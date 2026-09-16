@@ -52,7 +52,7 @@ class SecureClient : public Client {
   static bool tls13Available();
 
  private:
-  int connectWithMethod(const char* host, uint16_t port, void* method, const char* label);
+  int connectWithMethod(const char* host, uint16_t port, bool tls12Only, const char* label);
 
   WiFiClient _transport;
   const char* _rootCA = nullptr;

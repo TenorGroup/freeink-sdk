@@ -15,7 +15,7 @@
 //
 // Usage:
 //   SecureHttpClient http;
-//   http.setInsecure();                 // or http.setCACert(rootPem)
+//   http.setCACert(rootPem);
 //   if (http.begin("https://host/path")) {
 //     http.addHeader("Accept", "application/json");
 //     int code = http.GET();            // < 0 on transport failure
@@ -37,14 +37,15 @@
 
 #include <algorithm>
 #include <cctype>
-#include <iterator>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "HttpUrl.h"
 #include "SecureClient.h"
 
 namespace freeink {
@@ -63,10 +64,9 @@ class SecureHttpClient {
   SecureHttpClient(const SecureHttpClient&) = delete;
   SecureHttpClient& operator=(const SecureHttpClient&) = delete;
 
-  // Skip peer verification (SecureClient does likewise). Required today because
-  // the wolfSSL transport has no CA bundle wired up; see setCACert().
+  // Explicit opt-out for callers that provide their own trust policy.
   void setInsecure() { _insecure = true; }
-  // Verify against a single PEM root. Clears the insecure flag.
+  // Verify against the supplied PEM roots. Clears the insecure flag.
   void setCACert(const char* rootCA) {
     _rootCA = rootCA;
     _insecure = false;
@@ -109,18 +109,34 @@ class SecureHttpClient {
   void setReuse(bool reuse) { _reuse = reuse; }
 
   // Parse the URL and reset per-request state. Returns false on a malformed
-  // URL.
+  // URL. A changed origin clears Basic credentials; explicit trust settings
+  // remain object configuration and should cover every host used by the caller.
   bool begin(const std::string& url) {
     _headers.clear();
     _body.clear();
     _status = 0;
-    return parseUrl(url, _scheme, _host, _path, _port);
+    std::string scheme, host, path;
+    uint16_t port = 0;
+    if (!parseUrl(url, scheme, host, path, port)) return false;
+    if (!_host.empty() && (_scheme != scheme || _host != host || _port != port)) {
+      clearBasicAuth();
+      closeConnection();
+    }
+    _scheme = std::move(scheme);
+    _host = std::move(host);
+    _path = std::move(path);
+    _port = port;
+    return true;
   }
   // Closes the kept-alive connection (if any). Call when done with a server;
   // the next request transparently reconnects.
   void end() { closeConnection(); }
 
   void addHeader(const std::string& name, const std::string& value) {
+    if (name.empty() || name.find_first_of("\r\n:") != std::string::npos ||
+        value.find_first_of("\r\n") != std::string::npos || name.find('\0') != std::string::npos ||
+        value.find('\0') != std::string::npos)
+      return;
     _headers.push_back(name + ": " + value + "\r\n");
   }
 
@@ -141,6 +157,12 @@ class SecureHttpClient {
   // via getString().
   int sendRequest(const char* method, const uint8_t* payload, size_t payloadLen) {
     return sendRequest(method, payload, payloadLen, [this](const uint8_t* data, size_t len) {
+      constexpr size_t MAX_BUFFERED_BODY = 16384;
+      if (len > MAX_BUFFERED_BODY - _body.size()) return false;
+#ifdef ARDUINO_ARCH_ESP32
+      if (len > _body.capacity() - _body.size() && ESP.getMaxAllocHeap() < 2 * (_body.size() + len) + 4096)
+        return false;
+#endif
       _body.append(reinterpret_cast<const char*>(data), len);
       return true;
     });
@@ -172,6 +194,11 @@ class SecureHttpClient {
       // Refuse to silently drop transport security: a https -> http redirect
       // stops here (the caller sees the 3xx) unless explicitly allowed.
       if (_scheme == "https" && scheme == "http" && !_allowRedirectDowngrade) return status;
+      if (_scheme != scheme || _host != host || _port != port) {
+        _headers.clear();
+        _authUser.clear();
+        _authPass.clear();
+      }
       _scheme = scheme;
       _host = host;
       _path = path;
@@ -233,8 +260,19 @@ class SecureHttpClient {
       bool keepAlive = line.compare(0, 9, "HTTP/1.0 ") != 0;
 
       std::string transferEncoding;
+      size_t headerBytes = 0;
+      size_t headerCount = 0;
+      bool headersComplete = false;
       while (readLine(*_conn, line, headerDeadline, shouldAbort)) {
-        if (line.empty()) break;  // end of headers
+        if (line.empty()) {
+          headersComplete = true;
+          break;
+        }
+        headerBytes += line.size();
+        if (++headerCount > 32 || headerBytes > 8192) {
+          closeConnection();
+          return -1;
+        }
         const size_t colon = line.find(':');
         if (colon == std::string::npos) continue;
         std::string name = line.substr(0, colon);
@@ -253,11 +291,13 @@ class SecureHttpClient {
         } else if (name == "connection") {
           std::string v = value;
           std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(tolower(c)); });
-          if (v.find("close") != std::string::npos) keepAlive = false;
-          else if (v.find("keep-alive") != std::string::npos) keepAlive = true;
+          if (v.find("close") != std::string::npos)
+            keepAlive = false;
+          else if (v.find("keep-alive") != std::string::npos)
+            keepAlive = true;
         }
       }
-      if (_aborted) {
+      if (_aborted || !headersComplete) {
         closeConnection();
         return -1;
       }
@@ -335,6 +375,10 @@ class SecureHttpClient {
     std::string path;
     uint16_t port = 0;
     if (!parseUrl(baseUrl, scheme, host, path, port)) return false;
+    if (location.rfind("//", 0) == 0) {
+      resolved = scheme + ":" + location;
+      return true;
+    }
     const std::string authority = hostHeaderFor(scheme, host, port);
     if (!location.empty() && location[0] == '/') {
       resolved = scheme + "://" + authority + location;
@@ -362,32 +406,18 @@ class SecureHttpClient {
 
   static bool parseUrl(const std::string& url, std::string& scheme, std::string& host, std::string& path,
                        uint16_t& port) {
-    const size_t schemeEnd = url.find("://");
-    if (schemeEnd == std::string::npos) return false;
-    // URL schemes are case-insensitive (RFC 3986 §3.1): "HTTPS://..." from a
-    // server's Location header or user input must parse like "https://...".
-    scheme = url.substr(0, schemeEnd);
-    std::transform(scheme.begin(), scheme.end(), scheme.begin(),
-                   [](unsigned char c) { return static_cast<char>(tolower(c)); });
-    const size_t hostStart = schemeEnd + 3;
-    const size_t pathStart = url.find('/', hostStart);
-    const std::string hostPort =
-        pathStart == std::string::npos ? url.substr(hostStart) : url.substr(hostStart, pathStart - hostStart);
-    path = pathStart == std::string::npos ? "/" : url.substr(pathStart);
-    const size_t portSep = hostPort.rfind(':');
-    if (portSep != std::string::npos) {
-      host = hostPort.substr(0, portSep);
-      port = static_cast<uint16_t>(atoi(hostPort.substr(portSep + 1).c_str()));
-    } else {
-      host = hostPort;
-      port = scheme == "https" ? 443 : 80;
-    }
-    return !host.empty() && (scheme == "http" || scheme == "https");
+    http_url::Parts parsed;
+    if (!http_url::parse(url, parsed)) return false;
+    scheme = parsed.tls ? "https" : "http";
+    host.assign(parsed.host.data(), parsed.host.size());
+    std::transform(host.begin(), host.end(), host.begin(), [](unsigned char c) { return std::tolower(c); });
+    path.assign(parsed.target.data(), parsed.target.size());
+    if (path.empty() || path.front() == '?') path.insert(0, "/");
+    port = parsed.port;
+    return true;
   }
 
-  std::string hostHeader() const {
-    return hostHeaderFor(_scheme, _host, _port);
-  }
+  std::string hostHeader() const { return hostHeaderFor(_scheme, _host, _port); }
 
   static std::string hostHeaderFor(const std::string& scheme, const std::string& host, uint16_t port) {
     const uint16_t defaultPort = scheme == "https" ? 443 : 80;
