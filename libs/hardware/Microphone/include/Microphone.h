@@ -23,7 +23,7 @@ namespace freeink {
 class Microphone {
  public:
   // Default PDM sample rate. 16 kHz suits voice/wake-word; PDM mics also support
-  // 8 kHz and higher — pass a rate to begin() to override.
+  // 8 kHz and higher - pass a rate to begin() to override.
   static constexpr uint32_t kDefaultSampleRate = 16000;
 
   // Powers the mic rail and starts the i2s_pdm RX channel at sampleRate.

@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — HTML named-entity filter for FreeInkBook chapter streams.
+// FreeInk SDK - HTML named-entity filter for FreeInkBook chapter streams.
 //
 // EPUB chapters routinely use XHTML named entities (&nbsp; &mdash; &hellip;)
 // whose definitions live in a DTD the engine deliberately never fetches. A

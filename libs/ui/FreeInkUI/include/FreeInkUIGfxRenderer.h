@@ -2,7 +2,7 @@
 
 // Optional adapter: FreeInkUI DrawTarget backed by the GfxRenderer used in
 // CrossPoint and CrossInk (the same class in both forks). Header-only and
-// include-driven like FreeInkUIInputManager.h — FreeInkUI itself stays
+// include-driven like FreeInkUIInputManager.h - FreeInkUI itself stays
 // dependency-free, and this header only compiles in firmwares that provide
 // <GfxRenderer.h>.
 //
@@ -56,7 +56,7 @@ class GfxRendererTarget final : public DrawTarget {
     device.touchOrientation = touchOrientationFor(device.orientation);
     device.hasButtons = true;
     // Board viewable insets (bezel / rounded-corner clearance), oriented to the
-    // current rotation, become the fui safe area — so every fui screen's body,
+    // current rotation, become the fui safe area - so every fui screen's body,
     // list, and popups lay out inside the bezel automatically. Zero on
     // rectangular panels. Insets order is {top, right, bottom, left}.
     int viTop = 0, viRight = 0, viBottom = 0, viLeft = 0;
@@ -221,7 +221,7 @@ class GfxRendererTarget final : public DrawTarget {
     };
 
     // Fast path for the common case: text that already fits on one line draws
-    // straight from the caller's buffer after a single measure — no truncation
+    // straight from the caller's buffer after a single measure - no truncation
     // string, and for maxLines > 1 no word-splitting wrap walk (whose per-word
     // re-measures made every wrapped-capable label pay for wrapping it never
     // needed). Matters on e-paper list screens that rebuild every row per
@@ -252,11 +252,11 @@ class GfxRendererTarget final : public DrawTarget {
     if (!bitmap || rect.empty()) return;
 
     // BW1 (set bit = ink) and Mask1 (Icon convention: bit 0 = ink), both
-    // row-major natural orientation — same contract as DisplayTarget, so one
+    // row-major natural orientation - same contract as DisplayTarget, so one
     // BitmapRef renders identically on either target. The SDK's shared
     // sampling helper folds the Mask1 polarity and handles every BitmapMode
     // (including Stretch/Contain/Cover scaling and tiling); each ink pixel
-    // lands via drawPixel — adequate for icons and pattern fills on a 1-bit
+    // lands via drawPixel - adequate for icons and pattern fills on a 1-bit
     // panel. Note: GfxRenderer::drawIcon's pre-rotated asset layout is NOT
     // this contract; convert such assets before wrapping them in a BitmapRef.
     if (bitmap.format != BitmapFormat::BW1 && bitmap.format != BitmapFormat::Mask1) return;

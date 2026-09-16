@@ -1,15 +1,15 @@
 #pragma once
 
-// UC8179 panel driver — Xteink X4 / X4 Pro, newer production run (800x480 B/W).
+// UC8179 panel driver - Xteink X4 / X4 Pro, newer production run (800x480 B/W).
 // UltraChip UC8179 driven in KW mode (PSR KW/R=1): 1-bpp, DTM1 = OLD plane,
-// DTM2 = NEW plane, differential refresh — the same KW paradigm and command set
+// DTM2 = NEW plane, differential refresh - the same KW paradigm and command set
 // as the UC8279d X3 driver. It is a *separate* driver because the UC8179 needs
 // an explicit PLL / booster / VCOM bring-up that the UC8279d (pure-OTP) omits:
 // on OTP defaults alone the UC8179 never develops an image.
 //
 // Recovered from the X4 Pro OEM firmware (UC8179_800x480 init FUN_4214dff8 /
 // full-update FUN_4214e584, via Ghidra). It runs the factory OTP waveforms
-// (PSR REG=0) — the MTP holds temperature-compensated LUT sets — so no custom
+// (PSR REG=0) - the MTP holds temperature-compensated LUT sets - so no custom
 // LUT upload is needed; only the power rails are programmed here. PENDING
 // HARDWARE VALIDATION on a UC8179 (screenType=1 / hw_calib=2) X4 / X4 Pro unit.
 //
@@ -34,7 +34,7 @@ struct Uc8179Config {
   uint8_t gateScan;
   // CCSET cascade/output enable (cmd 0xE0).
   uint8_t ccset;
-  // TSSET forced temperature (cmd 0xE5) for a full refresh — selects the OTP
+  // TSSET forced temperature (cmd 0xE5) for a full refresh - selects the OTP
   // waveform's frame count/rate.
   uint8_t tsset;
   // TSSET (cmd 0xE5) for a fast/partial refresh (the OEM uses a different value).
@@ -44,7 +44,7 @@ struct Uc8179Config {
   // CDI (0x50) byte0 restored after the refresh completes; byte1 is 0x07.
   uint8_t cdiIdle;
   // TRES (0x61) gate count. The X4 Pro panel is addressed as 800x600 even though
-  // only 480 rows are visible — the OTP waveform is tuned for the full 600-gate
+  // only 480 rows are visible - the OTP waveform is tuned for the full 600-gate
   // scan, so the DTM transfer is padded to this height. (Visible height comes
   // from the board profile.)
   uint16_t tresHeight;
@@ -117,7 +117,7 @@ class Uc8179Driver : public PanelDriver {
   uint16_t _w;        // visible width (800)
   uint16_t _h;        // visible height (480)
   uint16_t _wb;       // width in bytes (100)
-  uint16_t _tresH;    // addressed gate count (600) — DTM padded to this
+  uint16_t _tresH;    // addressed gate count (600) - DTM padded to this
   uint32_t _bufferSize;
 
   // Stock Factory.bin uses absolute AA planes and derives its B/W base as

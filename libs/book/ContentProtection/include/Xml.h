@@ -1,12 +1,12 @@
 #pragma once
 
-// FreeInk — minimal XML scanner (header-only).
+// FreeInk - minimal XML scanner (header-only).
 //
 // rights.xml and encryption.xml are small, stable schemas. A full parser
 // (expat) would be overkill here and costs a vendored dependency; this
 // scanner emits start-tag / end-tag / text events with attributes, matches
 // element names with or without namespace prefix, and decodes entities.
-// Not a general-purpose XML parser: no DTD, no mixed-content fidelity — but
+// Not a general-purpose XML parser: no DTD, no mixed-content fidelity - but
 // sufficient and safe for rights metadata documents.
 //
 // Freestanding C++17.

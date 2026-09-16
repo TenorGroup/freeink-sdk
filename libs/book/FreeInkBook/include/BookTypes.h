@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — shared value types for FreeInkBook.
+// FreeInk SDK - shared value types for FreeInkBook.
 //
 // All strings are NUL-terminated UTF-8 owned by the book arena; they stay
 // valid until the arena that backed Book::open() is reset.
@@ -16,20 +16,20 @@ enum class BookStatus : uint8_t {
   IoError,       // BookSource read failed
   NotZip,        // no ZIP structure found
   NotEpub,       // ZIP without EPUB container/package
-  Encrypted,     // DRM (META-INF/encryption.xml present) — unsupported
+  Encrypted,     // DRM (META-INF/encryption.xml present) - unsupported
   Truncated,     // ZIP structure points past end of file
   Unsupported,   // valid but out of scope (zip64, unknown compression)
   OutOfMemory,   // an arena was exhausted
   ParseError,    // malformed XML in container/package/TOC
   NotFound,      // named item missing from the container
-  Stale,         // cache generation does not match — rebuild needed
+  Stale,         // cache generation does not match - rebuild needed
 };
 
 // Human-readable name for logs and tests.
 const char* bookStatusName(BookStatus status);
 
 // Vendored third-party versions ("miniz 11.3.2 expat 2.8.2"), for boot
-// logs — device debugging must never have to guess what is linked.
+// logs - device debugging must never have to guess what is linked.
 const char* vendorVersions();
 
 struct BookMetadata {

@@ -1,5 +1,5 @@
 /* Compiles the vendored libunibreak line-breaking core (UAX #14) as one
- * translation unit. Grapheme/word breaking are not vendored — FreeInkBook
+ * translation unit. Grapheme/word breaking are not vendored - FreeInkBook
  * only needs line-break opportunities. */
 #include "../../third_party/libunibreak/unibreakbase.c"
 #include "../../third_party/libunibreak/unibreakdef.c"

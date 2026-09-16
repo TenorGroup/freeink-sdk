@@ -1,8 +1,8 @@
 # Deferred refresh: one split interface (migration notes)
 
-This change collapses the two parallel deferred-refresh mechanisms —
+This change collapses the two parallel deferred-refresh mechanisms -
 `PanelDriver::displayAsync()` (SSD1677/X4) and `displayStart()/displayFinish()`
-(UC8253-X3) — into the single split interface, and merges the facade's two
+(UC8253-X3) - into the single split interface, and merges the facade's two
 pending flags into one. It builds on the `crosspoint-async-display-split` and
 `x4-async-trigger-split` work; nothing conceptual is new, there is just one
 mechanism now instead of two.
@@ -35,7 +35,7 @@ mechanism now instead of two.
 - **`supportsAsyncDisplay()`** now means "displayStart() defers". It must agree
   with what `displayStart()` returns. It exists so the facade can skip shadow
   setup without a trial call, and so hosts can size overlap buffers up front.
-  Overrides: SSD1677 → true, UC8253-X3 → true (new — this is what lets hosts
+  Overrides: SSD1677 → true, UC8253-X3 → true (new - this is what lets hosts
   run the same overlap flow on both panels).
 
 - **SSD1677** gains the split: `displayStart()` is the old `displayAsync` body
@@ -48,20 +48,20 @@ mechanism now instead of two.
 - **One pending flag** (`_refreshPending`) replaces `_asyncPending` +
   `_splitPending`. It is set from `displayStart()`'s return value and drained
   in exactly one place (`syncPendingAsync()`), which always finishes through
-  `driver->displayFinish()` — so the X3 post-waveform pipeline can never be
+  `driver->displayFinish()` - so the X3 post-waveform pipeline can never be
   skipped by a plain busy-wait again, and the X4 wait is always the ISR path.
-- **Entry points are unchanged** — all of these still exist and now delegate to
+- **Entry points are unchanged** - all of these still exist and now delegate to
   the same `displayAsyncImpl(mode, turnOff, noShadow)`:
-  - `displayBufferAsync(mode)` — shadowed async (single-buffer allocates the
+  - `displayBufferAsync(mode)` - shadowed async (single-buffer allocates the
     48 KB shadow; caller may redraw fb immediately).
-  - `displayBufferAsyncNoShadow(mode)` — no shadow; caller keeps fb intact
+  - `displayBufferAsyncNoShadow(mode)` - no shadow; caller keeps fb intact
     until the wait and re-seeds the baseline itself (the tiled-AA flow).
-  - `triggerDisplay(mode, off)` / `triggerDisplayAsync(mode, off)` — CrossPoint
+  - `triggerDisplay(mode, off)` / `triggerDisplayAsync(mode, off)` - CrossPoint
     compat names, same semantics as before.
 - **Finish/wait are aliases of one function**: `waitRefreshComplete()`,
   `completeDisplay()`, and `finishDisplayAsync()` all drain the single pending
   state. Call whichever your codebase already uses.
-- `refreshBusy()` no longer clears the pending state when the pin reads idle —
+- `refreshBusy()` no longer clears the pending state when the pin reads idle -
   the driver's post-waveform work must still run. When it returns false, call
   any of the finish aliases (or any blocking display op, which self-heals).
 - One behavior fix: single-buffer `displayBufferAsync()` on the **X3** now
@@ -72,7 +72,7 @@ mechanism now instead of two.
 
 ## What Witch Reader needs to change
 
-Almost nothing at the call sites — the compat surface is intact. Checklist:
+Almost nothing at the call sites - the compat surface is intact. Checklist:
 
 1. If any code overrides or calls `PanelDriver::displayAsync()` directly,
    port it to `displayStart()`/`displayFinish()` (see the SSD1677 diff for the
@@ -84,7 +84,7 @@ Almost nothing at the call sites — the compat surface is intact. Checklist:
 ## X4 fast-DU shortcut is now opt-in
 
 `fastDuRefreshShortcut` (CTRL2=0x1C instead of the stock 0xFC partial
-sequence) is no longer applied to the X4 by default — it is gated behind
+sequence) is no longer applied to the X4 by default - it is gated behind
 `-DFREEINK_X4_FAST_DU_SHORTCUT`. The 0x1C path skips the per-refresh
 temperature load and power sequencing; that is the community-sdk behavior the
 stock-parity work moved away from after ghosting/blotching reports on some

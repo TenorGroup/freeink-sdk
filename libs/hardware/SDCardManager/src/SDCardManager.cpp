@@ -31,7 +31,7 @@ bool SDCardManager::begin() {
   freeink::papermono::setSdPower(true);
 #endif
   // The SD power-enable (sd.powerEnable) is driven by SdmmcBlockDevice itself, which
-  // reproduces the OEM's timed HIGH->LOW power-cycle around each mount attempt — do
+  // reproduces the OEM's timed HIGH->LOW power-cycle around each mount attempt - do
   // NOT assert it here (holding it HIGH going in breaks that reset sequence).
   if (_dev) {
     // detachFilesystemForRawAccess() intentionally keeps the host and card
@@ -105,7 +105,7 @@ SDCardManager::SDCardManager() : sd() {}
 
 bool SDCardManager::begin() {
   // Profiles whose SD CS is not yet known leave it unassigned so the card stays
-  // dormant — bail out before any pin is touched, or SdFat drives "pin 255" and
+  // dormant - bail out before any pin is touched, or SdFat drives "pin 255" and
   // floods the log. (Native-SDMMC boards like the X4 Pro take the #if branch above.)
   if (BoardConfig::ACTIVE.sd.cs < 0) {
     if (Serial) Serial.printf("[%lu] [SD] SD disabled: CS unassigned in the %s profile\n", millis(), BoardConfig::ACTIVE.name);

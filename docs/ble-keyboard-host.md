@@ -89,19 +89,19 @@ peripheral requires passkey pairing, the host exposes the six-digit code through
 
 ## How It Works
 
-- **Scan** — active scan with duplicate reports enabled; every advertiser is
+- **Scan** - active scan with duplicate reports enabled; every advertiser is
   upserted into a fixed array (`kMaxDiscovered`) and the HID service UUID is
   recorded when present. HID is validated at connect time so devices that put
   their name or services in scan response / extended advertising fragments can
   still appear in the pairing UI.
-- **Connect** — runs on a dedicated FreeRTOS task: connect → discover HID →
+- **Connect** - runs on a dedicated FreeRTOS task: connect → discover HID →
   `secureConnection()` (bond) → write **Report Protocol** mode → subscribe to
   Input reports, falling back to Boot Keyboard Input (`0x2A22`) for devices that
   only expose the boot characteristic.
-- **Reports** — normalized to `[mod][k0..k5]`, diffed against the previous
+- **Reports** - normalized to `[mod][k0..k5]`, diffed against the previous
   report, then translated (US QWERTY HID usages) into `KeyEvent`s. Page turners
   commonly send arrow or page-up/page-down usages, which arrive as `SpecialKey`.
-- **Auto-repeat** — HID sends one report per state change, so `poll()`
+- **Auto-repeat** - HID sends one report per state change, so `poll()`
   synthesizes repeats for the held key after an initial delay.
 
 ## Memory

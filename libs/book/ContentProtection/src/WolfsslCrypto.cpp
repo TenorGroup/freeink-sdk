@@ -1,18 +1,18 @@
-// FreeInk — wolfSSL crypto backend.
+// FreeInk - wolfSSL crypto backend.
 //
 // Notes on the wolfSSL pieces:
 //  - PKCS#8 is decoded via ToTraditional (in-place PKCS#8 -> PKCS#1), then
 //    wc_RsaPrivateKeyDecode. Buffers must be writable.
 //  - "Raw" RSA is wc_RsaFunction(RSA_PRIVATE_ENCRYPT) = m^d mod n; signing is a manual PKCS#1
-//    type-1 pad of the 20-byte hash followed by that raw op — byte-identical
+//    type-1 pad of the 20-byte hash followed by that raw op - byte-identical
 //    to the reference implementation.
 //  - SPKI/PKCS#8 wrappers for locally generated keys are small fixed-shape
-//    DER encodings (rsaEncryption OID) — built by hand here.
+//    DER encodings (rsaEncryption OID) - built by hand here.
 //  - The X.509 authentication certificate's public key is extracted with
 //    wc_ParseCert + wc_GetPubKeyDerFromCert, then the PKCS#1 key is unwrapped
 //    from the SPKI by a minimal DER walk.
 //  - PKCS#12 parsing (wc_PKCS12_parse) needs WOLFSSL_PKCS12-capable build;
-//    Arduino-wolfSSL 5.7.x has it unless NO_PKCS12 is set — check
+//    Arduino-wolfSSL 5.7.x has it unless NO_PKCS12 is set - check
 //    scripts/patch_wolfssl.py in the firmware if this fails to link.
 
 #include "WolfsslCrypto.h"
@@ -69,7 +69,7 @@ class ScopedRsaKey {
 
 // Number of bytes DER uses to encode `len`, in minimal (definite) form:
 // short form (1 byte) for <128, else one 0x8N prefix + N length octets. Must
-// stay in lockstep with derWriteLen — a mismatch under-counts the parent
+// stay in lockstep with derWriteLen - a mismatch under-counts the parent
 // length field and corrupts the whole structure.
 size_t derLenLen(size_t len) {
   if (len < 128) return 1;
@@ -208,7 +208,7 @@ int32_t WolfsslCrypto::rsaPrivateRaw(const uint8_t* pkcs8Der, size_t pkcs8Len, c
     word32 outLen = static_cast<word32>(outCap);
     // The raw private op is m^d mod n (used for both request signing and
     // content-key decryption). wc_RsaFunction's `type` is the *_ENCRYPT/_DECRYPT
-    // set: RSA_PRIVATE_ENCRYPT==2 is m^d. Do NOT pass RSA_PRIVATE (==1) — that
+    // set: RSA_PRIVATE_ENCRYPT==2 is m^d. Do NOT pass RSA_PRIVATE (==1) - that
     // aliases RSA_PUBLIC_DECRYPT and computes m^e with the public exponent,
     // yielding signatures the server rejects as BadPadding.
     if (wc_RsaFunction(in, static_cast<word32>(inLen), out, &outLen, RSA_PRIVATE_ENCRYPT, key.get(),
@@ -286,7 +286,7 @@ bool WolfsslCrypto::rsaGenerate(RsaKeyPairDer* out) {
     uint8_t privBuf[1024];
     // with_header=0 → bare PKCS#1 RSAPublicKey. wc_RsaKeyToPublicDer() forces a
     // SubjectPublicKeyInfo header (~162 B, overflowed the old buffer), but
-    // wrapSpki() below adds the SPKI wrapper itself — mirrors the private side
+    // wrapSpki() below adds the SPKI wrapper itself - mirrors the private side
     // (bare wc_RsaKeyToDer + wrapPkcs8).
     const int pubLen = wc_RsaKeyToPublicDer_ex(key.get(), pubBuf, sizeof(pubBuf), 0);
     const int privLen = wc_RsaKeyToDer(key.get(), privBuf, sizeof(privBuf));
@@ -346,7 +346,7 @@ bool WolfsslCrypto::rsaPublicEncrypt(const uint8_t* certDer, size_t certLen, con
   }
   // wc_RsaPublicKeyDecode accepts either a bare PKCS#1 RSAPublicKey (what
   // wc_GetPubKeyDerFromCert returns in this build) or a full
-  // SubjectPublicKeyInfo (what the spkiFromX509 fallback yields) — it tries
+  // SubjectPublicKeyInfo (what the spkiFromX509 fallback yields) - it tries
   // PKCS#1 first, then SPKI. So hand it the DER directly; no manual unwrap.
   word32 idx = 0;
   bool ok = wc_RsaPublicKeyDecode(spki, &idx, key.get(), static_cast<word32>(spkiLen)) == 0;
@@ -404,7 +404,7 @@ bool WolfsslCrypto::pkcs12Extract(const uint8_t* p12, size_t len, const std::str
   }
   const int d2i = wc_d2i_PKCS12(p12, static_cast<word32>(len), bundle);
   if (d2i != 0) {
-    // Bad DER — e.g. the base64 decode picked up whitespace, or `len` is wrong.
+    // Bad DER - e.g. the base64 decode picked up whitespace, or `len` is wrong.
     lastError = "wc_d2i_PKCS12 rc=" + std::to_string(d2i) + " len=" + std::to_string(len);
     wc_PKCS12_free(bundle);
     return false;
@@ -426,7 +426,7 @@ bool WolfsslCrypto::pkcs12Extract(const uint8_t* p12, size_t len, const std::str
     return false;
   }
 
-  // The parsed private key is traditional (PKCS#1) — wrap as PKCS#8.
+  // The parsed private key is traditional (PKCS#1) - wrap as PKCS#8.
   const bool ok = wrapPkcs8(key, keyLen, keyPkcs8);
   if (ok) certDer->assign(cert, cert + certLen);
   XFREE(key, NULL, DYNAMIC_TYPE_PUBLIC_KEY);

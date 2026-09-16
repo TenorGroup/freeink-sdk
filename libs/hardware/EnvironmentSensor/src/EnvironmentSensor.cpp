@@ -96,7 +96,7 @@ bool EnvironmentSensor::read(float& tempC, float& humidityPct) {
 
 }  // namespace freeink
 
-#else  // FREEINK_CAP_TEMP_HUMIDITY — sensor absent.
+#else  // FREEINK_CAP_TEMP_HUMIDITY - sensor absent.
 
 namespace freeink {
 bool EnvironmentSensor::begin() { return false; }

@@ -1,16 +1,16 @@
 #pragma once
 
-// FreeInk SDK — streaming chapter layout for FreeInkBook (Phase 2).
+// FreeInk SDK - streaming chapter layout for FreeInkBook (Phase 2).
 //
 // Turns one spine item's XHTML into paginated text without ever building a
 // DOM: SAX events feed a block-flow state machine that accumulates one
-// paragraph at a time, breaks lines with libunibreak (UAX #14 — including
+// paragraph at a time, breaks lines with libunibreak (UAX #14 - including
 // CJK break opportunities), and assembles pages. Memory is O(paragraph +
 // page): fixed paragraph buffers plus per-page run copies that are released
 // after each PageSink callback. Chapter size never changes the footprint.
 //
 // Phase 2 scope: block flow (p, headings, blockquote, li, br, hr), bold and
-// italic runs, per-block font sizes (headings render larger — pages mix
+// italic runs, per-block font sizes (headings render larger - pages mix
 // sizes), left alignment, greedy breaking. Justification, hyphenation,
 // kerning, images, and CSS arrive in Phase 4 per the design doc.
 
@@ -58,7 +58,7 @@ struct PageTextRun {
   uint16_t len;        // bytes of UTF-8
   int16_t x;
   int16_t baselineY;
-  uint16_t sizePx;     // resolved size — headings differ from body
+  uint16_t sizePx;     // resolved size - headings differ from body
   uint8_t styleFlags;  // StyleFlags bits
 };
 
@@ -94,7 +94,7 @@ struct Page {
   // Chapter character offset (codepoints of extracted text) of this page's
   // first text run. Whitespace collapse and entity resolution are layout-
   // parameter independent, so this offset addresses the same place in the
-  // chapter at any font size or page geometry — it is the reading-position
+  // chapter at any font size or page geometry - it is the reading-position
   // anchor that survives relayouts.
   uint32_t charStart;
 };
@@ -103,7 +103,7 @@ class PageSink {
  public:
   virtual ~PageSink() = default;
   // Called for every id="" anchor as layout passes it (chapter character
-  // offset) — the substrate for footnote/internal-link jumps.
+  // offset) - the substrate for footnote/internal-link jumps.
   virtual void onAnchor(uint32_t idHash, uint32_t charStart) {
     (void)idHash;
     (void)charStart;
@@ -123,7 +123,7 @@ class ChapterLayout {
   // `pageCountOut` (optional) receives the number of pages delivered.
   //
   // `parseScratch` (optional) splits the working set into two arenas: the
-  // parse-side allocations (inflate window + decompressor + XML chunks —
+  // parse-side allocations (inflate window + decompressor + XML chunks -
   // ~50 KB for a deflated entry) come from it instead of `scratch`, so
   // neither arena needs to be a single ~100 KB block. On fragmented
   // PSRAM-less heaps two ~50 KB blocks fit where one large one cannot.
@@ -135,7 +135,7 @@ class ChapterLayout {
 
   // Plain-text (.txt) layout: the whole file is one chapter, paragraphs
   // split on blank lines, single newlines flow as spaces. Justification,
-  // hyphenation, caching, and character anchors all apply identically —
+  // hyphenation, caching, and character anchors all apply identically -
   // feed the same PageCacheWriter/Reader as an EPUB chapter (spine 0).
   // UTF-8 assumed; a leading BOM is skipped.
   static BookStatus layoutPlainText(BookSource& source, const LayoutParams& params,
@@ -144,7 +144,7 @@ class ChapterLayout {
                                     uint32_t* totalCharsOut = nullptr);
 };
 
-// Resumable chapter layout — the incremental-build primitive. Where
+// Resumable chapter layout - the incremental-build primitive. Where
 // ChapterLayout::layout() runs to completion in one call, a session lays out
 // a few pages at a time so a giant single-spine chapter can show its first
 // page immediately and finish behind the reader:
@@ -155,13 +155,13 @@ class ChapterLayout {
 //   while (!s.done()) { s.step(4); /* render, handle input, ... */ }
 //
 // `chapterSource` may differ from `bookSource`: extract a deflated chapter to
-// plain storage once and hand it in as a stored entry — the resident parse
+// plain storage once and hand it in as a stored entry - the resident parse
 // state then shrinks from ~46 KB (inflate window + decompressor) to ~8 KB,
 // which is what makes holding a session open WHILE rendering pages viable on
 // PSRAM-less hosts. Image probes always use `bookSource` + `zip`.
 //
 // Both arenas must stay valid (and must not be reset) for the session's
-// lifetime. The session does not release its arena marks — the owner resets
+// lifetime. The session does not release its arena marks - the owner resets
 // the arenas after abort()/completion.
 class ChapterLayoutSession {
  public:
@@ -177,7 +177,7 @@ class ChapterLayoutSession {
   // BOOK container, which needs a transient inflate stream (~46 KB) even
   // when the chapter itself is stored. A resident session should pass a
   // TEMPORARY large arena here (freed right after begin() returns) and keep
-  // `parseScratch` at the small stored-entry size (~12 KB) — otherwise the
+  // `parseScratch` at the small stored-entry size (~12 KB) - otherwise the
   // parse arena must be sized for the probe peak for its whole lifetime.
   BookStatus begin(BookSource& bookSource, const ZipCatalog* zip, BookSource& chapterSource,
                    const ZipEntry& entry, const char* chapterHref, const LayoutParams& params,

@@ -3,12 +3,12 @@
 // UC8279d X3 (792x528, panel "ZHX368", LUT_VER 0x66) waveform banks.
 //
 // Reverse-engineered from the stock Xteink X3 firmware (update.bin,
-// arduino-lib-builder, Jul 3 2026) — descriptor set "ZHX368_8279" at DROM
+// arduino-lib-builder, Jul 3 2026) - descriptor set "ZHX368_8279" at DROM
 // 0x3c25a5e0. These UC8279d modules ship a BLANK MTP (address 0x000 != 0xA5,
 // no factory Command Default Setting, no per-temperature LUTs), so the host
 // must drive EVERYTHING: geometry, PSR (REG=1 external LUT), drive voltages,
 // and these waveform tables. That is why the OTP-mode driver leaves the panel
-// dark — there is nothing in the module to run.
+// dark - there is nothing in the module to run.
 //
 // Geometry (confirmed from the init code immediates): TRES = 792 x 528
 // (0x318 x 0x210). External-AA CDI = 0x97.
@@ -19,7 +19,7 @@
 //   XTF_AA / XTH4                   : 5 x 49 bytes, RAW (no command prefix;
 //       the loader sends the register 0x20-0x24 separately).
 //
-// POWER-ON REGISTER SCRIPT — recovered by decompiling the stock 8279 init
+// POWER-ON REGISTER SCRIPT - recovered by decompiling the stock 8279 init
 // (FUN_42014ad4, dispatched from the 8279 object vtable at DROM 0x3c25a220).
 // The module MTP is blank, so the host MUST send all of this; the absence of
 // PWR/VDCS (no drive voltages) is exactly why the OTP-mode driver left the
@@ -34,16 +34,16 @@
 //   0x30 PLL  : 0F
 //   0xE1      : 02                             // gate scan
 // Refresh flow. Verified against the LIVE stock methods below; NEITHER B/W path
-// writes E0/E5, and NEITHER seeds DTM1 white — both diff the new frame (DTM2)
+// writes E0/E5, and NEITHER seeds DTM1 white - both diff the new frame (DTM2)
 // against the REAL previous frame (DTM1). GC vs DU is only the waveform bank.
 //   GC full (FUN_42015786, reached via vt14(obj,0) -> FUN_4201588e): CDI ->
 //             load BW_GC (5 tables 0x20-0x24) -> PON -> DRF(0x12) -> wait.
-//             (FUN_42015cca, which filled DTM1 0xFF, is DEAD code — no callers.)
+//             (FUN_42015cca, which filled DTM1 0xFF, is DEAD code - no callers.)
 //   DU fast (FUN_4201580a, via vt14(obj,1) -> FUN_42015bcc): CDI -> load BW_DU
 //             -> PON -> PTIN -> DRF -> PTOUT. CDI only, no E0/E5.
 //   The DTM planes are written by a separate display method; the host syncs
 //   DTM1 = last displayed frame after each refresh for the next diff. BW_GC has
-//   WW!=KW / WK!=KK, so it CLEARS via the true old->new transition — a white
+//   WW!=KW / WK!=KK, so it CLEARS via the true old->new transition - a white
 //   DTM1 baseline would leave high-contrast pixels undriven (ghosting).
 //   CDI byte: 0x97 on the first refresh after init, 0xD7 on later refreshes
 //             (FUN_42013c7e: 0x97, then |0x40 -> 0xD7 once the first-refresh
@@ -51,14 +51,14 @@
 // PON (0x04) + wait BUSY precede DRF; POF (0x02) + wait BUSY follow.
 //
 // GRAYSCALE / ANTI-ALIASING (FUN_42015108 display + FUN_42013be0 LUT load):
-//   4-level via TWO full bitplanes — DTM1(0x10) = plane A, DTM2(0x13) = plane B,
+//   4-level via TWO full bitplanes - DTM1(0x10) = plane A, DTM2(0x13) = plane B,
 //   each 792*528/8 = 52272 bytes over the full-panel window. Sequence:
 //     PTIN -> PTL(0,0,792,528) -> DTM1 plane A -> DTM2 plane B -> PTOUT ->
 //     load XTF_AA (cmd 0x20..0x24 each followed by its 49-byte table) ->
 //     CDI (0x97/0xD7 via FUN_42013c7e) -> PON -> DRF -> wait ("gray wait").
 //   E0=02 / E5=5A appear ONLY in the optional AA pre-conditioning pass
 //   (FUN_42015944, "AA-pre-BW(mid)"), which runs XTF_PRE_BW_MID BEFORE the
-//   grayscale frame — not part of any plain B/W refresh. XTH4 is an alternate
+//   grayscale frame - not part of any plain B/W refresh. XTH4 is an alternate
 //   4-gray table set. Wired into Uc8279Driver's grayscale path (mirrors the
 //   UC8253 X3 sibling): copyGrayscaleLsb/Msb + writeGrayscalePlaneStrip load
 //   the planes, displayGrayscaleBase/preconditionGrayscale run XTF_PRE_BW_MID,
@@ -137,7 +137,7 @@ inline const uint8_t kUc8279X3_Init[] = {
 
 constexpr uint8_t kUc8279X3_CdiFirst = 0x97;  // first refresh after init
 constexpr uint8_t kUc8279X3_CdiLater = 0xD7;  // subsequent refreshes
-// AA pre-conditioning pass only (FUN_42015944) — NOT used by plain B/W GC/DU.
+// AA pre-conditioning pass only (FUN_42015944) - NOT used by plain B/W GC/DU.
 constexpr uint8_t kUc8279X3_AaPreE0 = 0x02;
 constexpr uint8_t kUc8279X3_AaPreE5 = 0x5A;
 

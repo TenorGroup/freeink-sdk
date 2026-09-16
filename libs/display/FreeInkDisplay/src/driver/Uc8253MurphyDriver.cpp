@@ -164,7 +164,7 @@ void Uc8253MurphyDriver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* 
   loadLut(bus, useFast ? _cfg.fast : _cfg.def);
 
   // Full (GC) refresh writes the new frame to BOTH planes, so only WW/BB fire and
-  // every pixel is fully driven to its target — clean, no half-flipped pixels.
+  // every pixel is fully driven to its target - clean, no half-flipped pixels.
   // FAST (DU) refresh is differential: old frame -> DTM1, new -> DTM2, so unchanged
   // pixels take WW/BB and changed pixels take the quick BW/WB transition kicks.
   // Without a previous frame (single-buffer builds) fall back to both-planes-new.

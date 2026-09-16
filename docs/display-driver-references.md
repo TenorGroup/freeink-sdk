@@ -23,7 +23,7 @@ for each FreeInk target.
 - Exact panel matches may justify sequence-level comparisons, but still require
   hardware validation before replacing known-good FreeInk behavior.
 - Controller-only matches are evidence for command semantics, RAM lifecycle,
-  and optional registers—not for analog values, gate geometry, or LUT timing.
+  and optional registers-not for analog values, gate geometry, or LUT timing.
 - Factory firmware or a device-specific vendor reference wins when it conflicts
   with a generic library using different glass.
 - Waveforms and forced-temperature values are panel-specific. Never copy them

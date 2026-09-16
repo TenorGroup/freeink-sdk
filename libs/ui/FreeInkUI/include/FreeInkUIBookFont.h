@@ -1,10 +1,10 @@
 #pragma once
 
-// FreeInk SDK — bundled-bitmap-font adapter for FreeInkBook (opt-in).
+// FreeInk SDK - bundled-bitmap-font adapter for FreeInkBook (opt-in).
 //
 // BitmapBookFont exposes a FreeInkUI BitmapFont (the bundled Noto Sans, or
 // anything gen_font.py produces) as a FreeInkBook RenderFont, so a reader
-// renders books with NO font files on the card — drop it at the end of a
+// renders books with NO font files on the card - drop it at the end of a
 // FontChain as the always-present fallback. Like FreeInkUIGfxRenderer.h,
 // this header is opt-in: it is only compilable in firmwares that also link
 // FreeInkBook (it includes FreeInkBook's BookFont.h).
@@ -62,7 +62,7 @@ class BitmapBookFont : public book::RenderFont {
   }
 
  private:
-  // Books use typographic punctuation (’ “ ” – — …) that compact bitmap
+  // Books use typographic punctuation (’ “ ” - - …) that compact bitmap
   // ranges rarely cover; degrade to the ASCII equivalent instead of a gap.
   static uint32_t normalized(uint32_t cp) {
     switch (cp) {

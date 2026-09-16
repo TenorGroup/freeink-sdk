@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — streaming image rendering for FreeInkBook (Phase 4b).
+// FreeInk SDK - streaming image rendering for FreeInkBook (Phase 4b).
 //
 // Decodes a container image (PNG via pngle, JPEG via TJpgDec) and delivers
 // it as 8-bit grayscale rows already scaled (nearest-neighbor, no upscaling
@@ -12,7 +12,7 @@
 // output via a Bayer 4×4 matrix; grayscale panels can consume the rows
 // directly.
 //
-// Interlaced PNGs are rejected (BookStatus::Unsupported) — their pixels
+// Interlaced PNGs are rejected (BookStatus::Unsupported) - their pixels
 // arrive out of order and would require a full-image buffer.
 
 #include <stdint.h>

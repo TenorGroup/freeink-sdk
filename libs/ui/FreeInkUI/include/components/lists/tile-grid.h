@@ -58,7 +58,7 @@ struct TileGridProps {
   uint8_t radius = RADIUS_INHERIT;
 };
 
-// Height the grid needs for count tiles — for sizing the band (or a whole
+// Height the grid needs for count tiles - for sizing the band (or a whole
 // panel) before laying it out.
 inline int16_t tileGridHeight(uint16_t count, uint8_t columns, int16_t tileHeight, int16_t gap) {
   if (count == 0 || columns == 0) return 0;

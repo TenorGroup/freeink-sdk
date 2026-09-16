@@ -1,6 +1,6 @@
 #pragma once
 
-// SSD1677 panel driver — Xteink X4 and the de-link ESP32-S3 board (both drive
+// SSD1677 panel driver - Xteink X4 and the de-link ESP32-S3 board (both drive
 // an 800x480 GDEQ0426T82 over the same controller). B/W with software 2-bit
 // grayscale via a custom LUT, dual-RAM (BW 0x24 / RED 0x26) differential fast
 // refresh. Active-HIGH BUSY.
@@ -25,7 +25,7 @@ struct Ssd1677Config {
   // Absolute Display Update Control 2 (0x22) sequence values, per refresh type.
   // 0 = use the driver's built-in X4 values (incremental, keeps the panel powered
   // between fast refreshes). A panel whose OTP waveform isn't selected by the X4
-  // values supplies its vendor-published values here — they pick the waveform
+  // values supplies its vendor-published values here - they pick the waveform
   // (full vs partial/DU), load temperature, and self-cycle power. Setting these
   // makes fast refreshes use the panel's real DU waveform instead of running the
   // full waveform every time. (e.g. Sticky: full 0xF7 / fast 0xFF, from Seeed's
@@ -58,7 +58,7 @@ struct Ssd1677Config {
 };
 
 // Standard config (Xteink X4 / GDEQ0426T82). Panel mounting (mirror/180°) is NOT
-// a config field — it comes from BoardProfile.orientation so any board injects it
+// a config field - it comes from BoardProfile.orientation so any board injects it
 // uniformly. -DFREEINK_DISPLAY_FLIPPED is an alias for mirrorY.
 const Ssd1677Config& ssd1677DefaultConfig();
 

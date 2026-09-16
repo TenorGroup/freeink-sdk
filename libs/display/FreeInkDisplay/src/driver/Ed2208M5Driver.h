@@ -1,9 +1,9 @@
 #pragma once
 
-// ED2208 panel driver — M5Stack PaperColor (Spectra 6 color e-paper, ESP32-S3).
+// ED2208 panel driver - M5Stack PaperColor (Spectra 6 color e-paper, ESP32-S3).
 //
 // WHY THIS DRIVER EXISTS / how it gets reading-speed refreshes:
-// The PaperColor is natively a SIX-COLOR, full-refresh panel — a complete OTP
+// The PaperColor is natively a SIX-COLOR, full-refresh panel - a complete OTP
 // waveform takes ~15 s, which is unusable for reading. To get reading-compatible
 // speeds, this driver INTERRUPTS the refresh path at ~340 ms. The colors settle
 // in order, with white settling LAST, so cutting off early leaves the panel
@@ -11,9 +11,9 @@
 // We exploit that: by choosing the polarity, the interrupted refresh produces a
 // usable high-contrast monochrome image far faster than the full 15 s waveform.
 // Full color (or a true white background) requires running the complete
-// waveform — see requestCompleteWaveformNextRefresh().
+// waveform - see requestCompleteWaveformNextRefresh().
 //
-// DC BALANCE: an interrupted waveform is not charge-neutral — every fast
+// DC BALANCE: an interrupted waveform is not charge-neutral - every fast
 // refresh leaves a small net DC bias on the pixels, and over hours of
 // interrupted-only operation the panel visibly darkens and colors fade. Only
 // the complete waveform is DC-balanced, so consumers must schedule one
@@ -48,7 +48,7 @@ class Ed2208M5Driver : public PanelDriver {
   void setFullRefreshCompletesWaveform(bool enabled) override { _fullCompletes = enabled; }
 
   // Accent color planes (see PanelDriver): recolor ink pixels on
-  // complete-waveform refreshes only — an interrupted refresh cuts the
+  // complete-waveform refreshes only - an interrupted refresh cuts the
   // waveform long before color pigments settle, so there the planes are
   // ignored and accented pixels render as plain ink.
   void setAccentPlaneSlot(uint8_t slot, const uint8_t* plane, uint8_t colorCode) override {

@@ -1,4 +1,4 @@
-// FreeInkBook — Page → 1bpp framebuffer compositor.
+// FreeInkBook - Page → 1bpp framebuffer compositor.
 
 #include "render/PageRenderer.h"
 
@@ -18,11 +18,11 @@ constexpr uint8_t kInkThreshold = 120;  // Mono1Sharp: coverage above this is in
 // at body sizes edges are a large share of each glyph. Instead: a solid ink
 // core (>= kInkSolid always plots), a faint fringe that never plots
 // (< kInkFloor), and a narrow edge band between them dithered at boosted
-// contrast — stems stay black, edges stay smooth.
+// contrast - stems stay black, edges stay smooth.
 constexpr uint8_t kInkSolid = 140;
 constexpr uint8_t kInkFloor = 40;
 
-// Bayer 4×4 (0..255 domain) — the same matrix DisplayTarget uses for alpha
+// Bayer 4×4 (0..255 domain) - the same matrix DisplayTarget uses for alpha
 // fonts, so SDK chrome and book pages dither identically.
 constexpr uint8_t kBayer4[4][4] = {
     {15, 135, 45, 165}, {195, 75, 225, 105}, {60, 180, 30, 150}, {240, 120, 210, 90}};
@@ -117,9 +117,9 @@ uint32_t decodeUtf8(const char* text, uint32_t len, uint32_t& i) {
   return cp;
 }
 
-// Blits decoded rows into the frame. Mono targets get Floyd–Steinberg error
+// Blits decoded rows into the frame. Mono targets get Floyd-Steinberg error
 // diffusion (rows arrive strictly top-to-bottom, so the error rows carry
-// between callbacks) — tonal grays render as smooth stipple instead of the
+// between callbacks) - tonal grays render as smooth stipple instead of the
 // ordered-dither crosshatch.
 struct ImageBlit {
   const FrameTarget* target;

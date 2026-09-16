@@ -34,10 +34,10 @@ constexpr uint8_t CMD_TSSET = 0xE5;               // TSSET (forced temperature; 
 
 constexpr uint8_t CDI_INTERVAL = 0x07;  // CDI byte1, constant
 
-// 4-level grayscale (AA) waveform LUTs — stock's REAL grayscale set (the short
+// 4-level grayscale (AA) waveform LUTs - stock's REAL grayscale set (the short
 // 2-frame LUTs FUN_4214ebd0 actually uploads @app1 DROM 0x3c5d8994..), uploaded
 // in custom-LUT mode (PSR REG=1). NOTE: unlike the (dead, grainy) gray_full set,
-// here the register command is sent SEPARATELY — blob byte0 is DATA, not the cmd.
+// here the register command is sent SEPARATELY - blob byte0 is DATA, not the cmd.
 // Each LUT is 42 (0x2A) data bytes; only the first ~12 are non-zero. Level select
 // by (old=0x10/LSB, new=0x13/MSB): (0,0)=LUTKK black, (0,1)=LUTKW, (1,0)=LUTWK,
 // (1,1)=LUTWW white. This is the byte-exact stock set; CrossPoint's overlay-mask
@@ -87,11 +87,11 @@ const Uc8179Config& uc8179DefaultConfig() {
       0x02,                      // gateScan (0xE1)
       0x02,                      // ccset (0xE0)
       0x1E,                      // tsset (0xE5) full refresh (forced-temperature value)
-      0x5A,                      // tssetFast (0xE5) fast refresh — REQUIRED: this is the
+      0x5A,                      // tssetFast (0xE5) fast refresh - REQUIRED: this is the
                                  // frame-rate lever that makes the partial shorter (per RE)
       0x29,                      // cdiActive (0x50, during refresh)
       0xA9,                      // cdiIdle (0x50, restored after)
-      600,                       // tresHeight — panel addressed 800x600 (480 visible)
+      600,                       // tresHeight - panel addressed 800x600 (480 visible)
       0x22,                      // powerSave (0xE3): VCOM 2 lines, source 2 * 660 ns
   };
   return cfg;
@@ -114,7 +114,7 @@ uint32_t Uc8179Driver::spiHz() const {
 PanelGeometry Uc8179Driver::geometry() const { return {_w, _h, _wb, _bufferSize}; }
 
 // The OEM init (FUN_4214dff8): PSR, TRES (800x600), GSST, PFS, BTST, E1. No plane
-// fill, no CDI/VCOM here — those are (re)asserted per refresh. OTP waveforms
+// fill, no CDI/VCOM here - those are (re)asserted per refresh. OTP waveforms
 // (PSR REG bit cleared at refresh), so no LUT upload.
 void Uc8179Driver::initController(EpdBus& bus) {
   bus.cmd(CMD_PANEL_SETTING);
@@ -358,7 +358,7 @@ bool Uc8179Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t* p
     _isScreenOn = true;
   }
 
-  if (fast) bus.cmd(CMD_PARTIAL_IN);  // PTIN — whole-panel partial (no 0x90 window)
+  if (fast) bus.cmd(CMD_PARTIAL_IN);  // PTIN - whole-panel partial (no 0x90 window)
   bus.cmd(CMD_DISPLAY_REFRESH);
   // Confirm the waveform started (BUSY dropped) before returning, so
   // displayFinish() only rides out the completion edge.
@@ -555,7 +555,7 @@ void Uc8179Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, con
   // fb = the reader's current frame; used to re-seed the B/W baseline below.
   (void)lut;          // waveform comes from the built-in gray LUT set (kGrayLuts)
 
-  // The base refresh must be fully complete before we upload LUTs / stream — the
+  // The base refresh must be fully complete before we upload LUTs / stream - the
   // controller drops LUT/DTM/DRF writes while BUSY.
   bus.waitBusy(" 8179_gray_ready");
   _bwPlanesSynced = false;
@@ -624,7 +624,7 @@ void Uc8179Driver::cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) {
   _grayBaseValid = false;
   _absoluteGrayPlanes = false;
   if (!bw) {
-    // No baseline provided — fall back to a full flash on the next B/W refresh.
+    // No baseline provided - fall back to a full flash on the next B/W refresh.
     _needFullClear = true;
     _oldPlaneValid = false;
     return;

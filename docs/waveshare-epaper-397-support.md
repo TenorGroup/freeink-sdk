@@ -21,8 +21,8 @@ guess:
 | EPD SPI clock | 20 MHz | `epaper_port.c` (`clock_speed_hz`) |
 | EPD power rail | AXP2101 **ALDO3** | `components/epaper_port/epaper_port.c` (`enapwrstate(ALDO3)`) |
 | SD (SDMMC) | CLK 16, CMD 17, D0 15, D1 7, D2 8, D3 18 (4-bit) | `components/sdcard_bsp/sdcard_bsp.c` |
-| Buttons | UP 4, OK 5, DOWN 6, BOOT 0 — all active-low | `components/button_bsp/button_bsp.c` |
-| PMIC interrupt | GPIO38, active-low | NOT in the vendor sources — identified by probing during bring-up |
+| Buttons | UP 4, OK 5, DOWN 6, BOOT 0 - all active-low | `components/button_bsp/button_bsp.c` |
+| PMIC interrupt | GPIO38, active-low | NOT in the vendor sources - identified by probing during bring-up |
 | Deep-sleep wake | GPIO0 | `Arduino/examples/.../user_config.h` (`ext_wakeup_pin_1`) |
 | I2C bus | SDA 41, SCL 42 | `user_config.h` |
 | PMIC | AXP2101 @ 0x34 | `components/axpPower/axp_prot.cpp` |
@@ -34,7 +34,7 @@ guess:
 ## Panel
 
 The controller is SSD1677-class and the vendor bring-up is byte-identical to the
-Seeed Sticky's — booster `AE C7 C3 C0 80`, driver output scan `0x02`, data entry
+Seeed Sticky's - booster `AE C7 C3 C0 80`, driver output scan `0x02`, data entry
 `0x01`, border `0x01`, and update sequences `0x22 = F7` (full) / `FF` (partial) /
 `D7` (fast). `ssd1677ActiveConfig()` therefore returns `ssd1677StickyConfig()` for
 this board, including its grayscale LUT.
@@ -47,7 +47,7 @@ The PMIC is load-bearing, not an accessory:
   `EpdBus::begin()` calls `axp2101::setEpdPower(true)` through the board hook
   (the profile's `display.powerEnable` stays unassigned), and
   `PowerManager::powerDownRailsForSleep()` drops it before deep sleep.
-* **It is the only battery telemetry** — no ADC divider, no gauge chip.
+* **It is the only battery telemetry** - no ADC divider, no gauge chip.
   `GaugeType::Axp2101` reads SoC (0xA4), VBAT (0x34/0x35) and charge state
   (0x01[7:5]).
 * **It owns the power key.** PWRKEY does a hardware 1 s power-on / 4 s power-off
@@ -57,7 +57,7 @@ The PMIC is load-bearing, not an accessory:
 ## Buttons
 
 Four usable keys: the three-way side rocker (UP 4 / OK 5 / DOWN 6) plus BOOT
-(GPIO0). BOOT is both Back and the power button — hold to sleep, press to wake —
+(GPIO0). BOOT is both Back and the power button - hold to sleep, press to wake -
 because it is the pin the vendor arms for deep-sleep wake and the only key that can
 serve as one.
 
@@ -71,12 +71,12 @@ itself off on any board that does wire a horizontal key.
 The board has a fifth, PWR-labelled key that the firmware cannot see. It is absent
 from the vendor's `button_bsp.c`, and a bring-up probe that watched every unclaimed
 GPIO (1, 2, 13, 14, 21, 38, 39, 40, 45, 47, 48) plus the AXP2101 interrupt-status
-registers caught nothing while the key was pressed — including no `PKEY` bits in
+registers caught nothing while the key was pressed - including no `PKEY` bits in
 `INTSTS2` with the PWRKEY short-press interrupt enabled. Holding it past the
 PMIC's 4 s power-off time did not cut power either (the board was on USB).
 
 Do NOT map GPIO38 as that key. It carries the AXP2101's active-low interrupt
-output, which sits LOW for as long as any PMIC interrupt is pending — a gauge
+output, which sits LOW for as long as any PMIC interrupt is pending - a gauge
 "new SoC" interrupt during the probe read as a 55 ms button press, and mapping the
 pin as a key reads as one held down forever. That line is useful, just not as a
 button: it is how a future change could react to PMIC events without polling.
@@ -98,7 +98,7 @@ Bring-up on a unit, reading an EPUB end to end:
 
 * Panel bring-up through the PMIC rail: `EpdBus` -> `axp2101::setEpdPower(true)` ->
   SSD1677 responds, full refresh in 2.08 s.
-* `NO_FLIP` is the correct mount orientation — text renders upright.
+* `NO_FLIP` is the correct mount orientation - text renders upright.
 * PCF85063 RTC answers (`[CLK] SDK RTC found`).
 * 4-bit SDMMC mounts and carries the section cache under `/.crosspoint/`.
 * Buttons page through a book; BOOT wakes the board out of deep sleep without
@@ -108,11 +108,11 @@ Bring-up on a unit, reading an EPUB end to end:
 
 ## Pending hardware validation
 
-* **Grayscale LUT** — reused from the Sticky; retune if a unit shows banding on
+* **Grayscale LUT** - reused from the Sticky; retune if a unit shows banding on
   covers.
-* **Battery curve** — the AXP2101 fuel gauge learns its curve at runtime; SoC may
+* **Battery curve** - the AXP2101 fuel gauge learns its curve at runtime; SoC may
   be coarse until it has seen a full charge cycle.
-* **SPI clock** — 20 MHz is the vendor value and it is NOT worth raising: a page
+* **SPI clock** - 20 MHz is the vendor value and it is NOT worth raising: a page
   turn measures `wait=407ms` (BW waveform) + `gray_display=226ms` against
   `display=24ms` of actual SPI traffic, so the 40 MHz default would save ~10 ms of
   910. The panel's waveforms are the floor here, not the bus.

@@ -42,7 +42,7 @@ inline const unsigned char lut_grayscale[] PROGMEM = {
     0x00, 0x00};
 
 // No revert LUT: the stock X4 firmware has no revert waveform (verified against
-// the OEM binary — the grayscale LUT above appears there verbatim, a revert
+// the OEM binary - the grayscale LUT above appears there verbatim, a revert
 // table does not). Grayscale exits via RED resync or a single-pass HALF clean.
 
 // Seeed Sticky grayscale LUTs. The waveform (VS/TP/frame-rate) is the same as

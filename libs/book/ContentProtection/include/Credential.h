@@ -1,11 +1,11 @@
 #pragma once
 
-// FreeInk — access credential.
+// FreeInk - access credential.
 //
 // The credential bundle is produced off-device and stored on the SD card so
-// it is portable across firmware installs —
+// it is portable across firmware installs -
 // CrossPoint users switch firmware builds and the credential must survive.
-// FAT32 has no permissions; the private key inside is sensitive — treat the
+// FAT32 has no permissions; the private key inside is sensitive - treat the
 // file accordingly.
 //
 // Line-oriented `key: value` format (FREEINK-CONTENT-KEY 1) so parsing

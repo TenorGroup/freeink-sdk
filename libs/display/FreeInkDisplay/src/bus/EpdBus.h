@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — shared e-paper SPI/GPIO bus helper.
+// FreeInk SDK - shared e-paper SPI/GPIO bus helper.
 //
 // Every panel driver talks to its controller through one EpdBus, configured
 // once with the controller's SPI clock and BUSY polarity. This factors out the
@@ -42,12 +42,12 @@ class EpdBus {
   // Hardware reset pulse; extraSettleMs adds a post-reset settle (X3 needs 50 ms).
   void reset(uint16_t extraSettleMs = 0);
 
-  // Standalone command / data (each its own CS-framed transaction) — X4 style.
+  // Standalone command / data (each its own CS-framed transaction) - X4 style.
   void cmd(uint8_t c);
   void data(uint8_t d);
   void data(const uint8_t* d, uint16_t len);
 
-  // Command followed by payload inside a single CS-low transaction — X3 style.
+  // Command followed by payload inside a single CS-low transaction - X3 style.
   void cmdData(uint8_t c, const uint8_t* d, uint16_t len);
   void cmdData2(uint8_t c, uint8_t d0, uint8_t d1);
 
@@ -95,7 +95,7 @@ class EpdBus {
   void setBusyWaitSliceHook(bool (*sliceHook)(int8_t busyPin, uint8_t busyLevel)) { _busyWaitSliceHook = sliceHook; }
 
   // Send `ramCmd` then `plane` Y-flipped (gate order, bottom row first) as ONE
-  // CS-low data burst — required by UC8253 DTM writes which must not toggle CS
+  // CS-low data burst - required by UC8253 DTM writes which must not toggle CS
   // mid-stream. (cmd uses its own CS pulse, matching the OEM sequence.)
   void sendPlaneFlipped(uint8_t ramCmd, const uint8_t* plane, uint16_t height, uint16_t widthBytes);
 

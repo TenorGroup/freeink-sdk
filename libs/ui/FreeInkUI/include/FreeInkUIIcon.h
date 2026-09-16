@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — freeink::Icon → FreeInkUI BitmapRef bridge (opt-in).
+// FreeInk SDK - freeink::Icon → FreeInkUI BitmapRef bridge (opt-in).
 //
 // The Icons library (libs/assets/Icons) generates crisp 1-bpp icons at any
 // size from Lucide SVGs via tools/gen_icons.py:

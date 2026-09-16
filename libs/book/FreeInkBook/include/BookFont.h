@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — font metrics interface for FreeInkBook layout.
+// FreeInk SDK - font metrics interface for FreeInkBook layout.
 //
 // Layout needs only metrics: how wide is a codepoint at a size, how tall is a
 // line. Rasterization stays behind the application's renderer (FreeInkUI
@@ -46,7 +46,7 @@ class BookFont {
   virtual int16_t ascent(uint16_t sizePx) = 0;
 
   // Ligature substitution: the single codepoint that replaces the pair
-  // (left, right) — e.g. 'f'+'i' → U+FB01 — or 0 when none applies. Pairs
+  // (left, right) - e.g. 'f'+'i' → U+FB01 - or 0 when none applies. Pairs
   // chain (U+FB00+'i' → U+FB03). Layout applies this during measurement AND
   // bakes the substituted codepoint into page-run text, so rendering and
   // caching need no ligature logic of their own.
@@ -78,7 +78,7 @@ class BookFont {
   }
 };
 
-// A BookFont that can also rasterize — what PageRenderer and FontChain
+// A BookFont that can also rasterize - what PageRenderer and FontChain
 // consume. TtfFont implements it over stb_truetype; FreeInkUI's opt-in
 // FreeInkUIBookFont.h implements it over the bundled bitmap font so books
 // render with no font files at all.

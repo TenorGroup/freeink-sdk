@@ -15,7 +15,7 @@ namespace {
 
 // Fast (interrupted) refresh appearance. Default 0 = light "paper" UI: the
 // straight pixel mapping sends logical white as the controller's white code,
-// whose waveform — cut off at ~340 ms, before white settles — lands yellow.
+// whose waveform - cut off at ~340 ms, before white settles - lands yellow.
 // Set -DFREEINK_M5_DARK_FAST_REFRESH=1 for the upstream community-sdk dark
 // hack instead: logical white written as controller black, giving an inverted
 // black-background UI on fast refreshes (complete waveforms stay truthful).
@@ -43,7 +43,7 @@ int8_t Ed2208M5Driver::coCs() const { return BoardConfig::ACTIVE.sd.cs; }
 
 void Ed2208M5Driver::enablePmicPower() {
   // The display is the first M5PM1 caller at boot; it establishes the board power
-  // policy (charge+boost on, RGB rail off — see m5pm1::applyBootPowerPolicy) and
+  // policy (charge+boost on, RGB rail off - see m5pm1::applyBootPowerPolicy) and
   // then routes the EPD rail. LedManager shares the same single PM1 owner.
   m5pm1::beginBus();
   m5pm1::applyBootPowerPolicy();
@@ -126,7 +126,7 @@ void Ed2208M5Driver::writeFrame(EpdBus& bus, const uint8_t* fb) {
   // Pixel codes 0x0/0x1 are the controller's black/white. The straight mapping
   // is correct for both paths in light mode: a complete waveform settles
   // truthfully (true white), and an interrupted one leaves logical-white
-  // pixels yellow (the white track cut early) — a light paper-style UI.
+  // pixels yellow (the white track cut early) - a light paper-style UI.
   // In dark mode only the fast path swaps (the upstream dark hack); complete
   // waveforms must stay straight or they display inverted. writeFrame runs
   // before refresh() consumes the one-shot flag, so it can pick per-frame.
@@ -240,13 +240,13 @@ uint16_t Ed2208M5Driver::fastRefreshCutoffMs() const {
 void Ed2208M5Driver::interruptRefresh(EpdBus& bus) {
   // Abort the OTP waveform before white settles. CRITICAL: anchor the cutoff
   // to BUSY's falling edge (the drive actually starting), NOT the 0x12
-  // command. The controller preps before driving — power ramp, on-die
-  // temperature read (which calibrates the waveform), gate setup — and that
+  // command. The controller preps before driving - power ramp, on-die
+  // temperature read (which calibrates the waveform), gate setup - and that
   // prep time varies per refresh. A command-anchored delay therefore cuts at
   // a different waveform phase every time: mostly mid dark/blue phases (the
   // muddy, blue-banded look), occasionally just after the white push (the
   // "randomly looks fantastic" refresh). Edge-anchoring makes the cut phase
-  // — and therefore the panel's appearance — deterministic and tunable via
+  // - and therefore the panel's appearance - deterministic and tunable via
   // setFastRefreshCutoffMs().
   const int8_t busyPin = bus.pins().busy;
   const unsigned long t0 = millis();
@@ -327,7 +327,7 @@ void Ed2208M5Driver::refresh(EpdBus& bus, uint16_t dirtyX, uint16_t dirtyY, uint
     // Run the full OTP waveform to completion. waitBusy()'s generic 100 ms
     // assert window is too short here: the controller preps (power ramp,
     // on-die temperature read) for a variable time before BUSY drops, and
-    // when prep exceeds the window waitBusy() concludes the panel is idle —
+    // when prep exceeds the window waitBusy() concludes the panel is idle -
     // so the POWER_OFF below lands mid-waveform, turning the "complete"
     // refresh into an accidental interrupted one (nondeterministic blue
     // gate-scan band, the very artifact this path exists to avoid). Wait

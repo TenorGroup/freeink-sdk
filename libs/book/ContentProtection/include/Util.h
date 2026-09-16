@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk — small shared helpers (header-only).
+// FreeInk - small shared helpers (header-only).
 
 #include <cstdlib>
 #include <stdint.h>

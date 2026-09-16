@@ -1,8 +1,8 @@
 #pragma once
 
-// FreeInk — XML tree model, serializer, and the rights
+// FreeInk - XML tree model, serializer, and the rights
 // request-signing canonicalization (SHA-1 over a custom binary serialization
-// — namespace URIs inlined, attributes sorted, text trimmed, length-prefixed
+// - namespace URIs inlined, attributes sorted, text trimmed, length-prefixed
 // strings). Must match the server's canonicalization byte-for-byte.
 //
 // Cross-validated against a reference implementation (TypeScript).
@@ -274,7 +274,7 @@ struct BufferSink : ByteSink {
 };
 }  // namespace canon
 
-// SHA-1 of the canonicalized node — the signature input.
+// SHA-1 of the canonicalized node - the signature input.
 inline void canonHash(const XmlTNode& node, Crypto& crypto, uint8_t out[20]) {
   canon::BufferSink sink;
   std::vector<std::pair<std::string, std::string>> nsHash;

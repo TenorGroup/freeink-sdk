@@ -1,14 +1,14 @@
 #pragma once
 #include <cstdint>
 
-// FreeInk SDK — battery monitor.
+// FreeInk SDK - battery monitor.
 //
 // Two backends behind one API (chosen at compile time, so construction and the
 // public methods below are identical for both):
-//   * ADC (default) — reads a divided LiPo voltage off an ADC pin and maps it to
+//   * ADC (default) - reads a divided LiPo voltage off an ADC pin and maps it to
 //     a percentage; an optional charge-status pin (MCP73832 /STAT, active-LOW)
 //     drives isCharging().
-//   * I2C fuel gauge (FREEINK_BATTERY_I2C_GAUGE) — reads SoC/voltage/charge from a
+//   * I2C fuel gauge (FREEINK_BATTERY_I2C_GAUGE) - reads SoC/voltage/charge from a
 //     BQ27220 gauge (+ optional BQ25896 charger) over I2C; the ADC pin/divider are
 //     ignored. Used by X3 and LilyGo T5 S3. Config comes from
 //     BoardConfig::ACTIVE.batteryGauge, and gauge-vs-ADC is chosen at *runtime*

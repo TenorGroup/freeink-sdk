@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk — encrypted-entry read path.
+// FreeInk - encrypted-entry read path.
 //
 // Access-only, by design:
 //  - content stays encrypted at rest (items are accessed on read, into memory)
@@ -33,7 +33,7 @@ class ProtectedBook {
   //
   // rightsXmlOverride: the access-grant rights document (wrapped content key),
   // supplied out-of-band. the source delivers rights.xml separately from the EPUB, so
-  // the preferred flow keeps it in a sidecar and passes it here — the EPUB on
+  // the preferred flow keeps it in a sidecar and passes it here - the EPUB on
   // disk stays byte-identical to what was delivered. When empty, falls back to
   // reading META-INF/rights.xml from inside the zip (legacy in-container form).
   bool open(ByteSource& source, Crypto& crypto, const Credential& identity,

@@ -14,7 +14,7 @@
 
 // The ESP32 mask ROM exports tinfl_* at fixed addresses via DIRECT linker
 // script assignments (esp32s3.rom.ld: "tinfl_decompress = 0x40000828;"),
-// which override object-file definitions — without these renames the
+// which override object-file definitions - without these renames the
 // firmware silently binds to the 2021 ROM build (TINFL_LESS_MEMORY, a
 // different tinfl_decompressor layout) and corrupts inflate state on real
 // data. PROVIDE()-style ROM symbols (like tjpgd's) lose to our
@@ -29,6 +29,6 @@
 
 // Include the vendored miniz by relative path: ESP-IDF ships a ROM miniz.h
 // with the SAME include guard but a different (TINFL_LESS_MEMORY) struct
-// layout — resolving <miniz.h> through the platform include path would
+// layout - resolving <miniz.h> through the platform include path would
 // silently compile against the wrong structures.
 #include "../../third_party/miniz/miniz.h"

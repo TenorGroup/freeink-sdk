@@ -1,6 +1,6 @@
 #pragma once
 
-// UC8253 (Xteink X3) waveform LUTs — 43 bytes each, relocated verbatim from the
+// UC8253 (Xteink X3) waveform LUTs - 43 bytes each, relocated verbatim from the
 // community-sdk `main` lineage (the production X3 implementation crosspoint
 // ships). Six banks, each VCOM + the four transition LUTs (ww/bw/wb/bb):
 //   _normal    : community differential BW page-turn (clean fast diffs)
@@ -59,7 +59,7 @@ inline const uint8_t lut_x3_bb_half[] PROGMEM = {
 
 // --- _fast: papyrix turbo (full voltages, shortened timing) ---
 // NOTE: NOT a stock waveform. Absent from V6.2.4 stock (full + partial signature
-// scans found no match) — this is a community/custom "turbo" bank, kept for the
+// scans found no match) - this is a community/custom "turbo" bank, kept for the
 // papyrix-style fast page-turn option, not OEM parity.
 inline const uint8_t lut_x3_vcom_fast[] PROGMEM = {
     0x00, 0x04, 0x02, 0x04, 0x04, 0x01, 0x00, 0x04, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,

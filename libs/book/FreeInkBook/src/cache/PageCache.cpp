@@ -1,4 +1,4 @@
-// FreeInkBook — serialized page records: layout once, render many.
+// FreeInkBook - serialized page records: layout once, render many.
 
 #include "cache/PageCache.h"
 
@@ -15,7 +15,7 @@ constexpr uint32_t kHeaderSize = 12;
 constexpr uint32_t kFooterSize = 24;  // v3: + anchors + totalChars
 // Partial (suspended-build) footer: the final footer's five u32 fields plus
 // bytesConsumed + bytesTotal, sealed with "FIBx" instead of "FIBX". Old
-// readers see a magic mismatch and treat the file as Stale — safe.
+// readers see a magic mismatch and treat the file as Stale - safe.
 constexpr uint32_t kPartialFooterSize = 32;
 constexpr uint32_t kMaxBlobSize = 128 * 1024;  // sanity bound on one page
 
@@ -63,7 +63,7 @@ static BookStatus decodePageBlob(const uint8_t* blob, uint32_t blobLen, uint32_t
                                  Arena& scratch, Page* out);
 
 // Bump when layout BEHAVIOR changes without a format change (ligatures,
-// breaking rules, spacing math) — stale caches would otherwise render with
+// breaking rules, spacing math) - stale caches would otherwise render with
 // mismatched widths after a firmware update.
 constexpr uint32_t kLayoutRevision = 9;  // 9: uniform per-paragraph line grid (CrossPoint parity)
                                          // (8: inline CSS sizes/margins + line box sizing,
@@ -338,7 +338,7 @@ uint32_t PageCacheWriter::charStart(uint32_t pageIndex) const {
 
 uint32_t PageCacheWriter::pageForChar(uint32_t charOffset) const {
   if (pageCount_ == 0) return 0;
-  // Linear over the chunk list — a giant chapter is ~6 chunks; this runs on
+  // Linear over the chunk list - a giant chapter is ~6 chunks; this runs on
   // position restore, not per page turn.
   uint32_t best = 0;
   const IndexChunk* chunk = firstChunk_;
@@ -411,7 +411,7 @@ BookStatus PageCacheReader::open(CacheStorage& storage, const char* name, uint32
   if (getU32(header + 8) != expectedHash) return BookStatus::Stale;
 
   // The trailing magic tells final ("FIBX", 24-byte footer) from partial
-  // ("FIBx", 32-byte footer with build-progress fields) — see
+  // ("FIBx", 32-byte footer with build-progress fields) - see
   // PageCacheWriter::suspend(). A torn write matches neither: Stale.
   uint8_t magic[4];
   if (!readFully(storage, name, static_cast<uint32_t>(size) - 4, magic, sizeof(magic))) {

@@ -44,7 +44,7 @@ struct FooterProps {
   int16_t gap = 4;
   uint8_t buttonBorderEdges = EdgesNone;
   // Style for passive slots: a FooterAction with NO_ACTION renders as plain
-  // text in its slot instead of a button — version lines, status notes.
+  // text in its slot instead of a button - version lines, status notes.
   // font 0 = the theme's small text; align is honored either way.
   TextStyle passiveText{};
 };
@@ -174,7 +174,7 @@ public:
   // right-aligned label (a live clock, a count). borderEdges is HeaderProps'
   // divider setting: EdgeBottom (default) draws the rule, EdgesNone drops it.
   // trailingLabel/trailingAction put an action button (a "Save"/"Done") on the
-  // right edge instead of the passive rightLabel — set one or the other.
+  // right edge instead of the passive rightLabel - set one or the other.
   void navHeader(const char *title, ActionId backAction, BitmapRef backIcon,
                  const char *rightLabel = nullptr,
                  uint8_t borderEdges = EdgeBottom,
@@ -229,7 +229,7 @@ public:
 
   // Themed button at an explicit rect, for layouts the row cadence can't
   // express (bottom action bars, centered blocks). Does not consume body
-  // space — pair with takeTop/takeBottom when the band should be reserved.
+  // space - pair with takeTop/takeBottom when the band should be reserved.
   void button(const ButtonProps &props, Rect rect) {
     ButtonProps themed = props;
     if (textStyleUnset(themed.text))
@@ -439,7 +439,7 @@ public:
   }
 
   // Rows default to the theme's row cadence; pass a height for larger rows
-  // (a roomy settings list) — the gap grows with the row.
+  // (a roomy settings list) - the gap grows with the row.
   void settingRow(const SettingRowProps &props, int16_t height = 0,
                   LayoutAnchor anchor = LayoutAnchor::Top) {
     ui::settingRow(frame_, takeRow(anchor, height), props);
@@ -497,8 +497,8 @@ public:
     ui::textArea(frame_, height > 0 ? take(anchor, height) : content_, themed);
   }
 
-  // A one-line message centered in the remaining body — empty states,
-  // "Scanning…" notes — instead of hand-rolling lineHeight + centeredRect.
+  // A one-line message centered in the remaining body - empty states,
+  // "Scanning…" notes - instead of hand-rolling lineHeight + centeredRect.
   void centeredText(const char *message, TextStyle style) {
     if (!message)
       return;
@@ -698,7 +698,7 @@ public:
   // Shared mode: dereference caller-owned tokens through a caller-owned
   // atomic cell (both must outlive the app). Tokens are usually identical
   // for every screen of an app, so sharing one instance saves the ~1.5KB
-  // per-app copy setTheme() keeps — on small heaps that copy per live screen
+  // per-app copy setTheme() keeps - on small heaps that copy per live screen
   // is the cost that matters. Passing nullptr reverts to the owned/default
   // tokens.
   //
@@ -728,8 +728,8 @@ public:
   AssetResolver *assets() const { return assets_; }
 
   // Switch the active screen. `hint` is the refresh requested for the redraw:
-  // Full (default) gives a clean full refresh — good for the first paint or to
-  // clear ghosting — but on e-paper a full refresh on every screen change is
+  // Full (default) gives a clean full refresh - good for the first paint or to
+  // clear ghosting - but on e-paper a full refresh on every screen change is
   // slow and, on some panels, prone to a one-frame lag. Pass RefreshHint::Fast
   // for snappy partial-refresh transitions between screens.
   void setScreen(ScreenFn screen, void *user = nullptr,
@@ -774,7 +774,7 @@ public:
   void setTransitionFullEvery(uint8_t n) { transitionFullEvery_ = n; }
 
   // Fill the whole target with this color before each paint. Frames do not
-  // clear the target on their own — without this (or an app-side clear) the
+  // clear the target on their own - without this (or an app-side clear) the
   // previous screen shows through wherever the new one doesn't draw.
   void setClearColor(Color color) {
     clearPaint_ = Paint::solid(color);
@@ -805,7 +805,7 @@ public:
 
     // Build into whichever interaction-table generation isn't currently
     // published, so route() below (possibly running on another task right
-    // now) never reads one mid-rebuild — see InteractionBuffer's
+    // now) never reads one mid-rebuild - see InteractionBuffer's
     // beginPublishCycle()/publish().
     interactions_.beginPublishCycle();
     Frame<MaxInteractions> frame(target_, device_, input, interactions_,
@@ -819,7 +819,7 @@ public:
       dispatch(lastEvent_);
       invalidate(RefreshHint::Fast);
       // Tap feedback: paint the tapped element with its focused style in the
-      // same refresh that shows the tap's result — visual confirmation with
+      // same refresh that shows the tap's result - visual confirmation with
       // no extra panel refresh. Skipped when the handler called
       // clearTapFlash() (screen transitions).
       if (!flashSuppressed_) {
@@ -832,12 +832,12 @@ public:
   }
 
   // Route input against the interactions the LAST rendered frame registered
-  // and dispatch the resulting action — without drawing. A full render costs
+  // and dispatch the resulting action - without drawing. A full render costs
   // real time (~100-200 ms on large panels), so firmware that buffers input
   // (e.g. InputManager::beginAsync tap queues) drains the whole burst through
   // route() and repaints once. Only valid while the screen content still
   // matches the last render (a dispatched handler that navigates makes the
-  // remaining queued taps route against the old screen — same as taps landing
+  // remaining queued taps route against the old screen - same as taps landing
   // just before a transition).
   ActionEvent route(const InputSnapshot &input) {
     // Reads the last-published table (see render()'s beginPublishCycle()/
@@ -891,7 +891,7 @@ private:
   // Theme storage: caller-owned shared tokens (setThemeRef) or an app-owned
   // heap copy (setTheme / the constructor's font-derived default). A pointer
   // pair instead of an inline ThemeTokens member keeps sizeof(FreeInkApp)
-  // small — the tokens are ~1.5KB and most apps share one instance.
+  // small - the tokens are ~1.5KB and most apps share one instance.
   const std::atomic<const ThemeTokens *> *sharedThemeRef_ = nullptr;
   std::unique_ptr<ThemeTokens> ownedTheme_;
   AssetResolver *assets_ = nullptr;

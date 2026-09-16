@@ -1,4 +1,4 @@
-// FreeInkBook — streaming SAX → block flow → measured lines → placed pages.
+// FreeInkBook - streaming SAX → block flow → measured lines → placed pages.
 //
 // Phase 4 shape: paragraphs are laid out in two phases. MEASURE breaks the
 // paragraph into line records (libunibreak opportunities, kerning-aware
@@ -84,7 +84,7 @@ constexpr uint16_t kMaxProbedImages = 256;
 //
 // Layout needs each <img>'s intrinsic dimensions to reserve space, but probing
 // mid-parse opens a second inflate stream (~47 KB) while the chapter's own
-// parse stream is live — the image-chapter memory peak. Instead the chapter is
+// parse stream is live - the image-chapter memory peak. Instead the chapter is
 // pre-scanned once (a collector parse gathering resolved image hrefs), the
 // probes run sequentially with only one stream alive at a time, and the main
 // layout parse reads dimensions from this table. Entries carry the FNV-1a
@@ -97,7 +97,7 @@ struct ProbedImage {
 };
 
 // LineRec flags.
-constexpr uint8_t kLineLast = 1u << 0;    // paragraph-final or hard break — never justify
+constexpr uint8_t kLineLast = 1u << 0;    // paragraph-final or hard break - never justify
 constexpr uint8_t kLineHyphen = 1u << 1;  // render a hyphen after the last run
 
 const char* localName(const char* qname) {
@@ -182,7 +182,7 @@ bool isHyphLetter(uint32_t cp) {
 }
 
 // CJK ideographs, kana, Hangul, fullwidth forms, and the supplementary
-// ideographic planes — the scripts that justify by inter-character expansion
+// ideographic planes - the scripts that justify by inter-character expansion
 // and take a quarter-em gap against Latin runs.
 bool isCjk(uint32_t cp) {
   return (cp >= 0x2E80 && cp <= 0x9FFF) || (cp >= 0xAC00 && cp <= 0xD7AF) ||
@@ -194,7 +194,7 @@ bool isLatinWordChar(uint32_t cp) {
   return (cp >= '0' && cp <= '9') || (cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z');
 }
 
-// Hangul: syllables plus jamo. Korean is the spaced CJK script — it breaks
+// Hangul: syllables plus jamo. Korean is the spaced CJK script - it breaks
 // between syllables but justifies at word spaces, and attaches particles
 // directly to Latin words ("TV를"), so it opts out of both the quarter-em
 // rule and (when the line has spaces) inter-character justification.
@@ -211,7 +211,7 @@ bool crossesScripts(uint32_t a, uint32_t b) {
          (isLatinWordChar(a) && isCjk(b) && !isHangul(b));
 }
 
-// Full-width punctuation carries a built-in half-em of space — trailing for
+// Full-width punctuation carries a built-in half-em of space - trailing for
 // closers/stops, leading for openers. When two land adjacent (。」 or 」（)
 // JLREQ compresses the pair by half an em; fonts render each glyph in a
 // full em, so layout removes the overlap between them.
@@ -267,7 +267,7 @@ uint8_t bidiClass(uint32_t cp) {
   if (cp >= '0' && cp <= '9') return kBidiEN;
   if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') || (cp >= 0x00C0 && cp <= 0x024F) ||
       (cp >= 0x0370 && cp <= 0x058F) || cp >= 0x2E80) {
-    return kBidiL;  // Latin/Greek/Cyrillic/CJK — strong L for our purposes
+    return kBidiL;  // Latin/Greek/Cyrillic/CJK - strong L for our purposes
   }
   return kBidiNeutral;
 }
@@ -373,7 +373,7 @@ void reverseUtf8(char* s, uint32_t len) {
 // Arabic letters connect: each takes an isolated/initial/medial/final glyph
 // depending on whether it actually joins its neighbors (Unicode ch. 9).
 // Every contextual glyph exists as a codepoint in the Presentation Forms
-// blocks, so shaping is a substitution — resolved here once per paragraph,
+// blocks, so shaping is a substitution - resolved here once per paragraph,
 // applied in decodeShaped() during measurement, and baked into page-run text
 // exactly like ligatures. The renderer needs no shaping logic; it does need
 // a font with Presentation Forms coverage (BookFont::covers guards each
@@ -427,7 +427,7 @@ uint32_t arabPresentation(uint32_t cp, uint8_t form) {
 // One logical pass over the paragraph: resolve each Arabic letter's form
 // from whether it connects to its neighbors (transparent marks are skipped
 // per the joining rules), and fuse lam + immediately-following alef into the
-// mandatory ligature — but only when `font` covers the ligature glyph, since
+// mandatory ligature - but only when `font` covers the ligature glyph, since
 // the consumed alef cannot be resurrected at render time. Vowel marks
 // between lam and alef defeat the ligature (v1: adjacency required).
 void shapeArabic(const char* text, uint32_t len, uint8_t* levels, BookFont* font) {
@@ -917,7 +917,7 @@ class LayoutEngine : public XmlHandler {
     int32_t naturalWidth;  // includes the hyphen when kLineHyphen is set
     uint16_t spaceCount;   // adjustable spaces (Latin justification)
     uint16_t cjkGaps;      // CJ boundaries (inter-character justification)
-    uint16_t hangulGaps;   // Hangul boundaries — stretch only on space-less lines
+    uint16_t hangulGaps;   // Hangul boundaries - stretch only on space-less lines
     uint8_t flags;
   };
 
@@ -1118,13 +1118,13 @@ class LayoutEngine : public XmlHandler {
     }
     if (!prescanned && resolved != nullptr) {
       // Fallback (table overflow or over-long href): probe inline. This is
-      // the old two-concurrent-streams path — rare by construction.
+      // the old two-concurrent-streams path - rare by construction.
       const ZipEntry* entry = zip_->find(resolved);
       if (entry != nullptr) probeImage(source_, *entry, parseArena_, &info);
     }
     if (resolved == nullptr || info.kind == ImageInfo::Kind::Unknown || info.width == 0 ||
         info.height == 0) {
-      scratch_.release(marked);  // unknown format or missing target — skip
+      scratch_.release(marked);  // unknown format or missing target - skip
       return;
     }
 
@@ -1307,7 +1307,7 @@ class LayoutEngine : public XmlHandler {
     // "ko-keep-all": word-unit breaking (CSS word-break: keep-all). UAX #14
     // allows breaks between Hangul syllables; this style demotes them so
     // Korean lines break only at spaces (libunibreak still sees "ko" for its
-    // own tailoring — same suffix trick as "ja-strict").
+    // own tailoring - same suffix trick as "ja-strict").
     if (params_.language != nullptr) {
       const size_t langLen = strlen(params_.language);
       if (langLen >= 9 && strcmp(params_.language + langLen - 9, "-keep-all") == 0) {
@@ -1439,7 +1439,7 @@ class LayoutEngine : public XmlHandler {
     }
     const uint16_t sizePx = paragraphSizePx();
     // One line height for the whole paragraph, from the paragraph font size.
-    // Inline spans render at their own size on this shared grid — larger
+    // Inline spans render at their own size on this shared grid - larger
     // spans do NOT inflate their line box (CrossPoint parity: pages keep a
     // uniform baseline grid and a stable line count regardless of inline
     // font-size styling).
@@ -1457,7 +1457,7 @@ class LayoutEngine : public XmlHandler {
       const bool hasContent = runCount_ > 0 || pageY_ > params_.marginTop;
 
       if (avail == 0) {
-        if (!hasContent) break;  // page too short for even one line — give up
+        if (!hasContent) break;  // page too short for even one line - give up
         emitPage();
         continue;
       }
@@ -1830,7 +1830,7 @@ namespace {
 // BOOK container with only one inflate stream alive at a time. The table
 // sits below the layout buffers; everything else the pre-scan used is
 // released before the main parse, so the chapter peak stays at the
-// text-chapter level. Failures here are non-fatal — the main parse reports
+// text-chapter level. Failures here are non-fatal - the main parse reports
 // real errors, and unprobed images fall back to the inline probe.
 void prescanImages(BookSource& bookSource, const ZipCatalog* zip, BookSource& chapterSource,
                    const ZipEntry& entry, const char* chapterHref, Arena& scratch,

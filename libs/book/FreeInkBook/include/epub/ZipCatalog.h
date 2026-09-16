@@ -1,11 +1,11 @@
 #pragma once
 
-// FreeInk SDK — ZIP container access for FreeInkBook.
+// FreeInk SDK - ZIP container access for FreeInkBook.
 //
 // ZipCatalog parses the central directory of an EPUB container into the book
 // arena (entry names + fixed records; nothing else is retained). Item
 // contents are then read through ZipEntryReader, which streams stored or
-// deflated data in caller-sized chunks — an entry is never loaded whole.
+// deflated data in caller-sized chunks - an entry is never loaded whole.
 //
 // Out of scope for now (returns BookStatus::Unsupported): zip64 containers
 // and compression methods other than stored/deflate. Books that need zip64
@@ -75,7 +75,7 @@ class ZipEntryReader {
   // itself (offset 0), not a ZIP container. See rawEntry().
   static constexpr uint32_t kRawHeaderOffset = 0xFFFFFFFFu;
 
-  // Synthesizes an entry describing a raw stored byte range — e.g. a chapter
+  // Synthesizes an entry describing a raw stored byte range - e.g. a chapter
   // previously extracted (inflated) to its own file so later layout passes
   // can skip the ~46 KB inflate state. open() reads it from offset 0 without
   // expecting a ZIP local header.

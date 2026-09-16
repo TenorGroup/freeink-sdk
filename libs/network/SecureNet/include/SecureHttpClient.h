@@ -1,16 +1,16 @@
 #pragma once
 
-// FreeInk SDK — minimal HTTPS client over SecureClient (wolfSSL TLS 1.3).
+// FreeInk SDK - minimal HTTPS client over SecureClient (wolfSSL TLS 1.3).
 //
 // Self-contained on purpose: it does NOT wrap Arduino HTTPClient. HTTPClient's
 // begin() takes a NetworkClient&, but SecureClient is a plain Arduino Client
 // (it owns a WiFiClient transport and runs wolfSSL on top), so it can't bind to
 // that API. Instead this implements the small slice of HTTP/1.1 that firmware
-// needs — GET/POST/PUT with custom headers and a buffered response body —
+// needs - GET/POST/PUT with custom headers and a buffered response body -
 // directly over SecureClient, handling Content-Length, chunked, and
 // connection-close-delimited responses. Connections are kept alive and reused
 // across requests to the same scheme://host:port (see setReuse), so a burst of
-// requests — an OPDS crawl, a sync exchange, a multi-file download — pays for
+// requests - an OPDS crawl, a sync exchange, a multi-file download - pays for
 // one TLS handshake instead of one per request.
 //
 // Usage:
@@ -80,8 +80,8 @@ class SecureHttpClient {
   // Follow up to maxHops redirect hops (default 0: 3xx responses are returned
   // to the caller, matching the previous behavior). While following, the
   // intermediate 3xx bodies are drained and discarded; only the final
-  // response reaches the caller. 303 — and, per long-standing convention,
-  // 301/302 after a POST — continue as GET without the request body; 307/308
+  // response reaches the caller. 303 - and, per long-standing convention,
+  // 301/302 after a POST - continue as GET without the request body; 307/308
   // preserve method and body.
   void setFollowRedirects(int maxHops) { _followRedirects = maxHops < 0 ? 0 : maxHops; }
   // Allow a redirect to step down from https to http. Off by default, because
@@ -103,7 +103,7 @@ class SecureHttpClient {
   // Cloudflare in front of OPDS catalogs) answer UA-less requests with 403.
   void setUserAgent(const std::string& ua) { _userAgent = ua; }
   // Keep the connection open between requests to the same scheme://host:port
-  // (the default). Reusing the TLS session skips a full handshake per request —
+  // (the default). Reusing the TLS session skips a full handshake per request -
   // seconds of latency plus the ECC/RSA heap spike on PSRAM-less boards.
   // setReuse(false) restores connection-per-request behavior.
   void setReuse(bool reuse) { _reuse = reuse; }
@@ -187,7 +187,7 @@ class SecureHttpClient {
     }
   }
 
-  // One request/response transaction against the URL state — never follows
+  // One request/response transaction against the URL state - never follows
   // redirects. When following is enabled and the response is a 3xx, its body
   // is drained but NOT delivered to onData (only the final response's body
   // reaches the caller's sink).
@@ -226,7 +226,7 @@ class SecureHttpClient {
         if (reusing && attempt == 0 && !_aborted) continue;
         return -1;
       }
-      // "HTTP/1.1 200 OK" — the status code starts at offset 9.
+      // "HTTP/1.1 200 OK" - the status code starts at offset 9.
       _status = line.size() >= 12 ? atoi(line.c_str() + 9) : 0;
       // HTTP/1.0 peers default to connection-per-request; only an explicit
       // Connection: keep-alive header (below) overrides that.

@@ -1,14 +1,14 @@
 # Xteink X4 Classic (X4C)
 
 ESP32-S3 (16 MB flash, 8 MB PSRAM) e-reader. 800×480 B/W panel, **button-only**
-navigation — **no touchscreen and no frontlight**. It shares the ESP32-S3 board and
+navigation - **no touchscreen and no frontlight**. It shares the ESP32-S3 board and
 glass of the [Xteink X4 Pro](xteink-x4pro-support.md) and uses the same display
 driver stack, so most of that document's display detail applies; this page covers
 the X4C-specific pin assignment and peripherals. Its profile is
 `BoardConfig::XTEINK_X4_CLASSIC` (`Board::XteinkX4Classic`).
 
-The panel controller varies by production unit — **SSD1677**, **UC8179**, or
-**UC8279** — all driving the same 800×480 glass on the same X4C pinout. The X4C
+The panel controller varies by production unit - **SSD1677**, **UC8179**, or
+**UC8279** - all driving the same 800×480 glass on the same X4C pinout. The X4C
 display bus has no MISO, so the SDK reads the factory `hw_calib/screenType` NVS
 value at boot and selects the matching driver.
 
@@ -25,9 +25,9 @@ defines it).
   `ESP32S3_X4_CLA_SSD1677`.
 - Panel-controller selection: NVS namespace `hw_calib`, key `screenType` (u8:
   1 = UC8179, 2 = UC8279, 3/default = SSD1677). Because the bus has no MISO, this
-  NVS value is authoritative — the SDK maps it directly to the driver at boot.
+  NVS value is authoritative - the SDK maps it directly to the driver at boot.
 
-## Display — 800×480
+## Display - 800×480
 
 | Signal | GPIO | Notes |
 |--------|------|-------|
@@ -39,13 +39,13 @@ defines it).
 | BUSY   | 18   | input, active-high |
 
 `GPIO1` is the master peripheral/panel power rail, driven HIGH at boot. `GPIO6` is
-**not** a display pin — it is the SD card's power enable (see Storage). No custom
+**not** a display pin - it is the SD card's power enable (see Storage). No custom
 LUT, drive voltages, or external PMIC are needed; the panel runs the same UC8279
 command stream and OTP waveform as the X4 Pro. The X4C omits the UC8279 PLL (0x30)
 command that the X4 Pro programs. `displaySpiHz` defaults to 10 MHz, like all
 Xteink board profiles.
 
-## Input — eight discrete buttons, no touch
+## Input - eight discrete buttons, no touch
 
 Every key is a dedicated active-low GPIO. Seven are interrupt-driven buttons; GPIO4
 is a plain input (not a button, not used by the SDK). The layout is the two side
@@ -59,16 +59,16 @@ Because the X4C is a buttons-only device (`InputStyle::DigitalButtons` +
 `NO_TOUCH`) with all six navigation actions mapped, a consumer UI that reads the
 profile shows side-bezel button hints, like the C3 X4/X3.
 
-## Touch — none
+## Touch - none
 
 No touchscreen. Profile: `NO_TOUCH`.
 
-## Frontlight — none
+## Frontlight - none
 
 No frontlight. GPIO8/GPIO9 (the X4 Pro's warm/cool PWM channels) are button inputs
 here. Profile: `NO_FRONTLIGHT`.
 
-## I²C sensors — SDA 39 / SCL 38 @ 400 kHz
+## I²C sensors - SDA 39 / SCL 38 @ 400 kHz
 
 One shared master bus carries three devices:
 
@@ -83,7 +83,7 @@ One shared master bus carries three devices:
 GPIO21 is the charge `STAT` input, active-high (`batteryChargeStatus = 21`,
 `batteryChargeStatusActiveHigh = true`).
 
-## Storage — SD card (native SDMMC)
+## Storage - SD card (native SDMMC)
 
 Native SDMMC, 1-bit: CLK = 41, CMD = 42, DAT0 = 40, slot 1. `GPIO6` is the card's
 active-low power enable: it is driven HIGH for 80 ms, then LOW, and held LOW while

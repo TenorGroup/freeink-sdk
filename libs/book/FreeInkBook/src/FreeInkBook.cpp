@@ -1,4 +1,4 @@
-// FreeInkBook — book opening: ZIP catalog → container.xml → OPF → TOC.
+// FreeInkBook - book opening: ZIP catalog → container.xml → OPF → TOC.
 
 #include "FreeInkBook.h"
 
@@ -73,7 +73,7 @@ BookStatus Book::open(BookSource& source, Arena& bookArena, Arena& scratch) {
   spineCount_ = package.spineCount;
 
   // Prefer the EPUB 3 nav document; fall back to the EPUB 2 NCX. A book
-  // without any TOC still opens — the spine is the authoritative reading
+  // without any TOC still opens - the spine is the authoritative reading
   // order and paging must not depend on navigation data.
   const int tocIndex = package.navIndex >= 0 ? package.navIndex : package.ncxIndex;
   if (tocIndex >= 0) {

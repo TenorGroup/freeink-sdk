@@ -1,4 +1,4 @@
-// FreeInkBook — stb_truetype-backed BookFont with arena-bounded caches.
+// FreeInkBook - stb_truetype-backed BookFont with arena-bounded caches.
 
 #include "render/TtfFont.h"
 
@@ -158,7 +158,7 @@ const GlyphBitmap* TtfFont::rasterize(uint32_t codepoint, uint16_t sizePx) {
   if (w > 0 && h > 0) {
     pixels = static_cast<uint8_t*>(glyphArena_->alloc(static_cast<size_t>(w) * h, 1));
     if (pixels == nullptr) {
-      flushGlyphs();  // arena full — start a fresh cache generation
+      flushGlyphs();  // arena full - start a fresh cache generation
       pixels = static_cast<uint8_t*>(glyphArena_->alloc(static_cast<size_t>(w) * h, 1));
       if (pixels == nullptr) return nullptr;  // single glyph bigger than arena
     }

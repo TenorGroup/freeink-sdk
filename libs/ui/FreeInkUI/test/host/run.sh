@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds and runs the FreeInkUI host tests. No device or PlatformIO needed —
+# Builds and runs the FreeInkUI host tests. No device or PlatformIO needed -
 # the library is freestanding C++17.
 set -e
 cd "$(dirname "$0")"

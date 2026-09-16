@@ -1,6 +1,6 @@
 #pragma once
 
-// UC8253 panel driver — Murphy M3 (CrowPanel 3.7", 240x416 B/W, ESP32-S3).
+// UC8253 panel driver - Murphy M3 (CrowPanel 3.7", 240x416 B/W, ESP32-S3).
 // Ported from the community-sdk feat-support-for-m3 implementation.
 //
 // Distinct from the X3 UC8253 driver: the controller is 240x416 but the device is
@@ -11,7 +11,7 @@
 // Refresh: the controller is hardware-reset and re-initialised before every
 // refresh (manufacturer guidance) so stale LUT/RAM state can't leave pixels
 // half-latched. A full (GC) refresh then writes the new frame to BOTH planes so
-// only WW/BB fire and every pixel is fully driven to target — clean. A FAST (DU)
+// only WW/BB fire and every pixel is fully driven to target - clean. A FAST (DU)
 // refresh is differential: previous frame -> DTM1 (old), new frame -> DTM2 (new),
 // so unchanged pixels take WW/BB and changed pixels take the quick BW/WB transition
 // kicks; the driver promotes a fast refresh to a full one every ghostClearInterval

@@ -1,4 +1,4 @@
-// FreeInkBook — Liang pattern matcher over FIBH data.
+// FreeInkBook - Liang pattern matcher over FIBH data.
 
 #include "text/Hyphenator.h"
 

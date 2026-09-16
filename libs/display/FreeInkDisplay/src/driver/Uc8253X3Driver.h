@@ -1,6 +1,6 @@
 #pragma once
 
-// UC8253 panel driver — Xteink X3 (792x528 B/W + grayscale). Ported from the
+// UC8253 panel driver - Xteink X3 (792x528 B/W + grayscale). Ported from the
 // community-sdk `main` lineage (the production X3 implementation CrossPoint
 // ships). Selected at runtime via FreeInkDisplay::setDisplayX3() so one binary
 // drives both X3 and X4.

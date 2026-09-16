@@ -1,4 +1,4 @@
-// FreeInkBook — container.xml, OPF package, and TOC (nav/NCX) parsers.
+// FreeInkBook - container.xml, OPF package, and TOC (nav/NCX) parsers.
 
 #include "epub/PackageParsers.h"
 
@@ -80,7 +80,7 @@ const char* resolveHref(Arena& arena, const char* baseDir, const char* href,
     const char* end = strchr(p, '/');
     const size_t segLen = end != nullptr ? static_cast<size_t>(end - p) : strlen(p);
     if (segLen == 1 && p[0] == '.') {
-      // current directory — skip
+      // current directory - skip
     } else if (segLen == 2 && p[0] == '.' && p[1] == '.') {
       while (joinedLen > 0 && joined[joinedLen - 1] != '/') --joinedLen;
       if (joinedLen > 0) --joinedLen;  // drop the slash too
@@ -151,7 +151,7 @@ class PackageHandler : public XmlHandler {
   PackageHandler(Mode mode, Arena& bookArena, const char* opfDir)
       : mode_(mode), arena_(bookArena), opfDir_(opfDir) {}
 
-  // A book repeats a handful of media types across its whole manifest —
+  // A book repeats a handful of media types across its whole manifest -
   // "application/xhtml+xml" alone appears once per chapter (1,700+ times in
   // webnovel omnibuses; ~38 KB of duplicate strdup). Intern: same string,
   // allocated once.

@@ -1,7 +1,7 @@
 #pragma once
 
 // HID keyboard usage -> character / SpecialKey translation (US QWERTY).
-// Pure logic, no NimBLE — compiled regardless of FREEINK_CAP_BLE_HID_HOST so it
+// Pure logic, no NimBLE - compiled regardless of FREEINK_CAP_BLE_HID_HOST so it
 // can be host-tested and reused. See the USB HID Usage Tables (page 0x07).
 
 #include <stdint.h>

@@ -14,7 +14,7 @@ struct ToggleRowProps {
   int16_t toggleValue = 0;
   // By default the whole row is the tap target. Set this when the row hosts
   // other interactions (or toggling must be deliberate): only the switch
-  // itself — expanded to row.minTouchSize — responds to taps.
+  // itself - expanded to row.minTouchSize - responds to taps.
   bool hitToggleOnly = false;
   int16_t toggleWidth = 38;
   int16_t toggleHeight = 18;

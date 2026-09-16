@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds and runs the FreeInkBook host tests. No device or PlatformIO needed —
+# Builds and runs the FreeInkBook host tests. No device or PlatformIO needed -
 # the library is freestanding C++17. Fixture EPUBs are assembled here with the
 # system `zip` (mimetype stored first, per the EPUB OCF spec).
 set -e
@@ -22,12 +22,12 @@ elif command -v convert >/dev/null 2>&1; then
   convert "$BUILD_DIR/fixtures/minimal/OEBPS/images/pattern.png" \
     "$BUILD_DIR/fixtures/minimal/OEBPS/images/pattern.jpg"
 else
-  # No JPEG converter — reuse the PNG bytes; the JPEG-specific test will skip.
+  # No JPEG converter - reuse the PNG bytes; the JPEG-specific test will skip.
   cp "$BUILD_DIR/fixtures/minimal/OEBPS/images/pattern.png" \
      "$BUILD_DIR/fixtures/minimal/OEBPS/images/pattern.jpg"
 fi
 
-# Progressive JPEG variant of the pattern (PIL; skipped when absent — the
+# Progressive JPEG variant of the pattern (PIL; skipped when absent - the
 # matching test skips itself if the entry is missing from the fixture).
 python3 - "$BUILD_DIR/fixtures/minimal/OEBPS/images" <<'PYEOF2' || true
 import sys

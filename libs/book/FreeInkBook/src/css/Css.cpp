@@ -1,4 +1,4 @@
-// FreeInkBook — tolerant CSS subset parser and cascade.
+// FreeInkBook - tolerant CSS subset parser and cascade.
 
 #include "css/Css.h"
 
@@ -152,7 +152,7 @@ void applyDeclaration(CssDecl* decl, const char* prop, uint32_t propLen, const c
     const int32_t pct = lengthToPct(value, valueLen);
     if (pct >= 0) decl->marginBottomPct = static_cast<int16_t>(pct > 1000 ? 1000 : pct);
   } else if (propIs("margin")) {
-    // Shorthand: top [right [bottom [left]]] — we take top and bottom.
+    // Shorthand: top [right [bottom [left]]] - we take top and bottom.
     const char* parts[4] = {nullptr, nullptr, nullptr, nullptr};
     uint32_t partLens[4] = {0, 0, 0, 0};
     uint32_t count = 0;
@@ -261,7 +261,7 @@ bool CssStylesheetBuilder::begin(Arena& arena) {
 }
 
 void CssStylesheetBuilder::addText(const char* css, uint32_t len) {
-  if (rules_ == nullptr) return;  // begin() failed — stay inert
+  if (rules_ == nullptr) return;  // begin() failed - stay inert
   for (uint32_t i = 0; i < len; ++i) {
     contentHash_ ^= static_cast<uint8_t>(css[i]);
     contentHash_ *= 16777619u;

@@ -1,6 +1,6 @@
 #pragma once
 
-// IT8951E controller driver — M5Paper v1.1 (ED047TC1, 540x960, 16-gray, ESP32).
+// IT8951E controller driver - M5Paper v1.1 (ED047TC1, 540x960, 16-gray, ESP32).
 //
 // Unlike the panel-direct controllers (SSD1677/UC8253), the IT8951E is a timing
 // controller with its own framebuffer SRAM. The host doesn't push waveforms: it
@@ -9,8 +9,8 @@
 // IT8951 owns all LUT/VCOM/temperature handling internally.
 //
 // The protocol is 16-bit-word SPI with preamble words and MISO reads (device
-// info, register reads, HRDY flow control) — a poor fit for the byte-oriented,
-// write-only EpdBus — so this driver reports usesExternalBus() == true and drives
+// info, register reads, HRDY flow control) - a poor fit for the byte-oriented,
+// write-only EpdBus - so this driver reports usesExternalBus() == true and drives
 // its own SPIClass end to end (pins from BoardConfig::ACTIVE.display; MISO,
 // rotation, VCOM, and clock from the injectable It8951Config).
 //
@@ -36,7 +36,7 @@ struct It8951Config {
   uint8_t fastMode;   // B/W page turns (DU = 1, 2-level differential).
   uint8_t grayMode;   // anti-aliased grayscale pages. DU4 (6) is a 4-level DIRECT
                       // update: differential, so only changed pixels (the AA glyph
-                      // edges) move — no flash. GC16 (2) would drive every pixel.
+                      // edges) move - no flash. GC16 (2) would drive every pixel.
   uint16_t ghostClearInterval;  // promote a differential (DU/DU4) refresh to a GC16
                                 // ghost-clear every N partials (0 = never). Keeps
                                 // DU/DU4 residue from accumulating across menu and
@@ -96,7 +96,7 @@ class It8951Driver : public PanelDriver {
   void waitDisplayReady();                // poll LUT-busy register
 
   const It8951Config& _cfg;
-  // Reference to the Arduino global SPI bus (VSPI on ESP32) — the SAME object the
+  // Reference to the Arduino global SPI bus (VSPI on ESP32) - the SAME object the
   // SDCardManager uses. On M5Paper the SD card and the IT8951 share one physical
   // SPI bus; two separate SPIClass instances bound to one VSPI peripheral corrupt
   // each other's transfers, so both must drive the one global bus object (manual
@@ -131,7 +131,7 @@ class It8951Driver : public PanelDriver {
 
   // Snapshot of the last B/W frame from display(). The consumer's strip-grayscale
   // pass clears the live framebuffer to 0x00 while rendering the planes to a
-  // scratch buffer, so by displayGray() the passed buffer is black — we use this
+  // scratch buffer, so by displayGray() the passed buffer is black - we use this
   // snapshot (captured before the clear) as the true base instead.
   uint8_t* _base = nullptr;
 };

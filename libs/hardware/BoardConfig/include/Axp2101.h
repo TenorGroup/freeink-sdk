@@ -1,10 +1,10 @@
 #pragma once
 
-// X-Powers AXP2101 PMIC — board support for the Waveshare ESP32-S3-ePaper-3.97.
+// X-Powers AXP2101 PMIC - board support for the Waveshare ESP32-S3-ePaper-3.97.
 //
 // On that board the PMIC is not an optional extra: ALDO3 is the e-paper rail
 // (the panel is dead until it is enabled), and the PMIC's fuel-gauge block is
-// the only battery telemetry — there is no ADC divider and no gauge chip. Two
+// the only battery telemetry - there is no ADC divider and no gauge chip. Two
 // SDK modules therefore talk to it (EpdBus for the rail, BatteryMonitor for the
 // gauge), so the register map and the bus live here, once.
 //

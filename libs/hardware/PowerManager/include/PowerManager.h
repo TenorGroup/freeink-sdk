@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-// FreeInk SDK — deep-sleep / wake power management.
+// FreeInk SDK - deep-sleep / wake power management.
 //
 // Owns the one hardware concern the rest of the SDK leaves to the consumer: the
 // per-SoC deep-sleep GPIO-wakeup difference. RISC-V parts (C3/C6/H2) wake from
@@ -26,7 +26,7 @@ class PowerManager {
 
   // Arm deep-sleep wake on an arbitrary set of GPIOs (gpioMask, wakeLow = wake on
   // the low level) using the SoC-correct source (ext1 on Xtensa, gpio on RISC-V).
-  // Use for extra wake lines beyond the power button — a touch INT, a second
+  // Use for extra wake lines beyond the power button - a touch INT, a second
   // button, an IO-expander INT. The pins must be RTC-capable on ext1 parts.
   static void armWakeOnPins(uint64_t gpioMask, bool wakeLow = true);
 
@@ -40,7 +40,7 @@ class PowerManager {
   // enables gpio_deep_sleep_hold_en(), which makes the holds persist). Without
   // this, boards with gated rails (e.g. Sticky: GT911 on TP_PWR_EN, SD on
   // SD_PWR_EN, EPD on EP_PWR_EN) leave those peripherals powered all through
-  // deep sleep — milliamps of standby drain. No-op on boards whose rails are
+  // deep sleep - milliamps of standby drain. No-op on boards whose rails are
   // PIN_UNASSIGNED (X4/X3). Call after the display driver's deep-sleep command
   // and before deepSleep(); wake is a chip reset, so rails re-enable in the
   // normal init path. Display RESET is held LOW when its rail is cut (avoids
@@ -50,7 +50,7 @@ class PowerManager {
   static void powerDownRailsForSleep();
 
   // Isolate floating GPIOs to cut sleep current, then enter deep sleep. Does not
-  // return — the chip resets on wake.
+  // return - the chip resets on wake.
   [[noreturn]] static void deepSleep();
 
   // Convenience: wait for release, arm the power-button wakeup, then deep sleep.

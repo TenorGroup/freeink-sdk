@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — FreeInkBook umbrella header.
+// FreeInk SDK - FreeInkBook umbrella header.
 //
 // FreeInkBook turns an EPUB container on external storage into paginated
 // pages for e-paper panels. This is the Phase 1 surface: opening a book,
@@ -15,7 +15,7 @@
 // calls malloc; the vendored XML parser's bounded internal heap use is
 // confined to open/build time.
 //
-// Freestanding C++17 — no Arduino or ESP-IDF dependency; the full pipeline
+// Freestanding C++17 - no Arduino or ESP-IDF dependency; the full pipeline
 // runs in host-side unit tests.
 
 #include <stddef.h>

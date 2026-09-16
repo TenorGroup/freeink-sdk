@@ -1,10 +1,10 @@
 #pragma once
 
-// FreeInk SDK — page cache for FreeInkBook (Phase 3).
+// FreeInk SDK - page cache for FreeInkBook (Phase 3).
 //
 // Layout runs once; pages are serialized to compact binary records in the
 // application's cache storage. Turning a page is then one index lookup and
-// one sequential read — no ZIP, no inflate, no XML, no layout. A cache file
+// one sequential read - no ZIP, no inflate, no XML, no layout. A cache file
 // is keyed by a generation hash of everything that affects layout (page
 // geometry, base font size, font identity, engine version); changing the
 // font size simply produces a different generation, and the page anchors
@@ -13,10 +13,10 @@
 //
 // File format (little-endian, all fields packed):
 //   header : 'F''I''B''P' u16 version u16 reserved u32 generationHash
-//   blobs  : per page — u32 charStart, u16 runCount, u16 reserved, then runs
+//   blobs  : per page - u32 charStart, u16 runCount, u16 reserved, then runs
 //            {i16 x, i16 baselineY, u16 sizePx, u8 flags, u8 reserved,
 //             u16 textLen, bytes}
-//   index  : per page — u32 blobOffset, u32 charStart
+//   index  : per page - u32 blobOffset, u32 charStart
 //   footer : u32 indexOffset, u32 pageCount, 'F''I''B''X'
 // The index and footer live at the end so the writer streams blobs without
 // knowing the page count up front.
@@ -53,7 +53,7 @@ class PageCacheWriter : public PageSink {
   bool onPage(const Page& page) override;
   void onAnchor(uint32_t idHash, uint32_t charStart) override;
   bool finish();
-  // Set before finish(): total extracted characters in the chapter — the
+  // Set before finish(): total extracted characters in the chapter - the
   // denominator for reading-percentage (kosync-style progress).
   void setTotalChars(uint32_t totalChars) { totalChars_ = totalChars; }
   bool failed() const { return failed_; }
@@ -98,7 +98,7 @@ class PageCacheWriter : public PageSink {
   // Profile-tiered like the layout capacities (BookProfile.h): the small
   // tier trades pathological single-spine books for a smaller anchor table.
 #if FREEINK_BOOK_PROFILE == FREEINK_BOOK_PROFILE_SMALL
-  // With the chunked index the cap costs nothing up front — the build arena
+  // With the chunked index the cap costs nothing up front - the build arena
   // is the real limit (~8 B/page as chunks). Whole-novel single-spine files
   // exceed 1024 pages routinely (observed: 1174), so the cap matches the
   // standard tier and exists only as a runaway backstop.
@@ -140,7 +140,7 @@ class PageCacheReader {
   // total, and totalChars() covers only the built prefix. Callers serve
   // these pages immediately and rebuild the rest in the background.
   bool isPartial() const { return isPartial_; }
-  // Input-side progress the partial was suspended at — the basis for an
+  // Input-side progress the partial was suspended at - the basis for an
   // estimated total page count (pageCount / consumed * total). 0 on final
   // caches.
   uint32_t buildBytesConsumed() const { return buildBytesConsumed_; }
@@ -151,14 +151,14 @@ class PageCacheReader {
     return pageIndex < pageCount_ ? charStarts_[pageIndex] : 0;
   }
 
-  // The page containing `charOffset` — the position-restore primitive.
+  // The page containing `charOffset` - the position-restore primitive.
   uint32_t pageForChar(uint32_t charOffset) const;
 
   // Total extracted characters in the chapter (percentage denominator).
   uint32_t totalChars() const { return totalChars_; }
 
   // Resolves an id="" anchor (FNV hash via ZipCatalog::hashPath) to its
-  // chapter character offset — link/footnote jumps: charForAnchor →
+  // chapter character offset - link/footnote jumps: charForAnchor →
   // pageForChar. False when the chapter has no such id.
   bool charForAnchor(uint32_t idHash, uint32_t* charOut) const;
 

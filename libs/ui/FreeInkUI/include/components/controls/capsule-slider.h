@@ -8,7 +8,7 @@ namespace ui {
 // Finger-height filled-capsule slider (the iOS brightness control): one
 // unbroken stadium outline, filled solid up to the value, with a round handle
 // riding the boundary between the filled and empty track. Distinct from
-// slider(), which pairs a thin progress track with a separate knob — on a
+// slider(), which pairs a thin progress track with a separate knob - on a
 // capsule this tall that combination breaks the outline at the left end and
 // hides a dark knob inside the dark fill. Here the fill edge IS the handle.
 struct CapsuleSliderProps {
@@ -38,7 +38,7 @@ struct CapsuleSliderProps {
 template <size_t MaxInteractions>
 void capsuleSlider(Frame<MaxInteractions> &frame, Rect rect, const CapsuleSliderProps &props) {
   const int16_t stroke = props.stroke < 1 ? 1 : props.stroke;
-  // Below the width of the handle itself there is no capsule to draw — the
+  // Below the width of the handle itself there is no capsule to draw - the
   // handle would spill past the rect, and a track thinner than the outline
   // would put a negative width into fill(). Nothing registers either: at that
   // width there is no track a finger could meaningfully drag.
@@ -67,7 +67,7 @@ void capsuleSlider(Frame<MaxInteractions> &frame, Rect rect, const CapsuleSlider
   const int16_t handleCx =
       static_cast<int16_t>(inner.x + cap + (static_cast<int32_t>(travel) * value) / max);
   // The fill runs to the handle's far edge as a full stadium, so its right cap
-  // is a semicircle about the handle's own center and radius — entirely under
+  // is a semicircle about the handle's own center and radius - entirely under
   // the handle, touching the capsule only where the handle does. Ending the
   // fill at the handle's center instead (or squaring its right edge) leaves
   // its corners poking out past the round handle.

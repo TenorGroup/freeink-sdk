@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — lightweight UI primitives.
+// FreeInk SDK - lightweight UI primitives.
 //
 // FreeInkUI is intentionally not a retained DOM. It provides small value types,
 // fixed-capacity interaction routing, and simple row/column slot layout so apps

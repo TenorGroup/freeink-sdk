@@ -29,7 +29,7 @@ bool ZipScan::open(ByteSource& source) {
 
   // EOCD lives in the last (zip comment length + 22) bytes. The spec allows a
   // 64KB comment, but real containers have none, so search a small tail first
-  // and widen only when it's genuinely absent — the common path must never
+  // and widen only when it's genuinely absent - the common path must never
   // demand a 64KB contiguous block (measured aborting on the fragmented heap
   // a reading session leaves). All buffers are nothrow: running out of memory
   // fails the scan instead of the device.
@@ -60,7 +60,7 @@ bool ZipScan::open(ByteSource& source) {
   entries_.clear();
   // Cap the reserve hint: `count` is an untrusted uint16 (up to 65535), so a
   // crafted EOCD could force an outsized reserve that OOMs a low-heap device.
-  // The loop still handles a genuinely large directory — it just grows as
+  // The loop still handles a genuinely large directory - it just grows as
   // valid entries are actually read.
   entries_.reserve(count < 256 ? count : 256);
 

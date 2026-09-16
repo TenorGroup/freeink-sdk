@@ -324,7 +324,7 @@ void It8951Driver::begin(EpdBus& bus) {
   if (_pwrEn >= 0) {
     // PowerManager::powerDownRailsForSleep() latches this rail LOW through deep
     // sleep (the hold survives wake) and a held pad silently ignores writes.
-    // Release it first — this driver bypasses EpdBus, which does the same
+    // Release it first - this driver bypasses EpdBus, which does the same
     // release for the other panels.
     gpio_hold_dis(static_cast<gpio_num_t>(_pwrEn));
     pinMode(_pwrEn, OUTPUT);
@@ -336,7 +336,7 @@ void It8951Driver::begin(EpdBus& bus) {
   // begun this same object with the SD pins; that's fine *only* because a
   // shared-bus board wires the display and SD on the same SCLK/MOSI/MISO, so both
   // begins program identical pins (whichever runs last is a no-op re-init). The
-  // contract: on a shared bus (display.sclk == sd.sclk) the SPI pins must match —
+  // contract: on a shared bus (display.sclk == sd.sclk) the SPI pins must match -
   // otherwise the two begins fight and only one survives. Catch a profile that
   // violates it during bring-up.
 #ifdef IT8951_PROBE_DEBUG
@@ -390,7 +390,7 @@ void It8951Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, 
   (void)prev;  // IT8951 holds the previous frame in its own SRAM
 
   // A refresh clears ghosting when it's a Full/Half (the consumer's stronger
-  // refresh), a wake from standby (fresh image), or the periodic ghost-clear —
+  // refresh), a wake from standby (fresh image), or the periodic ghost-clear -
   // otherwise it's a fast DU. DU/DU4 leave residue that accumulates across menu and
   // activity navigation; promoting to GC16 every ghostClearInterval refreshes wipes
   // it automatically, like the X3 driver, with no firmware involvement.

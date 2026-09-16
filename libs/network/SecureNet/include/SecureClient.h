@@ -1,11 +1,11 @@
 #pragma once
 
-// FreeInk SDK — TLS 1.3 secure client.
+// FreeInk SDK - TLS 1.3 secure client.
 //
 // WHY: the precompiled mbedTLS shipped in the ESP-IDF/pioarduino package has
 // TLS 1.3 compiled out as empty stubs (PSA crypto prerequisites disabled), so
 // WiFiClientSecure / esp_http_client cannot reach TLS-1.3-only servers
-// (e.g. KOSync at kosync.ak-team.com:3042 — handshake fails with
+// (e.g. KOSync at kosync.ak-team.com:3042 - handshake fails with
 // -0x7780 MBEDTLS_ERR_SSL_FATAL_ALERT_MESSAGE). A -D Kconfig flag can't change a
 // precompiled .a, and a custom_sdkconfig rebuild fails on managed-component
 // dependencies. The only fix that doesn't rebuild ESP-IDF is to bring our own

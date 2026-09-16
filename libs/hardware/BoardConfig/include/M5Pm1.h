@@ -1,11 +1,11 @@
 #pragma once
 
-// M5Stack PaperColor — M5PM1 power-management IC (PY32L020), single owner.
+// M5Stack PaperColor - M5PM1 power-management IC (PY32L020), single owner.
 //
 // Two FreeInk modules drive the same PMIC over the board's internal I2C bus
 // (SDA3/SCL2): the ED2208 display driver (EPD rail via GPIO0, boot power policy)
 // and LedManager (the 3.3V LDO that feeds the WS2812 RGB rail). They share one
-// physical register — PWR_CFG (0x06) — so they must NOT keep private copies of
+// physical register - PWR_CFG (0x06) - so they must NOT keep private copies of
 // its map: an earlier split had LedManager mislabel reg 0x09 as a "watchdog"
 // (it's I2C_CFG) and the two callers' notions of the power bits drifted apart.
 //
@@ -81,7 +81,7 @@ constexpr uint8_t SYS_CMD_SHUTDOWN = 0xA1;
 constexpr uint8_t GPIO0 = 1 << 0;
 
 // Init the internal I2C bus and pin the PM1 to 100 kHz with idle-sleep disabled
-// (SLP_TO=0) so it doesn't drop off the bus between transactions. Idempotent —
+// (SLP_TO=0) so it doesn't drop off the bus between transactions. Idempotent -
 // safe to call from each module's begin().
 inline void beginBus() {
   Wire.begin(SDA, SCL, I2C_HZ);
@@ -181,21 +181,21 @@ inline bool requestShutdown() {
 
 // Board boot power policy. PWR_CFG auto-clears on reset, so this is where the
 // board's standing power state is (re)established each boot:
-//   CHG_EN  SET   — the PM1 only charges the 1250 mAh cell when this is on, and
+//   CHG_EN  SET   - the PM1 only charges the 1250 mAh cell when this is on, and
 //                   regulates the curve itself (charges only when VIN present,
 //                   stops at full). Off by default after reset; without setting
 //                   it the battery never tops up over USB.
-//   DCDC_EN SET   — the 5 V DCDC is the system 5 V rail the EPD drive runs from.
-//                   With it off the panel refreshes undervolted and sags blue —
+//   DCDC_EN SET   - the 5 V DCDC is the system 5 V rail the EPD drive runs from.
+//                   With it off the panel refreshes undervolted and sags blue -
 //                   on battery AND on USB. The PM1 retains PWR_CFG across
 //                   reflashes, so a once-latched-off DCDC stays off until
 //                   something sets it again; assert it every boot.
-//   BOOST_EN SET  — Grove/5VINOUT supply; M5's UserDemo boots with
+//   BOOST_EN SET  - Grove/5VINOUT supply; M5's UserDemo boots with
 //                   setBoostEnable(true), match it.
-//   LDO_EN  CLEAR — RGB rail, owned by LedManager (re-enabled lazily while an LED
+//   LDO_EN  CLEAR - RGB rail, owned by LedManager (re-enabled lazily while an LED
 //                   is lit). Cleared here so the chain stays unpowered from boot.
 // Also hands the WS2812 chain to the ESP by switching off the PM1's built-in
-// NeoPixel engine — left on, it renders its own status pixel (the stuck green LED
+// NeoPixel engine - left on, it renders its own status pixel (the stuck green LED
 // seen at boot) even while the ESP sleeps. The display is the first PM1 caller,
 // so doing both here kills the green LED before LedManager has even run.
 inline void applyBootPowerPolicy() {

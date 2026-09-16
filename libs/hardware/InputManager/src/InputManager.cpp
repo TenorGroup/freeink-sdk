@@ -456,7 +456,7 @@ void InputManager::updateDigitalTwoButton(const unsigned long currentTime) {
   // The power button reaches only the PM1 PMIC; clicks surface here as a
   // one-tick BTN_POWER pulse in the STATE, so applyStateChange() emits the
   // press this update and the release on the next. Never write the event
-  // masks directly — applyStateChange() assigns them from the state diff,
+  // masks directly - applyStateChange() assigns them from the state diff,
   // clobbering direct writes the same tick.
   if (freeink::papermono::pollPowerButtonClicked(currentTime)) {
     auxiliaryState |= static_cast<uint8_t>(1u << BTN_POWER);
@@ -590,9 +590,9 @@ bool InputManager::isPowerButtonPressed() const { return isPressed(BTN_POWER); }
 // The public touch API is always available. Compiled only when
 // FREEINK_CAP_TOUCH is set; the backend dispatches on
 // BoardConfig::ACTIVE.touch.controller:
-//   * CHSC6x (Murphy M3) — IRQ-driven, hand-rolled 16-byte frame decode.
-//   * GT911  (LilyGo)    — polled status/point registers over I2C.
-//   * FT5x06 (Paper Mono FT6336) — active-low IRQ + 0x02 point frame.
+//   * CHSC6x (Murphy M3) - IRQ-driven, hand-rolled 16-byte frame decode.
+//   * GT911  (LilyGo)    - polled status/point registers over I2C.
+//   * FT5x06 (Paper Mono FT6336) - active-low IRQ + 0x02 point frame.
 // Coordinates are delivered raw-panel-oriented; the app owns rotation.
 // ============================================================================
 
@@ -1175,7 +1175,7 @@ void InputManager::beginTouch() {
     beginGslx680();
     return;
   }
-  // CHSC6x: I2C bus only. The IRQ is left unconfigured — it's a brief pulse on
+  // CHSC6x: I2C bus only. The IRQ is left unconfigured - it's a brief pulse on
   // this controller, so detection polls I2C and gates on the frame's touch bit
   // instead (see decodeChsc6xFrame / updateTouchFromIrq).
   if (t.sda >= 0 && t.scl >= 0 && t.i2cAddress != 0) {
@@ -1305,7 +1305,7 @@ bool InputManager::decodeChsc6xFrame(const uint8_t* data, const size_t len, Touc
   // when idle. The controller keeps returning a stale coordinate frame between
   // touches, so without this gate every read looks like a phantom touch (which
   // is why polling reported a fixed point and IRQ-gated reads were needed to
-  // dodge it). Release transitions briefly show 0x40/0xff — both fail this test
+  // dodge it). Release transitions briefly show 0x40/0xff - both fail this test
   // or the coordinate sanity check below.
   if ((data[3] & 0x80) == 0) {
     return false;
@@ -1363,7 +1363,7 @@ void InputManager::beginFt5x06() {
 
 #if FREEINK_DEVICE_PAPERMONO
   // The FT6336's power rail and reset line live on the M5IOE1 expander, not
-  // ESP GPIOs — raise/release them before the probe below.
+  // ESP GPIOs - raise/release them before the probe below.
   freeink::papermono::enableTouch();
 #endif
 
@@ -1403,7 +1403,7 @@ void InputManager::beginFt5x06() {
   freeink::m5ioe1::readReg16(freeink::m5ioe1::REG_GPIO_OUT_L, &ioeOut);
   touchDebugPrintf("[touch] IOE1 addr=0x%02X mode=0x%04X out=0x%04X\n", freeink::m5ioe1::g_addr, ioeMode, ioeOut);
   // Full bus scan with the touch rail up: expected residents are 0x32 (RX8130
-  // RTC), 0x4F/0x6F (IOE1), 0x68 (BMI270), 0x6E (PM1), 0x50 (NFC on Pro) —
+  // RTC), 0x4F/0x6F (IOE1), 0x68 (BMI270), 0x6E (PM1), 0x50 (NFC on Pro) -
   // whatever ELSE ACKs is the touch controller (FT6336 = 0x38; some unit
   // revisions may carry a CST820 = 0x15 instead).
   touchDebugPrintf("[touch] i2c scan:");
@@ -1427,7 +1427,7 @@ void InputManager::pollFt5x06(const unsigned long now) {
   touchReadAt = now + TOUCH_SAMPLE_DELAY_MS;
 
   // The controller runs in interrupt-polling mode (G_MODE=0, set in begin),
-  // where INT emits low PULSES at the report rate while a contact is held —
+  // where INT emits low PULSES at the report rate while a contact is held -
   // the line reads HIGH between pulses even with the finger down, so its
   // level must not be treated as a release (that splits one swipe into a
   // phantom tap plus a swipe). Idle fast-path gate only; while a contact is
@@ -1443,7 +1443,7 @@ void InputManager::pollFt5x06(const unsigned long now) {
   if (!ft5x06ReadReg(0x02, data, sizeof(data))) {
     // Transient read failures happen on the shared PY32 bus; survive them.
     // But a controller that has stopped answering (rail glitch) must not
-    // leave the contact latched — release once samples go stale.
+    // leave the contact latched - release once samples go stale.
     constexpr unsigned long STALE_RELEASE_MS = 100;
     if (touchPressed && now - touchPoint.timestamp > STALE_RELEASE_MS) {
       touchPressed = false;
@@ -1995,7 +1995,7 @@ void InputManager::pollFt6336u(const unsigned long now) {
 #endif
   if (!gotData) return;
   // Reject garbage frames. Pattern A: all four bytes identical (0xE6/E7/E2/01/03).
-  // Pattern B: last three bytes identical but first differs (e.g. 07 03 03 03) —
+  // Pattern B: last three bytes identical but first differs (e.g. 07 03 03 03) -
   // produces rawX=1795 or rawY=771 which are impossibly out of range and generate
   // phantom touches at the corner of the screen.
   const bool uniformGarbage =

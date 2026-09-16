@@ -47,7 +47,7 @@ inline void IRAM_ATTR gpioLow(uint8_t pin) {
 }
 
 // Paper Mono discrete RGB LED: red = M5PM1 LED output (PWR_CFG bit 4),
-// green/blue = M5IOE1 IO8/IO9. On/off per channel, no per-channel intensity —
+// green/blue = M5IOE1 IO8/IO9. On/off per channel, no per-channel intensity -
 // a scaled channel value of 128+ counts as lit, so global brightness below 50%
 // dims by dropping channels rather than fading.
 constexpr uint8_t DISCRETE_ON_THRESHOLD = 128;
@@ -195,7 +195,7 @@ void LedManager::writePixels(const LedColor* colors, uint8_t count) {
     if (!enablePower()) return;
     railOn_ = true;
   }
-  // Precompute the byte stream and cycle timings before masking interrupts —
+  // Precompute the byte stream and cycle timings before masking interrupts -
   // the masked window must not touch flash (see sendFrame). nsToCycles calls
   // ESP.getCpuFreqMHz(), a flash-resident function.
   uint8_t bytes[MAX_LEDS * 3];

@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — arena (bump) allocator for FreeInkBook.
+// FreeInk SDK - arena (bump) allocator for FreeInkBook.
 //
 // All engine memory comes from arenas the application sizes up front (on
 // ESP32-class targets typically placed in PSRAM). Allocation is a pointer
@@ -8,7 +8,7 @@
 // Arenas reset wholesale at book/chapter boundaries and report a high-water
 // mark so host tests can assert peak-memory ceilings.
 //
-// Freestanding C++17 — no Arduino or ESP-IDF dependency.
+// Freestanding C++17 - no Arduino or ESP-IDF dependency.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -80,7 +80,7 @@ class Arena {
   size_t highWater() const { return highWater_; }
   // Diagnostics: the largest allocation this arena has REFUSED since init()
   // (0 = none). On an OutOfMemory build this names the request that missed,
-  // which highWater() alone cannot — it records the last success, so an
+  // which highWater() alone cannot - it records the last success, so an
   // arena can fail with headroom still showing.
   size_t failedAllocSize() const { return failedAllocSize_; }
 

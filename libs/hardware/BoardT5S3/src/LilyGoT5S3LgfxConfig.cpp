@@ -18,7 +18,7 @@ constexpr uint8_t kTpsEnableOutputs = 0x3F;
 // Single waveform for BOTH the B/W base push and the AA gray overlay push.
 // Panel_EPD's per-pixel diff embeds the epd_mode LUT offset in the stored
 // value, so alternating modes between the two pushes of a page turn defeats
-// the diff and re-drives the whole screen — the LovyanGFX default lut_fast
+// the diff and re-drives the whole screen - the LovyanGFX default lut_fast
 // then flashes every white pixel black for two frames (the full-screen black
 // "swipe"). Using one LUT under one mode keeps unchanged pixels skipped.
 // Columns 0/15 carry the default lut_fast drive (changed B/W text pixels);

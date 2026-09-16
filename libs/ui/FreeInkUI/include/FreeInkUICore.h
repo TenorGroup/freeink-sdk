@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — lightweight UI primitives.
+// FreeInk SDK - lightweight UI primitives.
 //
 // FreeInkUI is intentionally not a retained DOM. It provides small value types,
 // fixed-capacity interaction routing, and simple row/column slot layout so apps
@@ -126,7 +126,7 @@ struct DeviceContext {
   // coordinates (the BoardConfig touch contract) into this logical frame.
   // Distinct from `orientation` (what the app renders as): a DisplayTarget
   // rendering Portrait on a landscape-native panel rotates 90° CW, so its touch
-  // transform is LandscapeClockwise — the render rotation's inverse. Render
+  // transform is LandscapeClockwise - the render rotation's inverse. Render
   // targets set this (see DisplayTarget::touchOrientation()); the default,
   // Portrait, is the identity mapping.
   Orientation touchOrientation = Orientation::Portrait;
@@ -159,9 +159,9 @@ inline Orientation touchOrientationFor(const Orientation render) {
 }
 
 // Maps a touch point reported in normalized panel-native coordinates (0..1,
-// as InputManager reports taps — aligned to the display's native frame per
+// as InputManager reports taps - aligned to the display's native frame per
 // the BoardConfig touch contract) to logical screen coordinates under the
-// device's touchOrientation — the transform every app otherwise re-derives by
+// device's touchOrientation - the transform every app otherwise re-derives by
 // hand. flipX/flipY compensate for mirrored panel mounting; they are a
 // property of the board, not the app, so feed them from the board profile or
 // a config constant.
@@ -670,7 +670,7 @@ struct ThemeTokens {
   // Control shape tokens, forwarded into any radius prop left at
   // RADIUS_INHERIT: quick-setting tiles and slider step buttons
   // (Screen::tileGrid()/sliderRow()), the sheet's free-edge corners
-  // (Screen::sheet()), and the capsule slider's corners — a capsuleRadius of
+  // (Screen::sheet()), and the capsule slider's corners - a capsuleRadius of
   // at least half the control's height draws the classic full stadium,
   // smaller values square it toward the theme's card language.
   uint8_t controlRadius = 18;
@@ -872,7 +872,7 @@ inline void layoutText(const DrawTarget &target, const Rect rect,
 // Bounds of `text` wrapped into maxWidth under `style` (honors maxLines and
 // the ellipsis tail): width = widest emitted line, height = line count times
 // lineHeight. Built on layoutText, so it agrees exactly with what
-// text()/drawText render through targets that delegate to it — use it to
+// text()/drawText render through targets that delegate to it - use it to
 // reserve space for wrapped titles, auto-size dialogs, or compute row
 // heights, instead of estimating line counts from single-line measureText.
 inline Size measureWrappedText(const DrawTarget &target, const char *text,
@@ -920,7 +920,7 @@ inline Paint invertedPaint(Paint paint) {
 //   freeink::ui::InvertedDrawTarget target(realTarget, settings.darkMode);
 //   freeink::ui::Frame<32> ui(target, device, input, interactions);
 //
-// The screen clear stays app-owned — clear to black when inverted.
+// The screen clear stays app-owned - clear to black when inverted.
 class InvertedDrawTarget final : public DrawTarget {
 public:
   explicit InvertedDrawTarget(DrawTarget &inner, bool enabled = true)
@@ -996,7 +996,7 @@ struct ActionEvent {
   State state = StateNormal;
   // True when the dispatch came from a long-press touch release (the
   // interaction matched via InputLongPress). Lets one key offer an alternate
-  // output on hold — e.g. a keyboard digit key emitting its shift symbol —
+  // output on hold - e.g. a keyboard digit key emitting its shift symbol -
   // without registering a second ActionId.
   bool longPress = false;
   // For InputDrag interactions: horizontal touch position within the
@@ -1054,7 +1054,7 @@ public:
       if (active.action == action && active.value == value)
         state |= StateActive;
     }
-    // Tap flash renders with the focused style (light-gray dither) — a gray
+    // Tap flash renders with the focused style (light-gray dither) - a gray
     // acknowledgment overlay, softer than the inverted active style.
     if (flashAction_ != NO_ACTION && flashAction_ == action &&
         flashValue_ == value)
@@ -1068,7 +1068,7 @@ public:
   }
 
   size_t count() const { return count_[building_]; }
-  // True if a frame registered more interactions than the buffer holds —
+  // True if a frame registered more interactions than the buffer holds -
   // dropped elements never receive input, so size the template accordingly.
   bool overflowed() const { return overflowed_[building_]; }
   const Interaction *data() const { return interactions_[building_]; }
@@ -1087,7 +1087,7 @@ public:
   // Cross-task counterparts of count()/overflowed()/data()/route(): read the
   // last-published generation (see publish()) instead of building_, which a
   // concurrent render may be mid-rebuild on another task. A caller that never
-  // opts into publishing (below) never needs these — every method above
+  // opts into publishing (below) never needs these - every method above
   // keeps behaving exactly as it always has for single-task use.
   size_t publishedCount() const {
     return count_[published_.load(std::memory_order_acquire)];
@@ -1108,14 +1108,14 @@ public:
   // call on another task never sees a half-rebuilt table. Call once, before
   // constructing the Frame for this pass. Callers that never call this (every
   // existing single-task use, including the host test suite) keep building_
-  // pinned at generation 0 forever — a no-op, so this is pure opt-in.
+  // pinned at generation 0 forever - a no-op, so this is pure opt-in.
   void beginPublishCycle() {
     building_ = static_cast<uint8_t>(1 - published_.load(std::memory_order_relaxed));
   }
 
   // Atomically publishes the generation just built (building_) so
   // routePublished()/publishedData()/publishedCount()/publishedOverflowed()
-  // on any task see a complete, stable table — never one mid-rebuild. Call
+  // on any task see a complete, stable table - never one mid-rebuild. Call
   // once the frame's hit() calls are done (after Frame::finish(), or directly
   // after building for a caller that doesn't need finish()'s same-generation
   // route()). Release-paired with the acquire loads above: every write this
@@ -1126,15 +1126,15 @@ public:
   // Index of the interaction currently under a held touch (-1 when none).
   // Lets the render loop repaint for touch-down feedback: the active element
   // draws with its StateActive style while the finger is down. Shared across
-  // both generations by design — it names an action/value pair, not a raw
-  // index into a specific generation's array — same for focusedIndex() and
+  // both generations by design - it names an action/value pair, not a raw
+  // index into a specific generation's array - same for focusedIndex() and
   // the flash state below.
   int16_t activeIndex() const { return active_; }
 
   // Tap flash: mark one action/value for the frame(s) that follow a
   // dispatched tap, so the tapped element paints a gray acknowledgment (the
   // focused style's light-gray dither) in the same refresh that shows the
-  // tap's result — visual confirmation with no extra panel refresh.
+  // tap's result - visual confirmation with no extra panel refresh.
   // FreeInkApp arms this on dispatch and clears it after the repaint.
   void setFlash(ActionId action, int16_t value) {
     flashAction_ = action;
@@ -1256,7 +1256,7 @@ private:
 
     // touchPressed is gated on the contact first reading as a tap, which a
     // fast drag never is. Bind on the frame the contact begins, at the point
-    // it landed — the live position would let a passing contact grab a
+    // it landed - the live position would let a passing contact grab a
     // slider. Drag-masked elements only, so taps keep press-then-release;
     // a contact starting elsewhere clears whatever the last one bound.
     // The latch closes on hold and opens on the release edge, never on the
@@ -1264,7 +1264,7 @@ private:
     // through this same buffer on every repaint, and a drag repaints every
     // frame. Clearing on !touchHeld would let that placeholder re-open the
     // latch between two input frames, making every held frame read as a fresh
-    // contact — the bind below would then re-run against the live position and
+    // contact - the bind below would then re-run against the live position and
     // drop the drag the moment the finger leaves the rect.
     const bool contactBegan = input.touchHeld && !contactHeld_;
     if (input.touchHeld) contactHeld_ = true;

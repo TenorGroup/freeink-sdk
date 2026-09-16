@@ -1,6 +1,6 @@
 #pragma once
 
-// M5Stack Paper Mono — board bring-up over the PY32 helper chips, single owner.
+// M5Stack Paper Mono - board bring-up over the PY32 helper chips, single owner.
 //
 // The Paper Mono routes its power/reset plumbing through the M5PM1 PMIC
 // (M5Pm1.h) and the M5IOE1 expander (M5Ioe1.h) instead of ESP GPIOs. This
@@ -42,7 +42,7 @@ inline bool ensureBooted() {
   m5pm1::clearWakeSource();
   m5pm1::configureAppPowerButton();
   // The red RGB leg lives in the PM1's PWR_CFG, which the PMIC retains across
-  // reflashes — stock firmware leaves it lit. Drive it to the same known-off
+  // reflashes - stock firmware leaves it lit. Drive it to the same known-off
   // state configureOutputs() gives the IOE1 green/blue legs.
   m5pm1::updateReg(m5pm1::REG_PWR_CFG, m5pm1::LED_R_EN, 0);
   ok = m5ioe1::configureOutputs();

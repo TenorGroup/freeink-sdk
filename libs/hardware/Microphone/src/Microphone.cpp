@@ -84,7 +84,7 @@ void Microphone::end() {
 
 }  // namespace freeink
 
-#else  // FREEINK_CAP_MIC — no mic on this board: stub bodies, no I2S linkage.
+#else  // FREEINK_CAP_MIC - no mic on this board: stub bodies, no I2S linkage.
 
 namespace freeink {
 bool Microphone::begin(uint32_t) { return false; }

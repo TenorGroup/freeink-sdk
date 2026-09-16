@@ -1,11 +1,11 @@
 #pragma once
 
-// FreeInk SDK — on-demand memory / cache reclaim.
+// FreeInk SDK - on-demand memory / cache reclaim.
 //
 // A small, app-neutral registry of "cache sinks" plus heap reporting, so a
 // consumer can free RAM on demand (a control-center "clear caches" action) or
-// under memory pressure. Components that hold rebuildable RAM caches — rendered
-// pages, decoded images, glyph atlases, parsed-document buffers, PSRAM pools —
+// under memory pressure. Components that hold rebuildable RAM caches - rendered
+// pages, decoded images, glyph atlases, parsed-document buffers, PSRAM pools -
 // register a sink with an eviction callback; clearCaches() then asks each sink
 // (lowest priority first) to release memory until a target is met.
 //
@@ -27,15 +27,15 @@
 namespace freeink {
 
 // Which heap pool to measure / target.
-//   Internal — DMA/task-capable internal SRAM (the scarce pool).
-//   Psram    — external SPI RAM (0 on boards without PSRAM).
-//   Default  — the allocator's default pool (what ESP.getFreeHeap() reports).
+//   Internal - DMA/task-capable internal SRAM (the scarce pool).
+//   Psram    - external SPI RAM (0 on boards without PSRAM).
+//   Default  - the allocator's default pool (what ESP.getFreeHeap() reports).
 enum class MemPool : uint8_t { Internal, Psram, Default };
 
 // Heap-pressure level against the watermarks set by setWatermarks().
-//   None — used bytes below the soft watermark.
-//   Soft — above soft: rebuildable caches should start giving memory back.
-//   Hard — above hard: evict aggressively before allocations start failing.
+//   None - used bytes below the soft watermark.
+//   Soft - above soft: rebuildable caches should start giving memory back.
+//   Hard - above hard: evict aggressively before allocations start failing.
 enum class MemPressure : uint8_t { None, Soft, Hard };
 
 // A borrowed static task stack (see acquireTaskStack). `stack`/`tcb` are owned
@@ -50,7 +50,7 @@ struct TaskStack {
 // A registrable evictable cache.
 struct CacheSink {
   // Stable name (used for logging and as the replace/unregister key). Not copied
-  // — pass a string literal or a buffer that outlives the registration.
+  // - pass a string literal or a buffer that outlives the registration.
   const char* name = nullptr;
   // Eviction order: LOWER priority is evicted FIRST. Put cheap-to-rebuild caches
   // (glyphs, decoded images) low; hold expensive/essential state high.
@@ -92,7 +92,7 @@ class MemoryManager {
   size_t boost(size_t* freeBefore = nullptr, size_t* freeAfter = nullptr, MemPool pool = MemPool::Default);
 
   // Control-center "Boost" (reboot flavor): purge caches, then perform a clean
-  // software CPU restart — the only way to fully undo internal-heap
+  // software CPU restart - the only way to fully undo internal-heap
   // fragmentation. Shut down anything with external state first (stop wifi/BLE,
   // unmount SD, put the display driver to sleep); this call does not know about
   // those subsystems. Does not return.
@@ -101,7 +101,7 @@ class MemoryManager {
   // --- heap-pressure watermarks ---
   // Arm soft/hard used-bytes watermarks as percentages of the internal pool's
   // total size, and record how much was already in use ("reserved") at the time
-  // of the call — so call it once at end of app init. Defaults mirror common
+  // of the call - so call it once at end of app init. Defaults mirror common
   // e-reader firmware (soft 60%, hard 75% of internal RAM).
   void setWatermarks(uint8_t softPct = 60, uint8_t hardPct = 75);
 
@@ -111,7 +111,7 @@ class MemoryManager {
 
   // If pressure is Soft or Hard, evict sinks (lowest priority first) until used
   // bytes drop back under the soft watermark; Hard additionally purges every
-  // sink outright. Returns bytes reported freed. Cheap no-op at None — safe to
+  // sink outright. Returns bytes reported freed. Cheap no-op at None - safe to
   // call periodically or before a large allocation.
   size_t relievePressure();
 
@@ -122,7 +122,7 @@ class MemoryManager {
   // --- static task-stack slots ---
   // Borrow a named, preallocated internal-RAM stack (+ TCB) for
   // xTaskCreateStatic(), so short-lived big-stack tasks (wifi/radio bring-up,
-  // OTA, sync) don't repeatedly carve 4–8 KB holes in the internal heap. The
+  // OTA, sync) don't repeatedly carve 4-8 KB holes in the internal heap. The
   // slot's buffer is allocated on first acquire and kept across release for
   // reuse; a later acquire with a larger size reallocates it (only possible
   // while released). Returns {nullptr,...} if the slot is currently owned, the
@@ -139,7 +139,7 @@ class MemoryManager {
   // >= 0, or -1 on failure.
   int arenaCreate(size_t bytes, MemPool pool = MemPool::Internal);
   // Bump-allocate from an arena (align must be a power of two). Returns nullptr
-  // when the arena is exhausted — there is no per-allocation free.
+  // when the arena is exhausted - there is no per-allocation free.
   void* arenaAlloc(int id, size_t bytes, size_t align = 4);
   // Reset the arena to empty (invalidates everything allocated from it).
   void arenaReset(int id);

@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk — crypto backend interface.
+// FreeInk - crypto backend interface.
 //
 // On device: wolfSSL. Host tests: OpenSSL. Kept behind an interface so the
 // freestanding core carries no crypto dependency and stays unit-testable.

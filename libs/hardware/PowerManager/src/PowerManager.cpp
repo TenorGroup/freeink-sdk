@@ -19,7 +19,7 @@ void PowerManager::armWakeOnPins(uint64_t gpioMask, bool wakeLow) {
 #if SOC_PM_SUPPORT_EXT1_WAKEUP
   // Xtensa (S3/S2, classic ESP32): RTC ext1. Pins must be RTC GPIOs.
   //
-  // The classic ESP32 RTC has no "any low" mode — only ESP_EXT1_WAKEUP_ALL_LOW
+  // The classic ESP32 RTC has no "any low" mode - only ESP_EXT1_WAKEUP_ALL_LOW
   // ("wake when ALL selected pins are low"). For a single wake pin (the common
   // power-button case) ALL_LOW and ANY_LOW are identical; a multi-pin low wake on
   // classic ESP32 fires only when every pin is low. S2/S3 expose ANY_LOW directly.
@@ -78,7 +78,7 @@ void PowerManager::powerDownRailsForSleep() {
   const auto& b = BoardConfig::ACTIVE;
 #if FREEINK_DEVICE_WS397
   // The EPD rail is an AXP2101 LDO, not a GPIO, so holdRailOff() below cannot
-  // reach it — drop it here or the panel stays powered all through deep sleep.
+  // reach it - drop it here or the panel stays powered all through deep sleep.
   axp2101::setEpdPower(false);
 #endif
   // Keep RESET defined through deep sleep, but never drive an unpowered panel's

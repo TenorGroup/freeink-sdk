@@ -40,7 +40,7 @@ struct ListProps {
   const ListItem *items = nullptr;
   uint16_t count = 0;
   // First absolute index items[0] corresponds to. Lets `items` be a small
-  // window around the viewport instead of an array of all `count` entries —
+  // window around the viewport instead of an array of all `count` entries -
   // a several-hundred-row list (an EPUB table of contents) would otherwise
   // pin tens of KB of ListItems + label strings for rows that are never
   // drawn. list() only touches indexes in [topIndex, topIndex + visible],
@@ -154,7 +154,7 @@ struct ListProps {
 
 // Stateful companion to the immediate-mode list helpers in FreeInkUICore.h:
 // the selection-vs-viewport protocol most list screens want on e-paper.
-// Drag/swipe scrolling moves the viewport (top) WITHOUT moving the selection —
+// Drag/swipe scrolling moves the viewport (top) WITHOUT moving the selection -
 // the selection may scroll off-screen; key/button navigation moves the
 // selection and the caller re-follows (follow()) so the viewport is pulled the
 // minimal amount to keep it visible. The first syncToProps() after reset()
@@ -449,7 +449,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     }
     // Per-item height: text whose style allows wrapping (maxLines > 1) and
     // that overflows its slot grows the row by exactly the extra lines it
-    // USES — measured, not maxLines: a two-line title in a three-line budget
+    // USES - measured, not maxLines: a two-line title in a three-line budget
     // costs one extra line, not two. In a subtitle row the label band takes
     // its wrapped lines and the subtitle, which may itself wrap, moves below
     // them; vertical padding stays what a single-line row carries. Label-only
@@ -777,7 +777,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
               marker, BitmapMode::Contain, props.markerPaint);
         }
       } else {
-        // 12x18 right-pointing triangle, vertically centered — the v1 theme
+        // 12x18 right-pointing triangle, vertically centered - the v1 theme
         // Triangle selection marker geometry.
         const int16_t tx = static_cast<int16_t>(row.x + props.markerInset);
         const int16_t cy = static_cast<int16_t>(row.y + row.height / 2);
@@ -810,7 +810,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     // First index the loop above did NOT lay out. With wrapped rows fewer
     // indexes fit than the fixed-height `visible` estimate, so top + visible
     // would preview an item past the real next one (skipping the rows in
-    // between — pressing Next then selects a different item than previewed).
+    // between - pressing Next then selects a different item than previewed).
     const uint16_t partialIndex = static_cast<uint16_t>(top + consumedIndexes);
     const int16_t remainingH = static_cast<int16_t>(rowArea.bottom() - cursorY);
     if (partialIndex < props.count && partialIndex >= props.itemsWindowFirst &&

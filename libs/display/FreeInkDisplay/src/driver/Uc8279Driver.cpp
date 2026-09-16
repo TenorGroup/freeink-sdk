@@ -96,7 +96,7 @@ void Uc8279Driver::triggerGrayRefresh(EpdBus& bus, bool turnOff) {
 // The stock init (FUN_42014ad4): a blank-MTP module needs the full register
 // bring-up. PSR 0x3F sets REG=1 (external LUT); the PTL window defines the
 // active 792x528 area in place of TRES; PWR/VDCS supply the drive rails without
-// which nothing develops. No plane seed here — the first refresh writes both.
+// which nothing develops. No plane seed here - the first refresh writes both.
 void Uc8279Driver::initController(EpdBus& bus) {
   sendScript(bus, kUc8279X3_Init, sizeof(kUc8279X3_Init));
   _isScreenOn = false;
@@ -121,7 +121,7 @@ void Uc8279Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, 
 
 bool Uc8279Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
   (void)prev;  // single-buffer: DTM1 holds the previous frame from displayFinish()'s sync
-  // GC vs DU is ONLY a waveform-bank choice — BOTH diff the new frame against the
+  // GC vs DU is ONLY a waveform-bank choice - BOTH diff the new frame against the
   // REAL previous frame in DTM1 (the live stock full path FUN_42015786 loads
   // BW_GC and never touches DTM1; BW_GC's WW!=KW / WK!=KK, so it clears via the
   // true old->new transition, not a white baseline). Forcing DTM1 white made a
@@ -145,7 +145,7 @@ bool Uc8279Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t* p
   bus.cmd(CMD_DATA_STOP);
 
   // Refresh setup (RE order, FUN_42015786 GC / FUN_4201580a DU): CDI, then the
-  // waveform bank. NEITHER B/W path writes E0/E5 — those (0x02/0x5A) belong only
+  // waveform bank. NEITHER B/W path writes E0/E5 - those (0x02/0x5A) belong only
   // to the AA pre-conditioning pass (FUN_42015944), not plain GC/DU refreshes.
   bus.cmd(CMD_VCOM_DATA_INTERVAL);
   bus.data(_firstRefresh ? kUc8279X3_CdiFirst : kUc8279X3_CdiLater);
@@ -179,11 +179,11 @@ void Uc8279Driver::displayFinish(EpdBus& bus, const uint8_t* fb) {
   bus.data(kUc8279X3_CdiLater);
 
   // Sync the OLD plane with the just-displayed frame so the NEXT refresh (GC or
-  // DU) diffs against the real on-screen content — the core of clean clears and
+  // DU) diffs against the real on-screen content - the core of clean clears and
   // ghost-free fast page turns. This MUST happen while still inside the PTIN
   // partial window (before PTOUT): the DTM2 write in displayStart is windowed
   // (792x528 addressing), so DTM1 must use the same window or the two planes
-  // misalign and the DU diff drives garbage (the new frame never appears — a
+  // misalign and the DU diff drives garbage (the new frame never appears - a
   // full-frame GC hides this because it flashes every pixel regardless).
   bus.sendPlaneFlipped(CMD_DTM1, fb, _h, _wb);
   bus.cmd(CMD_DATA_STOP);
@@ -251,7 +251,7 @@ void Uc8279Driver::writeGrayscalePlaneStrip(EpdBus& bus, GrayPlane plane, const 
   if (!rows || numRows == 0 || yStart >= _h || numRows > _h - yStart) return;
   // PTL partial-window in GATE space (logical row y lives at gate H-1-y), rows
   // emitted bottom-first so they land on the same gates the full-frame write
-  // uses — same idiom as the UC8253 sibling (fixes AA banding).
+  // uses - same idiom as the UC8253 sibling (fixes AA banding).
   const uint8_t ramCmd = (plane == GrayPlane::Lsb) ? CMD_DTM1 : CMD_DTM2;
   const uint16_t xEnd = static_cast<uint16_t>(_w - 1);
   const uint16_t yEndLogical = static_cast<uint16_t>(yStart + numRows - 1);
@@ -302,9 +302,21 @@ void Uc8279Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, con
   bus.cmd(CMD_PARTIAL_OUT);
 
   _firstRefresh = false;
-  _oldPlaneValid = false;  // gray planes overwrote DTM1/DTM2 — next B/W needs a rebase/clear
+  _oldPlaneValid = false;  // gray planes overwrote DTM1/DTM2 - next B/W needs a rebase/clear
   _forceFullSyncNext = factoryMode;
   _lsbValid = false;
+}
+
+void Uc8279Driver::beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode mode, RefreshMode fallback,
+                                  bool turnOff) {
+  if (mode == GrayscaleMode::Absolute) {
+    // XTH4 supplies all four target levels in one waveform. Stage both planes
+    // before activation; the overlay's B/W and preconditioning passes are redundant.
+    _lsbValid = false;
+    _inGrayscaleMode = false;
+    return;
+  }
+  displayGrayscaleBase(bus, fb, fallback, turnOff);
 }
 
 void Uc8279Driver::displayGrayscaleBase(EpdBus& bus, const uint8_t* fb, RefreshMode fallback, bool turnOff) {

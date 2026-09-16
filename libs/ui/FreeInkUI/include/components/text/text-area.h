@@ -127,7 +127,7 @@ inline uint16_t textAreaVisibleLines(Rect rect, int16_t lineHeight) {
 }
 
 // Adjusts topLine the minimal amount so caretLine is visible, then clamps to the
-// valid scroll range — the textArea analogue of listTopIndexFor().
+// valid scroll range - the textArea analogue of listTopIndexFor().
 inline uint32_t textAreaTopLineFor(uint32_t caretLine, uint32_t topLine, uint16_t visibleLines, uint32_t lineCount) {
   if (visibleLines == 0) return 0;
   const uint32_t maxTop = lineCount > visibleLines ? lineCount - visibleLines : 0;

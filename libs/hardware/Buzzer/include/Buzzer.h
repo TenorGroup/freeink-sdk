@@ -4,7 +4,7 @@
 //
 // Drives the passive buzzer on BoardConfig::ACTIVE.audio.buzzer (e.g. the
 // Sticky's GPIO48, Murphy's GPIO46) as a square-wave tone generator via the
-// ESP32 LEDC peripheral — the same approach as the vendor demo. This is a tone
+// ESP32 LEDC peripheral - the same approach as the vendor demo. This is a tone
 // device, NOT PCM audio, so it is independent of AudioManager (which streams WAV
 // through an I2S codec). Boards without a buzzer (FREEINK_CAP_BUZZER off, or the
 // buzzer pin unassigned) link stub bodies and present() returns false.

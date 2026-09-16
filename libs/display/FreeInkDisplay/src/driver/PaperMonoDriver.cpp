@@ -187,7 +187,7 @@ void PaperMonoDriver::begin(EpdBus& bus) {
   bus.reset();
   initController(bus);
   _needsFull = true;
-  // The first paints after boot (splash, then whatever replaces it — the one
+  // The first paints after boot (splash, then whatever replaces it - the one
   // that must erase the dwelled logo) each get extra drive passes so pre-boot
   // and splash residue doesn't ghost through (see runBootCleanPass()). Three
   // paints so an intermediate progress paint can't exhaust the budget before
@@ -481,7 +481,7 @@ uint16_t PaperMonoDriver::makeTriLut(uint8_t out[111], bool bgTopUp) const {
       lut.setVs(3, group, phase, VS_WHITE);
     }
     // Overlay passes leave entry 0 fully idle: there, entry 0 holds every
-    // undriven pixel — including unchanged BLACK text, not just background —
+    // undriven pixel - including unchanged BLACK text, not just background -
     // and the white-biased top-up would visibly bleach it each page.
     if (topUp && bgTopUp) {
       lut.setVs(0, group, 0, VS_BLACK);
@@ -559,8 +559,8 @@ bool PaperMonoDriver::runOtpUpdate(EpdBus& bus, const uint8_t* bwTarget, bool fo
   }
 
   // Only "did anything change at all" gates the update; the exact bit count is
-  // a log statistic. __builtin_popcount does not inline on Xtensa — it compiles
-  // to a windowed callx8 into ROM's __popcountsi2 — so accumulating it per byte
+  // a log statistic. __builtin_popcount does not inline on Xtensa - it compiles
+  // to a windowed callx8 into ROM's __popcountsi2 - so accumulating it per byte
   // cost one function call per byte of the framebuffer on every refresh. OR the
   // masks together instead, and pay for popcount only when a log will print it.
   uint8_t changedBits = 0;
@@ -568,7 +568,7 @@ bool PaperMonoDriver::runOtpUpdate(EpdBus& bus, const uint8_t* bwTarget, bool fo
   // white->black transition's light residue parks, and with no flashing
   // corrective on this panel it accumulates without bound. Present those
   // pixels as old-white so the OTP waveform runs its full white->black drive
-  // and re-blackens the background on every update — the drive is optically
+  // and re-blackens the background on every update - the drive is optically
   // invisible on an already-black pixel. This mirrors what the tri path
   // already does (it drives every non-white pixel per page). The repeated
   // black-going impulse on static background is a deliberate DC imbalance in
@@ -652,7 +652,7 @@ bool PaperMonoDriver::runUpdate(EpdBus& bus, const uint8_t* bwTarget, bool useGr
   // This removes the dominant full-background flash without letting stable
   // text fade. Stage 2 explicitly treats both entries 0 and 1 as white.
   // See runOtpUpdate(): popcount is a ROM call on Xtensa, and both counters are
-  // log-only — `changed` is otherwise tested just for zero, `driven` is never
+  // log-only - `changed` is otherwise tested just for zero, `driven` is never
   // read at all. Keeping them out of the release build removes two calls per
   // framebuffer byte from the hottest loop in a gray page turn.
   uint8_t changedBits = 0;
@@ -670,7 +670,7 @@ bool PaperMonoDriver::runUpdate(EpdBus& bus, const uint8_t* bwTarget, bool useGr
     const uint8_t changedMask = static_cast<uint8_t>((old24 ^ q24) | (old26 ^ q26));
     // Overlay: the B/W base already reached the glass through its own OTP
     // activation (the host displayed it before staging gray planes), so only
-    // the pixels whose class actually changes — the AA grays — may be driven.
+    // the pixels whose class actually changes - the AA grays - may be driven.
     // Re-driving the whole non-white body here is what reads as a full-screen
     // flash. The combined single-activation path keeps `| q24` because there
     // the tri waveform is the only drive the page gets.

@@ -1,11 +1,11 @@
 #pragma once
 
-// FreeInk SDK — Liang-pattern hyphenation for FreeInkBook.
+// FreeInk SDK - Liang-pattern hyphenation for FreeInkBook.
 //
 // The matcher runs over FIBH pattern data compiled offline by tools/hyphc.py
 // from TeX hyph-utf8 pattern files (the same data KOReader and LibreOffice
 // use, permissively licensed per language). The data is borrowed, not copied
-// — point it at flash, PSRAM, or an arena-loaded file — and matching itself
+// - point it at flash, PSRAM, or an arena-loaded file - and matching itself
 // allocates nothing: it walks a sorted pattern table with an incremental
 // binary search per character.
 //
@@ -42,7 +42,7 @@ class Hyphenator {
   uint32_t patternCount_ = 0;
   uint8_t maxPatLen_ = 0;
 
-  static constexpr uint32_t kMaxWord = 64;  // bytes — Cyrillic runs 2 bytes/char
+  static constexpr uint32_t kMaxWord = 64;  // bytes - Cyrillic runs 2 bytes/char
   static constexpr uint8_t kLeftMin = 2;
   static constexpr uint8_t kRightMin = 3;
 };

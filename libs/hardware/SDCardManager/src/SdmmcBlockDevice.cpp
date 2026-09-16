@@ -20,7 +20,7 @@ bool SdmmcBlockDevice::begin(const BoardConfig::SdmmcPins& pins) {
   // Host config matches the OEM (recovered from app1's mountSD via Ghidra): full
   // default capability flags (0x37) with the actual width selected via slot.width
   // only, and the data clock at 40 MHz. The read timeouts we chased earlier were a
-  // mount-sequencing problem, not a clock-margin one — see the retry loop below.
+  // mount-sequencing problem, not a clock-margin one - see the retry loop below.
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
   host.max_freq_khz = SDMMC_FREQ_DEFAULT;  // 40 MHz
 
@@ -44,8 +44,8 @@ bool SdmmcBlockDevice::begin(const BoardConfig::SdmmcPins& pins) {
 
   // NOTE: we used to force gpio_pullup_en() on CMD/DAT0 here (the slot's
   // INTERNAL_PULLUP flag doesn't always engage on GPIO-matrix SDMMC pins). It proved
-  // redundant once the GPIO5 power-cycle below was in place — old-batch units mount
-  // fine without it — and it deviated from the OEM (slot flag only), a suspected
+  // redundant once the GPIO5 power-cycle below was in place - old-batch units mount
+  // fine without it - and it deviated from the OEM (slot flag only), a suspected
   // cause of "no card in" on newer socket revisions. Removed.
 
   auto* card = static_cast<sdmmc_card_t*>(malloc(sizeof(sdmmc_card_t)));
@@ -76,7 +76,7 @@ bool SdmmcBlockDevice::begin(const BoardConfig::SdmmcPins& pins) {
     return false;
   }
 
-  // Retry the WHOLE mount — init AND a real sector-0 read — power-cycling the
+  // Retry the WHOLE mount - init AND a real sector-0 read - power-cycling the
   // configured gate before
   // each attempt, mirroring the OEM mountSD. Retrying only card_init leaves SdFat's
   // first (un-retried) block read to hit a still-marginal data path and fail with
@@ -92,7 +92,7 @@ bool SdmmcBlockDevice::begin(const BoardConfig::SdmmcPins& pins) {
     }
     esp_err_t e = sdmmc_card_init(&host, card);
     if (e != ESP_OK && card->csd.capacity == 0) {
-      mountErr = e;  // failed before CSD — nothing to read; power-cycle and retry
+      mountErr = e;  // failed before CSD - nothing to read; power-cycle and retry
       continue;
     }
     // CSD is valid (capacity known); prove real block I/O before committing.

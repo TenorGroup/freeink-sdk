@@ -124,7 +124,7 @@ class PaperMonoDriver final : public PanelDriver {
   // runs its required activations plus optional endpoint post-clean, and waits
   // them out. Returns true when a waveform actually ran. overlayOnly restricts
   // the drive set to changed pixels (the AA grays) for the follow-up pass after
-  // a separately displayed B/W base — see displayGray().
+  // a separately displayed B/W base - see displayGray().
   bool runUpdate(EpdBus& bus, const uint8_t* bwTarget, bool useGray, bool corrective, bool overlayOnly = false);
   void stashTarget(const uint8_t* fb, RefreshMode mode);
   bool commitPending(EpdBus& bus, bool useGray);

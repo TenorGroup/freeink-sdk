@@ -1,12 +1,12 @@
 #pragma once
 
-// FreeInk SDK — EPUB package parsing for FreeInkBook.
+// FreeInk SDK - EPUB package parsing for FreeInkBook.
 //
 // Streaming parsers for the small XML documents that describe a book:
 // META-INF/container.xml, the OPF package (metadata/manifest/spine), and the
 // table of contents (EPUB 3 nav document or EPUB 2 NCX). Variable-size
-// results use a two-pass parse — count, allocate exact arrays from the book
-// arena, fill — so nothing is over-reserved and nothing reallocates. The
+// results use a two-pass parse - count, allocate exact arrays from the book
+// arena, fill - so nothing is over-reserved and nothing reallocates. The
 // documents are tiny, so the second inflate is cheap.
 
 #include <stddef.h>
@@ -51,7 +51,7 @@ BookStatus parseNcxToc(BookSource& source, const ZipEntry& entry, const char* do
 //
 // resolveHref percent-decodes `href`, resolves it against `baseDir` handling
 // "." and "..", strips any #fragment (returned separately, arena-owned), and
-// returns the container-absolute path (arena-owned) — or nullptr on overflow
+// returns the container-absolute path (arena-owned) - or nullptr on overflow
 // or arena exhaustion.
 const char* resolveHref(Arena& arena, const char* baseDir, const char* href,
                         const char** fragmentOut);

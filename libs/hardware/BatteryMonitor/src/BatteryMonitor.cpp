@@ -271,11 +271,11 @@ bool readGaugeMillivolts(uint16_t& out) {
 
 // Charging state for an I2C-gauge board, from the active board's gauge config.
 // Two sources, in order of preference:
-//   1. A dedicated charger IC (BQ25896): CHRG_STAT in REG0B[4:3] — 01 pre-charge
+//   1. A dedicated charger IC (BQ25896): CHRG_STAT in REG0B[4:3] - 01 pre-charge
 //      or 10 fast-charge means charging. Used by LilyGo T5 S3.
 //   2. Gauge-native fallback (BQ27220 Current(), signed mA): current flowing INTO
 //      the battery (> 0) means charging. Lets boards with a gauge but NO charger
-//      IC — e.g. Xteink X3 — still report charge status. Current() is used rather
+//      IC - e.g. Xteink X3 - still report charge status. Current() is used rather
 //      than the BatteryStatus DSG bit because DSG also clears during rest, so it
 //      can't tell "charging" from "idle"; the current sign can.
 // `known` is set false only when neither source responds (transient I2C failure or
@@ -329,7 +329,7 @@ namespace {
 // Level meaning "charging" on the charge-status pin, per the active board's
 // polarity. Active-low /STAT lines are open-drain and need the internal
 // pull-up; an active-high STAT (X4 Pro GPIO21) is push-pull driven with no
-// pull — stock reads it bare, and a pull-up would fake "charging" if the
+// pull - stock reads it bare, and a pull-up would fake "charging" if the
 // driver ever tri-states.
 int chargeActiveLevel() {
   return BoardConfig::ACTIVE.batteryChargeStatusActiveHigh ? HIGH : LOW;
@@ -415,7 +415,7 @@ BatteryMonitor::Status BatteryMonitor::readStatus() const {
       status.millivolts = mv;
     }
     // Charging: from a dedicated charger IC when present, else the gauge's own
-    // Current() sign — so gauge-only boards (X3) report it too. A gauge that
+    // Current() sign - so gauge-only boards (X3) report it too. A gauge that
     // cannot observe charging at all (CW2017) leaves chargingKnown false; fall
     // back to the charger's STAT pin when the board has one (X4 Pro GPIO21).
     bool chargingKnown = false;
@@ -501,7 +501,7 @@ bool BatteryMonitor::isCharging() const {
   // Gauge boards: prefer a charger IC's status (BQ25896), else fall back to the
   // gauge's own Current() sign, so a board with a gauge but no charger IC (e.g.
   // X3) still reports charging. A gauge that cannot observe charging at all
-  // (CW2017) reports unknown — fall through to the STAT pin below (X4 Pro
+  // (CW2017) reports unknown - fall through to the STAT pin below (X4 Pro
   // GPIO21). Failed reads report false.
   if (BoardConfig::ACTIVE.batteryGauge.gaugeAddr != 0) {
     bool known = false;

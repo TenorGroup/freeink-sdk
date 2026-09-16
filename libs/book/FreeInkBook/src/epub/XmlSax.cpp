@@ -1,4 +1,4 @@
-// FreeInkBook — expat-backed streaming XML parse of ZIP entries.
+// FreeInkBook - expat-backed streaming XML parse of ZIP entries.
 
 #include "epub/XmlSax.h"
 
@@ -84,7 +84,7 @@ void XmlSaxSession::close() {
     XML_ParserFree(static_cast<XML_Parser>(parser_));
     parser_ = nullptr;
   }
-  // buf_/filter_ are arena allocations — reclaimed by the arena owner.
+  // buf_/filter_ are arena allocations - reclaimed by the arena owner.
   buf_ = nullptr;
   filter_ = nullptr;
   handler_ = nullptr;

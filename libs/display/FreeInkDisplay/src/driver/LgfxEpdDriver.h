@@ -2,7 +2,7 @@
 
 // Raw-parallel EPD driver via LovyanGFX (bundled in M5GFX).
 //
-// For panels with NO on-glass controller/RAM — the MCU clocks every row/column
+// For panels with NO on-glass controller/RAM - the MCU clocks every row/column
 // over the ESP32-S3 LCD (i80) peripheral and an external PMIC generates the
 // waveform rails. The LilyGo T5 S3 4.7" (ED047TC1, 960x540, 16-gray) is the
 // reference. This is a different class from the SPI single-chip controllers

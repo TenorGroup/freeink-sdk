@@ -30,7 +30,7 @@ enum class KeyboardLayoutId : uint8_t {
   //
   // The four differ only in which letters occupy a handful of slots. Ukrainian
   // reaches ґ, and Kazakh its nine extra letters, by long-press rather than
-  // dedicated keys — a 480px panel has no room for a wider grid.
+  // dedicated keys - a 480px panel has no room for a wider grid.
   CyrillicRu,
   CyrillicUk,
   CyrillicBe,
@@ -65,6 +65,7 @@ struct KeyboardLayout {
 };
 
 struct KeyboardProps {
+  bool alignedColumns = false;
   const KeyboardLayout* layout = nullptr;
   ActionId keyAction = NO_ACTION;
   ActionId shiftAction = NO_ACTION;
@@ -94,14 +95,14 @@ struct KeyboardProps {
   uint8_t keyRadius = 0;
   // Extra hit area below the last row's keys. Fingers occlude the key being
   // pressed and land low, and the last row has no key beneath it to catch the
-  // miss — extend its hit band down to whatever sits below (hints bar, screen
+  // miss - extend its hit band down to whatever sits below (hints bar, screen
   // edge). Visual rects are unchanged.
   int16_t bottomHitOverflow = 0;
   bool inactiveSelection = false;
 };
 
 // `numberRow` prepends a dedicated digit row (with shift-symbol alternates on
-// long-press) to the letter layers — for entry fields where digits must stay
+// long-press) to the letter layers - for entry fields where digits must stay
 // one tap away (passwords, hosts, ports). The symbol layers already carry
 // digits, so they ignore the flag. Shift swaps the row to symbols-primary on
 // QwertyEn and picks the uppercase layer on the Cyrillic layouts; FR/DE/ES keep
@@ -118,16 +119,16 @@ const KeyboardLayout& builtinKeyboardLayout(KeyboardLayoutId id, bool shifted = 
 
 // The UTF-8 text a key id inserts under the given layout (nullptr for
 // shift/mode/delete/OK and unknown ids). Keys report stable ids in
-// ActionEvent::value — ASCII keys their code point, localized keys (é, ñ, ß)
-// ids above 1000 — so casting the value to char corrupts non-ASCII layouts;
+// ActionEvent::value - ASCII keys their code point, localized keys (é, ñ, ß)
+// ids above 1000 - so casting the value to char corrupts non-ASCII layouts;
 // always insert through this lookup.
 const char* keyboardOutputFor(const KeyboardLayout& layout, int16_t value);
 
 // The UTF-8 alternate a key id inserts on long-press. Explicit KeyboardKey::alt
 // wins; letter keys without one fall back to the opposite case (the
-// phone-keyboard hold-for-capital convention) — ASCII a-z/A-Z and Cyrillic
+// phone-keyboard hold-for-capital convention) - ASCII a-z/A-Z and Cyrillic
 // U+0410..U+044F plus Ё/ё. Returns nullptr when the key has no alternate. The
-// case-flip result lives in a static buffer — call from one task (the UI loop),
+// case-flip result lives in a static buffer - call from one task (the UI loop),
 // and consume before the next call.
 const char* keyboardAltOutputFor(const KeyboardLayout& layout, int16_t value);
 
@@ -154,7 +155,7 @@ struct KeyboardActivation {
 };
 
 inline KeyboardActivation keyboardActivationFor(const KeyboardLayout& layout, const int16_t value,
-                                                 const bool longPress = false) {
+                                                const bool longPress = false) {
   for (uint8_t row = 0; row < layout.rowCount; ++row) {
     for (uint8_t col = 0; col < layout.rows[row].count; ++col) {
       const KeyboardKey& key = layout.rows[row].keys[col];
@@ -164,8 +165,8 @@ inline KeyboardActivation keyboardActivationFor(const KeyboardLayout& layout, co
         case KeyKind::Space: {
           const char* text = longPress ? keyboardAltOutputFor(layout, value) : nullptr;
           if (!text) text = keyboardOutputFor(layout, value);
-          return KeyboardActivation{text ? KeyboardActivationKind::Text : KeyboardActivationKind::None,
-                                    text, value, longPress};
+          return KeyboardActivation{text ? KeyboardActivationKind::Text : KeyboardActivationKind::None, text, value,
+                                    longPress};
         }
         case KeyKind::Shift:
           return KeyboardActivation{KeyboardActivationKind::Shift, nullptr, value, longPress};
@@ -289,11 +290,11 @@ inline size_t utf8NextBoundary(const char* text, const size_t length, size_t pos
 // broken next to a 1s panel refresh) and swallows the eventual release.
 //
 // Feed one update() per loop pass from the app's level-triggered touch state:
-//   pressedDown  — a tap-candidate contact is currently on the screen
+//   pressedDown  - a tap-candidate contact is currently on the screen
 //                  (true EVERY pass while held, not just the first)
-//   tapped       — a tap release was reported this pass
-//   inContact    — any contact is present (ungated; catches swipe drift)
-// The router latches transitions itself — feeding level-triggered signals is
+//   tapped       - a tap release was reported this pass
+//   inContact    - any contact is present (ungated; catches swipe drift)
+// The router latches transitions itself - feeding level-triggered signals is
 // the point, since getting that latch wrong (restarting the hold timer every
 // pass) is the natural bug every hand-rolled version hits.
 //
@@ -343,7 +344,7 @@ class TouchHoldRouter {
         // Tap slop means the release can land off the pressed key (fingers
         // occlude and slide low on e-paper). A tap is bounded by the slop
         // radius, so dispatching the key the press landed on is what the
-        // user meant — a >slop drag is a swipe and never reaches here.
+        // user meant - a >slop drag is a swipe and never reaches here.
         if (!result.event && heldActive >= 0) {
           const Interaction& held = interactions.publishedData()[heldActive];
           if (!hasState(held.state, StateDisabled) && acceptsInput(held.inputMask, InputTouch)) {
@@ -356,7 +357,7 @@ class TouchHoldRouter {
 
     if (pressedDown) {
       // A long-press already dispatched for this contact: hold everything
-      // (including the timer — the synthesized release cleared the active
+      // (including the timer - the synthesized release cleared the active
       // index, which must not read as a key change) until the finger lifts.
       if (longFired_) return result;
 
@@ -510,7 +511,8 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
   rect = rect.inset(props.padding);
   if (rect.empty() || rect.width < 10 || rect.height < 10) return;
   const int16_t gap = props.gap < 0 ? 0 : props.gap;
-  const int16_t rowH = static_cast<int16_t>((rect.height - gap * (props.layout->rowCount - 1)) / props.layout->rowCount);
+  const int16_t rowH =
+      static_cast<int16_t>((rect.height - gap * (props.layout->rowCount - 1)) / props.layout->rowCount);
   int16_t logicalIndex = 0;
 
   auto actionFor = [&](KeyKind kind) {
@@ -529,9 +531,8 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     if (!key.enabled || key.kind == KeyKind::Disabled) state |= StateDisabled;
     const ActionId action = actionFor(key.kind);
     ButtonProps bp;
-    bp.label = (key.kind == KeyKind::Space || key.kind == KeyKind::Delete || key.kind == KeyKind::Lang)
-                   ? nullptr
-                   : key.label;
+    bp.label =
+        (key.kind == KeyKind::Space || key.kind == KeyKind::Delete || key.kind == KeyKind::Lang) ? nullptr : key.label;
     if (key.kind == KeyKind::Ok && props.okLabel) bp.label = props.okLabel;
     if (key.kind == KeyKind::Shift && props.shiftLabel) bp.label = props.shiftLabel;
     if (key.kind == KeyKind::Mode && props.modeLabel) bp.label = props.modeLabel;
@@ -549,13 +550,13 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
 
     // Delete and the script switch carry a glyph instead of a word: both mean
     // the same thing in every language, and the switch key in particular has
-    // no label the table could hold — which layout comes next is the app's
+    // no label the table could hold - which layout comes next is the app's
     // state, not the table's.
     if (key.kind == KeyKind::Delete || key.kind == KeyKind::Lang) {
       // Size the glyph from the label font so it reads at the same weight as
       // neighboring key labels; the source art carries ~3px of internal
       // margin, so the box runs slightly over the line height. Snap to an
-      // integer multiple of 16 — non-integer nearest-neighbor scaling doubles
+      // integer multiple of 16 - non-integer nearest-neighbor scaling doubles
       // some rows of the mask and not others, which reads as a ragged
       // upscale.
       const Paint ink = styles.resolve(frame.stateFor(action, key.value, state)).foreground;
@@ -587,7 +588,7 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
 
     if (key.kind != KeyKind::Space) return;
     // Keys draw no background here, so the eye measures the gap between
-    // glyphs, not between key rects — a rule much shorter than its key reads
+    // glyphs, not between key rects - a rule much shorter than its key reads
     // as a hole beside its neighbours.
     const Paint ink = styles.resolve(frame.stateFor(action, key.value, state)).foreground;
     const int16_t cx = static_cast<int16_t>(keyRect.x + keyRect.width / 2);
@@ -597,10 +598,25 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
                         Point{static_cast<int16_t>(cx + half), static_cast<int16_t>(cy + 3)}, 3, ink);
   };
 
+  uint8_t gridColumns = 0;
+  if (props.alignedColumns) {
+    for (uint8_t row = 0; row < props.layout->rowCount; ++row)
+      if (props.layout->rows[row].count > gridColumns) gridColumns = props.layout->rows[row].count;
+  }
   for (uint8_t row = 0; row < props.layout->rowCount; ++row) {
     const KeyboardRow& layoutRow = props.layout->rows[row];
     if (!layoutRow.keys || layoutRow.count == 0) continue;
     rowHitOverflow = row == props.layout->rowCount - 1 ? props.bottomHitOverflow : 0;
+    // Letter and digit rows share column centres. The shorter action row
+    // retains its wide Space/OK controls.
+    if (props.alignedColumns && layoutRow.count >= 7 && gridColumns) {
+      const int16_t cell = static_cast<int16_t>((rect.width + gap) / gridColumns);
+      const int16_t y = static_cast<int16_t>(rect.y + row * (rowH + gap));
+      for (uint8_t col = 0; col < layoutRow.count; ++col)
+        drawKey(Rect{static_cast<int16_t>(rect.x + col * cell), y, static_cast<int16_t>(cell - gap), rowH},
+                layoutRow.keys[col], logicalIndex++);
+      continue;
+    }
     uint16_t units = static_cast<uint16_t>(layoutRow.insetUnits * 2);
     for (uint8_t col = 0; col < layoutRow.count; ++col) {
       units = static_cast<uint16_t>(units + (layoutRow.keys[col].widthUnits ? layoutRow.keys[col].widthUnits : 1));
@@ -612,8 +628,8 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     for (uint8_t col = 0; col < layoutRow.count; ++col) {
       const KeyboardKey& key = layoutRow.keys[col];
       const uint8_t keyUnits = key.widthUnits ? key.widthUnits : 1;
-      const int16_t w = col == layoutRow.count - 1 ? static_cast<int16_t>(rowRight - x)
-                                                   : static_cast<int16_t>(unitW * keyUnits);
+      const int16_t w =
+          col == layoutRow.count - 1 ? static_cast<int16_t>(rowRight - x) : static_cast<int16_t>(unitW * keyUnits);
       drawKey(Rect{x, y, w, rowH}, key, logicalIndex++);
       x = static_cast<int16_t>(x + w + gap);
     }

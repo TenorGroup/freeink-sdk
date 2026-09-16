@@ -48,8 +48,8 @@ void settingRow(Frame<MaxInteractions>& frame, Rect rect, const SettingRowProps&
 
   Rect content = rect.inset(Insets{0, props.sidePadding, 0, props.sidePadding});
 
-  // Slot layout: the label owns a "title band" and every accessory — icon,
-  // chevron, value — aligns to that band, not the row's vertical middle. With
+  // Slot layout: the label owns a "title band" and every accessory - icon,
+  // chevron, value - aligns to that band, not the row's vertical middle. With
   // a subtitle the label+subtitle block centers in the row and the subtitle
   // spans the full content width under the accessories, so it never collides
   // with them.

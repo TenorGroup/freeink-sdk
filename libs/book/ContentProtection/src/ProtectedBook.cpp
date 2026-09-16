@@ -147,7 +147,7 @@ bool ProtectedBook::unwrapBookKey(Crypto& crypto, const Credential& identity, ui
     const long nonce = strtol(rights_.keyType.c_str(), nullptr, 10);
     // keyType is attacker-controlled (from rights.xml); C++ % keeps the sign, so
     // a negative value would make `remainder` negative and drive the memcpys out
-    // of bounds. Normalize into [0,16) — matches the reference's unsigned rotate.
+    // of bounds. Normalize into [0,16) - matches the reference's unsigned rotate.
     const int remainder = static_cast<int>(((nonce % 16) + 16) % 16);
 
     uint8_t key[16];
@@ -343,7 +343,7 @@ bool ProtectedBook::scanEncryptionXml(ByteSource& source, const ZipEntryInfo& en
   uint8_t* outBuf = bufs + kChunk;
 
   // Tag-level scan. Inter-tag text is discarded; only element attributes
-  // matter here. `carry` holds an unterminated tag across chunk boundaries —
+  // matter here. `carry` holds an unterminated tag across chunk boundaries -
   // manifest tags run ~200 bytes, so a tag that never closes within the cap
   // is a malformed document, not a real split.
   std::string carry;

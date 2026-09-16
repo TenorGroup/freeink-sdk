@@ -18,7 +18,7 @@ namespace {
 constexpr uint32_t CODEC_I2C_HZ = 100000;  // OEM bus speed (shared with touch)
 constexpr size_t READ_CHUNK = 1024;        // mono source bytes per loop pass
 
-// ES8388 playback init recovered from the Murphy OEM firmware — exact register
+// ES8388 playback init recovered from the Murphy OEM firmware - exact register
 // order matters (staged mute -> clocks/format -> mixers -> power -> unmute).
 struct RegVal {
   uint8_t reg, val;
@@ -37,7 +37,7 @@ constexpr uint8_t ES8388_VOL_MAX_REG = 0x21;  // register full-scale for OUT vol
 // (_speaker_enabled_cb_papercolor). The codec derives its internal MCLK from
 // BCLK (reg 0x01 bit7 + reg 0x02 MULT_PRE=3, i.e. 32*fs * 8 = 256*fs), so no
 // MCLK line is needed and the same init covers every sample rate. The 16-bit
-// I2S SDP format (0x09) is set explicitly — M5Unified relies on the default.
+// I2S SDP format (0x09) is set explicitly - M5Unified relies on the default.
 constexpr RegVal ES8311_INIT[] = {
     {0x00, 0x80},  // RESET: CSM power on, slave mode
     {0x01, 0xB5},  // CLK_MANAGER: internal MCLK from BCLK pin, clocks on
@@ -241,7 +241,7 @@ bool AudioManager::ensureI2s(uint32_t sampleRate) {
   }
 
   i2s_chan_config_t chanCfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-  // Without auto_clear the DMA replays its last buffers on underrun — heard
+  // Without auto_clear the DMA replays its last buffers on underrun - heard
   // as a looping stutter after playback stops.
   chanCfg.auto_clear = true;
   if (i2s_new_channel(&chanCfg, &tx, nullptr) != ESP_OK) return false;
@@ -298,7 +298,7 @@ bool AudioManager::play(const WavSource& source, bool loop) {
 
   // Unmute the DAC (stop() mutes it). Codec writes stay on the caller's core
   // so the shared I2C bus is never touched from the audio task. The speaker
-  // amp comes up in the playback task once silence is flowing — enabling it
+  // amp comes up in the playback task once silence is flowing - enabling it
   // against an idle I2S line is an audible pop.
   codecMute(false);
 
@@ -308,7 +308,7 @@ bool AudioManager::play(const WavSource& source, bool loop) {
   stopRequested_ = false;
   playing_ = true;
 
-  // Same shape as the OEM "musicTask" (high priority, core 0 — the Arduino
+  // Same shape as the OEM "musicTask" (high priority, core 0 - the Arduino
   // loop owns core 1); 8K stack covers the on-stack sample buffers.
   if (xTaskCreatePinnedToCore(taskEntry, "audio_play", 8192, this, 10, &task_, 0) != pdPASS) {
     playing_ = false;
@@ -413,7 +413,7 @@ void AudioManager::taskLoop() {
   }
 
   // Flush silence through every DMA descriptor, then stop the channel
-  // entirely — a merely-idle channel replays stale DMA contents (stutter).
+  // entirely - a merely-idle channel replays stale DMA contents (stutter).
   memset(outBuf, 0, sizeof(outBuf));
   for (int i = 0; i < 6; ++i) {
     size_t written = 0;
@@ -429,7 +429,7 @@ void AudioManager::taskLoop() {
 
 }  // namespace freeink
 
-#else  // !FREEINK_CAP_AUDIO — stubs so callers need no #ifdefs
+#else  // !FREEINK_CAP_AUDIO - stubs so callers need no #ifdefs
 
 namespace freeink {
 bool AudioManager::present() const { return false; }

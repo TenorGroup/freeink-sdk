@@ -1,6 +1,6 @@
 #pragma once
 
-// M5Stack Paper Mono — M5IOE1 I/O expander (PY32L020), single owner.
+// M5Stack Paper Mono - M5IOE1 I/O expander (PY32L020), single owner.
 //
 // The Paper Mono routes most of its power/reset plumbing through this expander
 // on the system I2C bus (SDA47/SCL48, shared with the M5PM1 PMIC at 0x6E, the
@@ -15,7 +15,7 @@
 // N of the 16-bit value = expander pin "IO(N+1)" (schematic PYG(N+1)).
 //
 // The device answers at 0x6F or 0x4F depending on its ADD_SET strap (official
-// schematic says 0x4F, the crosspoint-reader-mono bring-up saw 0x6F) — begin()
+// schematic says 0x4F, the crosspoint-reader-mono bring-up saw 0x6F) - begin()
 // probes both and caches whichever responds.
 
 #include <Arduino.h>
@@ -39,7 +39,7 @@ constexpr uint8_t REG_GPIO_PD_L = 0x0B;    // pull-down enable
 constexpr uint8_t REG_GPIO_DRV_L = 0x13;   // 0 = push-pull, 1 = open-drain
 constexpr uint8_t REG_I2C_CFG = 0x23;      // [4]SPD(1=400k) [3:0]idle-sleep timeout; 0 = stay awake
 // PWM duty pairs (L then H; H byte: [7]EN [6]POL [3:0]duty high). PWM1 drives
-// IO9 (blue LED leg), PWM2 drives IO8 (green) — the pins' alt function.
+// IO9 (blue LED leg), PWM2 drives IO8 (green) - the pins' alt function.
 constexpr uint8_t REG_PWM1_DUTY_L = 0x1B;
 constexpr uint8_t REG_PWM2_DUTY_L = 0x1D;
 
@@ -91,7 +91,7 @@ inline bool begin() {
     uint8_t uid[2] = {0, 0};
     if (readBytesAt(addr, REG_UID_L, uid, sizeof(uid))) {
       g_addr = addr;
-      // Full speed awake: 100 kHz, never idle-sleep (matches the PM1 policy —
+      // Full speed awake: 100 kHz, never idle-sleep (matches the PM1 policy -
       // an idle-slept PY32 slave serves garbage on the first transaction).
       const uint8_t cfg = 0x00;
       writeBytesAt(g_addr, REG_I2C_CFG, &cfg, 1);
@@ -131,7 +131,7 @@ inline bool configureOutputs() {
   if (!begin()) return false;
   // IO8/IO9 (green/blue LED legs) double as the PY32's PWM2/PWM1 outputs, and
   // the stock firmware drives blue through PWM1 as its status light. Like the
-  // PM1's PWR_CFG, the PWM engine state is retained across reflashes — while
+  // PM1's PWR_CFG, the PWM engine state is retained across reflashes - while
   // a channel is enabled it owns the pin and the GPIO writes below never
   // reach it. Disable both channels (duty 0, EN bit clear).
   static constexpr uint8_t pwmOff[2] = {0x00, 0x00};

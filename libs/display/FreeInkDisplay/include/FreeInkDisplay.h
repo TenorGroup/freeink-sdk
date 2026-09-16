@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — display facade.
+// FreeInk SDK - display facade.
 //
 // FreeInkDisplay is the stable, hardware-independent display API the firmware
 // calls. It owns the framebuffer(s) and geometry and delegates every panel
@@ -28,7 +28,7 @@ class FreeInkDisplay {
   FreeInkDisplay(int8_t sclk, int8_t mosi, int8_t cs, int8_t dc, int8_t rst, int8_t busy);
   ~FreeInkDisplay() = default;
 
-  // Refresh modes (public contract — full / balanced-half / fast).
+  // Refresh modes (public contract - full / balanced-half / fast).
   enum RefreshMode { FULL_REFRESH, HALF_REFRESH, FAST_REFRESH };
 
   // Select panel geometry/controller before begin().
@@ -50,7 +50,7 @@ class FreeInkDisplay {
   // 0/black framebuffer bit) to the slot's `colorCode` on complete-waveform
   // refreshes; interrupted refreshes render it as plain ink (color pigments
   // never settle in a cut-off waveform), so accents appear only on standing
-  // images. Up to 4 slots — the lowest slot with a set bit wins on overlap;
+  // images. Up to 4 slots - the lowest slot with a set bit wins on overlap;
   // nullptr clears a slot; the caller owns the buffers. No-op on other panels.
   void setAccentPlaneSlot(uint8_t slot, const uint8_t* plane, uint8_t colorCode);
   // ED2208 Spectra-6 controller color codes for setAccentPlaneSlot().
@@ -82,7 +82,7 @@ class FreeInkDisplay {
   static constexpr uint16_t X3_DISPLAY_HEIGHT = 528;
   static constexpr uint16_t X3_DISPLAY_WIDTH_BYTES = X3_DISPLAY_WIDTH / 8;
   static constexpr uint32_t X3_BUFFER_SIZE = X3_DISPLAY_WIDTH_BYTES * X3_DISPLAY_HEIGHT;
-  // Sized to the largest panel in the build — derived from the device set in the
+  // Sized to the largest panel in the build - derived from the device set in the
   // registry (no device names here). One binary holds whichever panel is
   // runtime-selected; a single-device build gets exactly that panel's size.
   static constexpr uint32_t MAX_BUFFER_SIZE = BoardConfig::MAX_FRAMEBUFFER_BYTES;
@@ -170,7 +170,7 @@ class FreeInkDisplay {
   // promises (a) not to touch the framebuffer until the refresh completes
   // (waitRefreshComplete() / refreshBusy()==false / any blocking call), and
   // (b) to rebuild the controller's differential baseline itself before the
-  // next differential update — e.g. the tiled-grayscale reader path, whose
+  // next differential update - e.g. the tiled-grayscale reader path, whose
   // cleanupGrayscaleBuffers() resyncs the baseline from the framebuffer.
   // In dual-buffer mode this is identical to displayBufferAsync().
   void displayBufferAsyncNoShadow(RefreshMode mode = FAST_REFRESH);
@@ -207,7 +207,7 @@ class FreeInkDisplay {
   // overlap non-SPI work, and completeDisplay() waits it out and performs the
   // post-waveform DTM1 sync + conditioning. On X4 the refresh completes inside
   // triggerDisplay() (short waveform, RED re-seeded inline) and completeDisplay()
-  // is a no-op — matching CrossPoint's behavior. The framebuffer must not be
+  // is a no-op - matching CrossPoint's behavior. The framebuffer must not be
   // overwritten between the two calls; see PanelDriver::displayStart.
   void triggerDisplay(RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
   void completeDisplay();
@@ -217,14 +217,14 @@ class FreeInkDisplay {
   // performs the full update (RAM writes, MASTER_ACTIVATION, buffer swap) but
   // returns while the waveform runs; finishDisplayAsync() sleeps until it
   // completes (busy-wait power/slice hooks active) and clears the pending
-  // state. Between the calls the caller may do CPU/RAM-only work — the write
+  // state. Between the calls the caller may do CPU/RAM-only work - the write
   // framebuffer is free (the swap already happened, the controller scans its
-  // own RAM) — but must issue no display/bus operation; same-task contract as
+  // own RAM) - but must issue no display/bus operation; same-task contract as
   // triggerDisplay()/completeDisplay(). Every blocking display call self-heals
   // by waiting out an unfinished async refresh first (syncPendingAsync()).
   //
-  // On X3, triggerDisplayAsync() falls back to triggerDisplay() — already
-  // non-blocking there, with completeDisplay() as its finish — and
+  // On X3, triggerDisplayAsync() falls back to triggerDisplay() - already
+  // non-blocking there, with completeDisplay() as its finish - and
   // finishDisplayAsync() is a no-op.
   void triggerDisplayAsync(RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
   void finishDisplayAsync();
@@ -245,7 +245,7 @@ class FreeInkDisplay {
 
   // Opt in to X4 fast differential against the controller's retained RED-RAM baseline
   // while the secondary buffer is released. When set, a FAST refresh with no secondary
-  // buffer keeps diffing against RED — the caller must have seeded it with
+  // buffer keeps diffing against RED - the caller must have seeded it with
   // syncRedRamFromFrameBuffer() before releasing. When clear, such a FAST refresh
   // downgrades to HALF (see resolveReleasedMode) so it can't ghost off a stale baseline.
   void setSingleBufferFastDiff(bool enabled) { _singleBufferFastDiff = enabled; }
@@ -314,7 +314,7 @@ class FreeInkDisplay {
   // and re-displaying instead of fully re-rendering. No-op in single-buffer mode.
   void syncWriteBufferFromActive() const;
 
-  // Release the framebuffer(s) — and the single-buffer async shadow — back to
+  // Release the framebuffer(s) - and the single-buffer async shadow - back to
   // the heap. After this call no display operations may be performed until
   // reallocBuffers() (or begin()) runs; the panel keeps showing its last
   // refreshed image. Two intended uses: transient sessions that reboot on
@@ -345,12 +345,12 @@ class FreeInkDisplay {
 
 #ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
   // Release only the secondary (previous-frame) buffer to free ~48-52 KB
-  // temporarily — e.g. during chapter compilation when no rendering is
+  // temporarily - e.g. during chapter compilation when no rendering is
   // happening. Available on every dual-buffer build (not just PSRAM ones):
   // CrossPoint's C3 lends the buffer out of internal DRAM. BW display keeps working.
   // Fast differential refresh continues only if the caller opts in with
   // setSingleBufferFastDiff(true) after seeding RED (syncRedRamFromFrameBuffer) just
-  // before the release; the SSD1677 driver then diffs against — and re-seeds — the
+  // before the release; the SSD1677 driver then diffs against - and re-seeds - the
   // controller's retained RED plane. Without the opt-in a FAST refresh downgrades to
   // HALF (resolveReleasedMode) so it can't ghost off a stale baseline. Grayscale AA is
   // unavailable until restored with reallocSecondaryBuffer(). No-op if already released.
@@ -358,7 +358,7 @@ class FreeInkDisplay {
   bool releaseSecondaryBuffer();
 
   // Reallocate the secondary buffer after releaseSecondaryBuffer(). Seeds it
-  // from the live framebuffer — the on-screen frame in released mode — so the
+  // from the live framebuffer - the on-screen frame in released mode - so the
   // previously-displayed-frame contract holds and the next FAST refresh diffs
   // against a correct RED baseline (seeding white ghosts the first post-realloc
   // page; see the .cpp). Call BEFORE drawing the next frame into the
@@ -373,7 +373,7 @@ class FreeInkDisplay {
   // (same fast-diff/refresh semantics apply), but the block stays owned here
   // and is handed to the caller for scratch use (e.g. a section-build arena).
   // Unlike release/realloc, the memory never enters the heap, so nothing can
-  // allocate inside it and returnSecondaryBuffer() CANNOT fail — the
+  // allocate inside it and returnSecondaryBuffer() CANNOT fail - the
   // realloc-failure / fragmented-hole class of bugs is impossible by
   // construction. Returns nullptr if there is no secondary buffer or it is
   // already lent. *size receives the block size.
@@ -407,7 +407,7 @@ class FreeInkDisplay {
   uint8_t* allocFrameBufferStorage() const;
 #ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
   // Downgrade a FAST request to HALF when the secondary (previous-frame) buffer is
-  // released and the caller hasn't opted into single-buffer fast-diff — mirrors the
+  // released and the caller hasn't opted into single-buffer fast-diff - mirrors the
   // open-x4 EInkDisplay::triggerDisplay downgrade. X4 only; see the .cpp for rationale.
   RefreshMode resolveReleasedMode(RefreshMode mode) const;
 #endif
@@ -445,13 +445,13 @@ class FreeInkDisplay {
   uint8_t* _secondaryLent = nullptr;
   // One-shot, armed by reallocSecondaryBuffer(): the controller's RED RAM still
   // holds the on-screen frame (host allocation never touches controller RAM),
-  // while the fresh secondary may not — the host may have scribbled or cleared
+  // while the fresh secondary may not - the host may have scribbled or cleared
   // the framebuffer between release and realloc (blocking section builds do:
   // image warm + clearScreen before the realloc), so the seed copied there is
   // unproven. The next full-frame FAST must diff against the retained RED
   // baseline (prev = nullptr, single-buffer path; the driver's post-refresh
   // resync then re-establishes BW/RED from the displayed frame) instead of
-  // pushing the unproven secondary into RED — pushing a wrong baseline leaves
+  // pushing the unproven secondary into RED - pushing a wrong baseline leaves
   // undriven pixels: a baked-in ghost of whatever the panel showed (e.g. the
   // indexing popup) until the next absolute waveform. A non-fast update
   // rewrites RED absolutely anyway and just clears the flag.

@@ -1,11 +1,11 @@
 #pragma once
 
-// FreeInk — wolfSSL crypto backend.
+// FreeInk - wolfSSL crypto backend.
 //
 // Compiled only when FREEINK_CONTENT_WOLFSSL is defined (CrossPoint sets it
 // alongside FREEINK_NET_WOLFSSL). wolfSSL build needs: RSA (+ PKCS#8
 // traditional decode), raw RSA ops, AES-CBC, SHA-1/SHA-256, PKCS#12 parse.
-// No TLS, no cert store, no keygen certs — see the implementation notes.
+// No TLS, no cert store, no keygen certs - see the implementation notes.
 
 #include "Crypto.h"
 

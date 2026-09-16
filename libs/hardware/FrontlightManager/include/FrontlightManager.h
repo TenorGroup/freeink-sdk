@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — frontlight manager.
+// FreeInk SDK - frontlight manager.
 //
 // Drives a PWM frontlight described by BoardConfig::ACTIVE.frontlight. Inert on
 // boards without one (e.g. Xteink X4/X3), so it is always safe to construct.
@@ -48,7 +48,7 @@ class FrontlightManager {
 
   // Undo park() at boot so begin() can re-attach the LEDC channels. The release is
   // UNCONDITIONAL: park() latches a digital pad hold that survives deep sleep AND
-  // the wake reset, while _lsParked (a DRAM flag) is lost on reset — so after a
+  // the wake reset, while _lsParked (a DRAM flag) is lost on reset - so after a
   // wake the hold is still present even though _lsParked reads false. Releasing
   // unconditionally (gpio_hold_dis on a non-held pad is a harmless no-op) is the
   // only way to guarantee the held pad is cleared; every other driver releases
@@ -100,7 +100,7 @@ class FrontlightManager {
   // Recompute and write both channels from _brightness + _warmPercent.
   void apply();
 #if FREEINK_DEVICE_EEGO_A4
-  // LM3630A (I2C) frontlight helpers — see FrontlightManager.cpp.
+  // LM3630A (I2C) frontlight helpers - see FrontlightManager.cpp.
   bool lm3630aWrite(uint8_t reg, uint8_t value);
   bool lm3630aRead(uint8_t reg, uint8_t& value);
   bool lm3630aUpdate(uint8_t reg, uint8_t mask, uint8_t value);

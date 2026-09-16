@@ -1,6 +1,6 @@
 #pragma once
 
-// Native framebuffer DrawTarget — renders FreeInkUI with NO external graphics
+// Native framebuffer DrawTarget - renders FreeInkUI with NO external graphics
 // library. This is the default render path for SDK apps: it needs only a raw
 // 1-bit framebuffer you already own (e.g. FreeInkDisplay::getFrameBuffer()), so
 // nothing here depends on CrossPoint's GfxRenderer (that adapter,
@@ -9,7 +9,7 @@
 //
 // Framebuffer convention (matches FreeInkDisplay): 1bpp, MSB-first (bit 7 is the
 // leftmost pixel), row-major, `widthBytes` bytes per row. A SET bit is WHITE, a
-// CLEAR bit is BLACK ink — i.e. clearScreen(0xFF) yields a white page.
+// CLEAR bit is BLACK ink - i.e. clearScreen(0xFF) yields a white page.
 //
 // Text uses the bundled Noto Sans bitmap font (FreeInkUIFont.h). Every font
 // slot defaults to it; call setFont() to swap in your own BitmapFont (see
@@ -22,7 +22,7 @@
 // into the panel's native framebuffer at draw time, so apps lay out a screen in
 // whatever orientation they intend without a separate rotated framebuffer. The
 // constructor takes the PANEL's native dimensions; the 4-arg overload picks a
-// sensible default — a landscape-native panel (width > height, e.g. the Xteink
+// sensible default - a landscape-native panel (width > height, e.g. the Xteink
 // X3/X4) defaults to Portrait so a held-tall e-reader reads upright, while a
 // portrait-native panel keeps its native orientation. Pass an explicit
 // Orientation to the 5-arg overload to override (the rotation transforms match
@@ -35,7 +35,7 @@ namespace freeink {
 namespace ui {
 
 // Runtime glyph provider consulted when the active BitmapFont has no glyph
-// for a codepoint — the path that lets UI chrome render scripts too large to
+// for a codepoint - the path that lets UI chrome render scripts too large to
 // pre-bake (Hangul, CJK) from a TTF on the card. `pixelSize` is the slot's
 // line height so fallback glyphs match each slot's size. Coverage is 8-bit;
 // the target dithers it exactly like its 4-bpp alpha fonts. See
@@ -248,7 +248,7 @@ class DisplayTarget final : public DrawTarget {
 
   const BitmapFont& fontFor(const FontId slot) const { return *fonts_[slot < FONT_SLOTS ? slot : 0]; }
 
-  // 4x4 ordered Bayer matrix (0..15) — reproduces gray levels on a 1-bit panel.
+  // 4x4 ordered Bayer matrix (0..15) - reproduces gray levels on a 1-bit panel.
   // Sampled in logical coordinates so the pattern stays stable per UI.
   static uint8_t bayerAt(const int16_t x, const int16_t y) {
     static constexpr uint8_t kBayer[4][4] = {
@@ -379,7 +379,7 @@ class DisplayTarget final : public DrawTarget {
   }
 
   // Pen advance for a codepoint, mapping the ellipsis to three dots and unknown
-  // codepoints to a visible missing-glyph box — consistent with drawRun().
+  // codepoints to a visible missing-glyph box - consistent with drawRun().
   int16_t runAdvance(const BitmapFont& f, const uint32_t cp) const {
     if (cp == 0x2026) {  // U+2026 HORIZONTAL ELLIPSIS -> "..."
       const FontGlyph* dot = glyphFor(f, '.');
@@ -523,7 +523,7 @@ inline void present(EInkDisplay& display, const RefreshHint hint) {
   }
 }
 
-// Non-blocking present: starts the refresh and returns immediately — the
+// Non-blocking present: starts the refresh and returns immediately - the
 // panel refreshes from its own RAM copy, so keep rendering into the
 // framebuffer while it runs. Pair with display.refreshBusy(): push the next
 // frame once the panel goes idle. This is what keeps touch and typing

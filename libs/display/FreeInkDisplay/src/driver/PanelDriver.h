@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — panel driver interface.
+// FreeInk SDK - panel driver interface.
 //
 // One PanelDriver implementation exists per display controller (SSD1677,
 // UC8253-X3, ED2208-M5, UC8253-Murphy). The FreeInkDisplay facade owns the
@@ -8,7 +8,7 @@
 // controller-specific register sequences, LUTs, timing, and cross-call state.
 //
 // The facade does all framebuffer composition (clear/draw) itself and passes
-// raw buffer pointers in here — drivers only touch hardware. `prev` is the
+// raw buffer pointers in here - drivers only touch hardware. `prev` is the
 // previous frame in dual-buffer mode, or nullptr in single-buffer mode (the
 // controller's own RAM holds the previous frame).
 
@@ -42,7 +42,7 @@ class PanelDriver {
 
   // True for drivers backed by an external library that manages its own SPI /
   // display hardware (e.g. M5GFX, EPD_Painter). When true the facade does NOT
-  // bring up its EpdBus — the driver owns the panel end to end.
+  // bring up its EpdBus - the driver owns the panel end to end.
   virtual bool usesExternalBus() const { return false; }
 
   // --- lifecycle ---
@@ -197,7 +197,7 @@ class PanelDriver {
   // Content-polarity hint: true while the facade is rendering inverted (dark
   // background) frames. Differential drivers idle unchanged pixels, so on a
   // dark background the residue of every white->black transition parks in the
-  // background and accumulates — worst on panels whose corrective pass is
+  // background and accumulates - worst on panels whose corrective pass is
   // non-flashing. Drivers may use this to widen their drive set (re-blacken
   // the unchanged background each update) or bias their deghost direction.
   virtual void setBackgroundHint(bool darkBackground) { (void)darkBackground; }

@@ -1,6 +1,6 @@
 // Host-side unit tests for FreeInkBook Phase 1 (container layer). The engine
 // is freestanding C++, so the ZIP catalog, streaming inflate, and package/TOC
-// parsing run here with no device in the loop — including the memory-ceiling
+// parsing run here with no device in the loop - including the memory-ceiling
 // assertions that keep "RAM is O(one page)" an enforced invariant rather
 // than a hope. Run with test/host/run.sh.
 
@@ -234,7 +234,7 @@ void testMinimalBook(const char* name) {
   CHECK(std::strstr(content, "Call me Ishmael") != nullptr);
   scratch.release(marked);
 
-  // Chapter 2 is generated large (well past the 32 KB inflate window) —
+  // Chapter 2 is generated large (well past the 32 KB inflate window) -
   // stream it whole and verify both ends arrived intact.
   const size_t marked2 = scratch.mark();
   ZipEntryReader big;
@@ -267,7 +267,7 @@ void testMinimalBook(const char* name) {
   CHECK(std::strstr(tail, "</html>") != nullptr);
   scratch.release(marked2);
 
-  // Memory ceilings — the design's headline invariant.
+  // Memory ceilings - the design's headline invariant.
   std::printf("  %-14s bookArena high water %zu B, scratch high water %zu B\n", name,
               bookArena.highWater(), scratch.highWater());
   CHECK(bookArena.highWater() < kBookArenaCeiling);
@@ -290,7 +290,7 @@ void testNcxOnlyBook() {
   CHECK_EQ(book.spineCount(), 1u);
   CHECK_STREQ(book.spineItem(0)->href, "OEBPS/ch1.xhtml");
 
-  // No nav document — the TOC falls back to the EPUB 2 NCX.
+  // No nav document - the TOC falls back to the EPUB 2 NCX.
   CHECK_EQ(book.tocCount(), 1u);
   CHECK_STREQ(book.tocEntry(0)->title, "Erstes Kapitel");
   CHECK_STREQ(book.tocEntry(0)->href, "OEBPS/ch1.xhtml");

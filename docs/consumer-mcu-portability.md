@@ -6,7 +6,7 @@ from `BoardConfig::ACTIVE` or per-driver config, so the SDK hardcodes no chip.
 
 A consumer's own layer can still tie a build to one MCU by hardcoding chip-specific
 code. CrossPoint's HAL is written for the C3 (RISC-V): a `pio run -e m5paper`
-(ESP32-S3) build fails in `lib/hal/*` — not in any SDK library — at three spots.
+(ESP32-S3) build fails in `lib/hal/*` - not in any SDK library - at three spots.
 This document describes those patterns and their MCU-portable forms.
 
 ## Chip-specific patterns and their portable forms
@@ -87,7 +87,7 @@ belongs behind a target guard or in board config, not as a literal in shared cod
 ## Pin sourcing: runtime profile, not compile-time default
 
 `InputManager::POWER_BUTTON_PIN` is `constexpr = BoardConfig::DEFAULT_DEVICE.input.power`
-— the compile-time default device's pin. For a single-device binary that pin is
+- the compile-time default device's pin. For a single-device binary that pin is
 correct; for the X3+X4 (and any multi-device) binary the live pin is
 `BoardConfig::ACTIVE.input.power`. A consumer's sleep/wake code reads the wake pin
 (and any other board pin) from `BoardConfig::ACTIVE`, which the SDK populates per
@@ -118,7 +118,7 @@ freeink::PowerManager::armPowerButtonWakeup();
 esp_deep_sleep_start();
 ```
 
-`PowerManager.cpp` compiles on both targets — the `gpio` branch links in a C3
+`PowerManager.cpp` compiles on both targets - the `gpio` branch links in a C3
 build, the `ext1` branch in an S3 build. CrossPoint's `HalGPIO::startDeepSleep`
 uses it; `HalPowerManager::startDeepSleep` is the other call site.
 
@@ -146,10 +146,10 @@ ESP-IDF and compile against either SDK.
 
 Three ways to handle the coupling:
 
-1. **Inline guard, no SDK dependency** — write the `#if SOC_*` wakeup branch in the
+1. **Inline guard, no SDK dependency** - write the `#if SOC_*` wakeup branch in the
    consumer instead of calling `PowerManager`. Compiles against either SDK; the
    chip branch lives in the consumer.
-2. **`__has_include` bridge** — prefer the SDK helper when present, fall back to the
+2. **`__has_include` bridge** - prefer the SDK helper when present, fall back to the
    inline path otherwise, in one snippet that compiles against either SDK:
    ```cpp
    #if __has_include(<PowerManager.h>)
@@ -162,18 +162,18 @@ Three ways to handle the coupling:
    esp_deep_sleep_start();
    ```
    (The `#include <PowerManager.h>` is guarded with `#if __has_include` too.)
-3. **Commit to freeink-sdk** — point the committed `[base]` `lib_deps` (or the
+3. **Commit to freeink-sdk** - point the committed `[base]` `lib_deps` (or the
    submodule) at freeink-sdk. The old SDK drops out of the build and plain
    `freeink::PowerManager` resolves. The straight `freeink::PowerManager` form in
    `HalGPIO.cpp` assumes this.
 
 ## What a consumer changes
 
-- `HalGPIO.cpp` and `HalPowerManager.cpp` — call `freeink::PowerManager` or the
+- `HalGPIO.cpp` and `HalPowerManager.cpp` - call `freeink::PowerManager` or the
   `#if SOC_*` wakeup branch instead of `esp_deep_sleep_enable_gpio_wakeup`.
-- `HalSystem.cpp` — guard the RISC-V panic backtrace with `#if __riscv`, else call
+- `HalSystem.cpp` - guard the RISC-V panic backtrace with `#if __riscv`, else call
   `__real_panic_print_backtrace`.
-- `HalPowerManager.cpp` — guard or board-source the `GPIO_NUM_13` SPIWP pin.
+- `HalPowerManager.cpp` - guard or board-source the `GPIO_NUM_13` SPIWP pin.
 - Read board pins from `BoardConfig::ACTIVE.*`, not `BoardConfig::DEFAULT_DEVICE.*`
   or fixed constants, in multi-device builds.
 

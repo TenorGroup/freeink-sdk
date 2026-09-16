@@ -7,7 +7,7 @@
 // "Stack canary watchpoint triggered (loopTask)" panic and a reboot
 // mid-interaction. Ship a roomier weak default so every FreeInkUI app gets
 // it for free. Apps still override with the standard
-// SET_LOOP_TASK_STACK_SIZE(...) macro — that strong definition beats this
+// SET_LOOP_TASK_STACK_SIZE(...) macro - that strong definition beats this
 // weak one, and this weak one beats the core's 8 KB weak default because
 // app-side libraries link ahead of the Arduino framework archive.
 __attribute__((weak)) size_t getArduinoLoopTaskStackSize(void) { return 16 * 1024; }
@@ -225,7 +225,7 @@ static const KeyboardKey ES_ROW3[] = {KS("Shift", KeyKind::Shift, QWERTY_KEY_SHI
 // ЙЦУКЕН. Key ids are the letters' code points (U+0410..U+044F): they fit
 // int16_t and stay clear of the ASCII ids and the negative control ids.
 //
-// They do overlap the localized-letter ids of the Latin layouts — э is 0x44D,
+// They do overlap the localized-letter ids of the Latin layouts - э is 0x44D,
 // which is 1101, the same number as QwertzDe's ü. That is safe because ids are
 // only ever resolved within one layout (keyboardOutputFor walks the layout it
 // is handed), and two scripts are never on screen at once. Anything that maps
@@ -324,7 +324,7 @@ static const KeyboardKey ES_SHIFT_ROW3[] = {KS("Shift", KeyKind::Shift, QWERTY_K
 
 // Ukrainian ЙЦУКЕН. Differs from Russian in four slots: ї replaces ъ, і
 // replaces ы, є replaces э, and и is the Ukrainian и (U+0438) as in Russian
-// while й stays put. ґ has no key of its own — it long-presses off г, the
+// while й stays put. ґ has no key of its own - it long-presses off г, the
 // letter it derives from, mirroring how ё hangs off е in the Russian layer.
 // The apostrophe is a real letter-level separator in Ukrainian, so it takes
 // the slot Russian gives to ъ's neighbour.
@@ -483,7 +483,7 @@ static const KeyboardKey HE_ROW3[] = {K("ז", "ז", 0x5D6), K("ס", "ס", 0x5E1)
                                       KS("Del", KeyKind::Delete, QWERTY_KEY_BACKSPACE, 2)};
 
 // Bottom row carrying the script-switch key. Kept separate from EN_ROW4 so a
-// single-script build renders exactly as before — the key costs a slot in the
+// single-script build renders exactly as before - the key costs a slot in the
 // row, and there is no point spending it when there is nowhere to switch to.
 // The key draws a globe glyph, so it carries no label, and one unit is all a
 // glyph needs; the rest of the row's ten units go to the space bar.
@@ -531,7 +531,7 @@ static const KeyboardLayout ES_NUM_LAYOUT{ES_NUM_ROWS, 5};
 
 // Cyrillic ships only in the lang-key flavour: a Cyrillic-only keyboard cannot
 // type a Wi-Fi password or a URL, so there always has to be a way back to
-// Latin. Its rows run 12/11/11 keys against Latin's 10/9/9 — callers sizing a
+// Latin. Its rows run 12/11/11 keys against Latin's 10/9/9 - callers sizing a
 // hit-test buffer from the widest layout must account for that.
 static const KeyboardRow RU_ROWS[] = {{RU_ROW1, 12, 0}, {RU_ROW2, 11, 0}, {RU_ROW3, 11, 0}, {LANG_ROW4, 4, 0}};
 static const KeyboardRow RU_SHIFT_ROWS[] = {{RU_SHIFT_ROW1, 12, 0},
@@ -630,7 +630,7 @@ static const KeyboardRow ES_SHIFT_LANG_ROWS[] = {{ES_SHIFT_ROW1, 10, 0}, {ES_SHI
 static const KeyboardRow ES_SHIFT_LANG_NUM_ROWS[] = {{NUM_SHIFT_ROW, 10, 0}, {ES_SHIFT_ROW1, 10, 0}, {ES_SHIFT_ROW2, 10, 0}, {ES_SHIFT_ROW3, 9, 0}, {LANG_ROW4, 4, 0}};
 
 // Latin layers wearing the lang-key bottom row, so a multi-script keyboard can
-// switch back. Letter rows are the plain EN tables — same QWERTY, no copies.
+// switch back. Letter rows are the plain EN tables - same QWERTY, no copies.
 static const KeyboardRow EN_LANG_ROWS[] = {{EN_ROW1, 10, 0}, {EN_ROW2, 9, 1}, {EN_ROW3, 9, 0}, {LANG_ROW4, 4, 0}};
 static const KeyboardRow EN_SHIFT_LANG_ROWS[] = {{EN_SHIFT_ROW1, 10, 0},
                                                  {EN_SHIFT_ROW2, 9, 1},
@@ -756,7 +756,7 @@ const char* keyboardOutputFor(const KeyboardLayout& layout, int16_t value) {
       if (key.value != value) continue;
       if (key.kind == KeyKind::Normal) return key.output;
       // Space keys draw a glyph instead of a label, so the layout tables leave
-      // their output null — but they still insert text.
+      // their output null - but they still insert text.
       if (key.kind == KeyKind::Space) return key.output ? key.output : " ";
     }
   }
@@ -812,7 +812,7 @@ Rect ensureMinTouchRect(Rect visual, int16_t minSize, Rect bounds) {
   // Edge snap: hit rects whose edge lies within EDGE_SNAP_PX of a bounds edge
   // extend to that boundary. The touch transforms clamp bezel-adjacent taps to
   // the exact border pixels (touchToLogical / raw-range clamping), so an inset
-  // control near an edge otherwise has a dead gutter its own users tap into —
+  // control near an edge otherwise has a dead gutter its own users tap into -
   // an edge target should reach the physical edge (the Fitts's-law rule).
   constexpr int16_t EDGE_SNAP_PX = 12;
 

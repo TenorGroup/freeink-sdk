@@ -38,7 +38,7 @@ void statusBar(Frame<MaxInteractions>& frame, Rect rect, const StatusBarProps& p
   if (props.fillBackground) frame.target().fill(rect, props.background);
   Rect textRect = rect.inset(Insets{0, props.horizontalPadding, 0, props.horizontalPadding});
 
-  // Left cluster: icon, leading, leadingSecondary — measured and laid out in
+  // Left cluster: icon, leading, leadingSecondary - measured and laid out in
   // sequence so the title never draws over them.
   const Paint ink = Paint::solid(props.text.color);  // icon matches text color in dark mode
   int16_t leftX = static_cast<int16_t>(textRect.x + props.leadingReserve);

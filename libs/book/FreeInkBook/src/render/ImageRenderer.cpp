@@ -1,4 +1,4 @@
-// FreeInkBook — streaming PNG/JPEG decode → scaled grayscale rows.
+// FreeInkBook - streaming PNG/JPEG decode → scaled grayscale rows.
 
 #include "render/ImageRenderer.h"
 
@@ -283,13 +283,13 @@ BookStatus renderJpeg(BookSource& source, const ZipEntry& entry, const PageImage
 
 // --- progressive JPEG: DC-only first-scan decode -------------------------------
 //
-// Full progressive decode needs every DCT coefficient buffered (megabytes) —
+// Full progressive decode needs every DCT coefficient buffered (megabytes) -
 // off the table on MCU targets. But the FIRST scan of a progressive JPEG is
 // always a DC scan, and a block's DC coefficient IS its 8x8 average. Decoding
 // just that scan streams like a baseline image and yields a correct 1/8-scale
 // grayscale picture, which bilinear resampling maps onto the placement box.
 // (Same strategy CrossPoint/JPEGDEC use.) Chroma DC values are entropy-decoded
-// to keep the bitstream in sync but never used — output is luma only.
+// to keep the bitstream in sync but never used - output is luma only.
 
 struct ProgHuff {
   uint8_t counts[17] = {0};     // codes per length 1..16
@@ -503,7 +503,7 @@ BookStatus renderJpegProgressive(BookSource& source, const ZipEntry& entry,
     uint32_t segLen = (static_cast<uint32_t>(lenB[0]) << 8 | lenB[1]);
     if (segLen < 2) return BookStatus::ParseError;
     segLen -= 2;
-    if (m == 0xDB) {  // DQT — only the DC entry matters
+    if (m == 0xDB) {  // DQT - only the DC entry matters
       while (segLen > 0) {
         uint8_t pqtq;
         if (!rd(&pqtq, 1)) return BookStatus::ParseError;
@@ -559,12 +559,12 @@ BookStatus renderJpegProgressive(BookSource& source, const ZipEntry& entry,
         if (comps[c].h == 0 || comps[c].v == 0) return BookStatus::ParseError;
       }
     } else if (m == 0xC0 || m == 0xC1) {
-      return BookStatus::ParseError;  // baseline mislabeled — not our path
+      return BookStatus::ParseError;  // baseline mislabeled - not our path
     } else if (m == 0xDD) {  // DRI
       uint8_t d[2];
       if (segLen != 2 || !rd(d, 2)) return BookStatus::ParseError;
       restartInterval = static_cast<uint16_t>(d[0] << 8 | d[1]);
-    } else if (m == 0xDA) {  // SOS — first scan
+    } else if (m == 0xDA) {  // SOS - first scan
       uint8_t nsB;
       if (!rd(&nsB, 1)) return BookStatus::ParseError;
       ns = nsB;

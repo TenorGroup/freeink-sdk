@@ -16,7 +16,7 @@ The design goal is "Tailwind for e-ink" without a web-style runtime:
   `button`, `keyGrid`, and `batteryIndicator`
 - touch, GPIO buttons, focus navigation, and gestures all route to semantic
   action IDs
-- freestanding C++17 — no Arduino or ESP-IDF dependency, so the same code
+- freestanding C++17 - no Arduino or ESP-IDF dependency, so the same code
   runs on firmware and in host-side unit tests
 
 ## Core Flow
@@ -139,7 +139,7 @@ text layout) runs deeper than Arduino's default 8 KB `loopTask` stack (the
 overflow is a `Stack canary watchpoint triggered (loopTask)` panic and a
 reboot mid-interaction), so on ESP32 FreeInkUI ships a weak 16 KB default for
 `getArduinoLoopTaskStackSize()`. An app that needs a different size overrides
-it the standard way — `SET_LOOP_TASK_STACK_SIZE(24 * 1024);` at global scope
+it the standard way - `SET_LOOP_TASK_STACK_SIZE(24 * 1024);` at global scope
 in the sketch beats the SDK's weak default.
 
 `FreeInkApp` does not own your display refresh policy. `lastRenderRefreshHint()`
@@ -150,8 +150,8 @@ whether an action handler changed state and a follow-up render is needed.
 firmware with its own refresh policy can keep switching on the hint instead.
 
 For interactive apps prefer `presentAsync()` + `display.refreshBusy()`:
-`present()` blocks on the panel's BUSY pin for the whole waveform (~0.3–2 s),
-during which the loop can't poll input — typing feels sluggish and taps get
+`present()` blocks on the panel's BUSY pin for the whole waveform (~0.3-2 s),
+during which the loop can't poll input - typing feels sluggish and taps get
 lost. `presentAsync()` starts the refresh and returns (~25 ms); the panel
 refreshes from its own RAM copy, so the loop keeps polling input and rendering
 into the framebuffer, and pushes the newest frame once `refreshBusy()` goes
@@ -160,10 +160,10 @@ false. Accumulate the strongest `RefreshHint` across renders between presents.
 Pair it with buffered input: `InputManager::beginAsync()` samples touch on its
 own task and queues completed taps (`popTouchTap`), so taps that land during a
 ~200 ms render are never lost, and `FreeInkApp::route()` dispatches each
-queued tap against the last rendered frame without drawing — a fast typing
+queued tap against the last rendered frame without drawing - a fast typing
 burst costs one repaint, not one render per key.
 
-Frames do not clear the target on their own — without `setClearColor()` (or an
+Frames do not clear the target on their own - without `setClearColor()` (or an
 app-side clear) the previous screen shows through wherever the new one doesn't
 draw. For screen changes, `invalidateTransition()` requests a fast partial
 refresh with a periodic full refresh (every 6th by default, see
@@ -387,7 +387,7 @@ The lower-level API is still available when a screen needs exact control:
 freeink::ui::InteractionBuffer<32> interactions;
 freeink::ui::InputSnapshot input = readInput();
 
-// Native render path — no external graphics library. Draws into the
+// Native render path - no external graphics library. Draws into the
 // framebuffer FreeInkDisplay already owns (FreeInkUIDisplayTarget.h). Construct
 // this after display.begin(), when getFrameBuffer() is valid.
 freeink::ui::DisplayTarget draw(display.getFrameBuffer(), display.getDisplayWidth(),
@@ -419,8 +419,8 @@ flags.
 `Stack<N>` fixes the slot count at compile time. When the slots come from
 parsed data instead, `FreeInkUILayout.h` is the runtime counterpart: it splits a
 rect into row/column slots with no heap allocation or retained widget state.
-Each slot is a `LayoutLength` — `fixed(px)`, `flexible(grow, minPx)`, or
-`tokenized(id)` (resolved through an optional callback for theme spacing) — and
+Each slot is a `LayoutLength` - `fixed(px)`, `flexible(grow, minPx)`, or
+`tokenized(id)` (resolved through an optional callback for theme spacing) - and
 the split emits a `Rect` per slot:
 
 ```cpp
@@ -444,10 +444,10 @@ components and apps: `clampI16`/`clampU8`/`clampRadius`, `makeRect`/`makeSize`/
 
 ## Rendering
 
-FreeInkUI draws through a `DrawTarget` — an interface of primitives (`fill`,
+FreeInkUI draws through a `DrawTarget` - an interface of primitives (`fill`,
 `stroke`, `line`, `triangle`, `text`, `bitmap`). The SDK ships two:
 
-- **`DisplayTarget` (`FreeInkUIDisplayTarget.h`) — the default.** A
+- **`DisplayTarget` (`FreeInkUIDisplayTarget.h`) - the default.** A
   self-contained renderer that needs nothing but a raw 1-bit framebuffer, so it
   has no external dependency and the same drawing code runs in host tests. It
   bundles a compact Noto Sans bitmap font and reproduces gray paints on a 1-bit
@@ -463,7 +463,7 @@ FreeInkUI draws through a `DrawTarget` — an interface of primitives (`fill`,
   bit is white and a clear bit is black ink. After a frame, push the buffer with
   the display's normal refresh call.
 
-- **`GfxRendererTarget` (`FreeInkUIGfxRenderer.h`) — optional.** An adapter for
+- **`GfxRendererTarget` (`FreeInkUIGfxRenderer.h`) - optional.** An adapter for
   firmwares that already provide CrossPoint's `GfxRenderer` (its fonts, bidi,
   truncation, dithering). It compiles **only** where `<GfxRenderer.h>` is on the
   include path (guarded by `__has_include`), so it never interferes with apps
@@ -472,8 +472,8 @@ FreeInkUI draws through a `DrawTarget` — an interface of primitives (`fill`,
 ## Fonts
 
 `DisplayTarget` bundles one font (Noto Sans, rasterized to a compact 1-bit
-bitmap). Every logical font slot — `ThemeTokens::fontSmall`, `fontBody`,
-`fontTitle`, which are just `FontId` values your app assigns — points at it by
+bitmap). Every logical font slot - `ThemeTokens::fontSmall`, `fontBody`,
+`fontTitle`, which are just `FontId` values your app assigns - points at it by
 default, so text works with zero setup.
 
 ### Swapping the font
@@ -493,7 +493,7 @@ a 1-bit on/off mask, or anti-aliased 4-bit coverage. To use your own typeface:
 
    This emits `freeink::ui::kMyFontFont` (a `BitmapFont`). Pick `--size` for the
    pixel height you want; the tool prints the resulting line height and flash
-   cost. Covers printable ASCII (`U+0020..U+007E`) by default — widen with
+   cost. Covers printable ASCII (`U+0020..U+007E`) by default - widen with
    `--first`/`--last`. Confirm the source font's license permits embedding.
 
    Add `--alpha` to rasterize anti-aliased: glyphs are stored as 4-bit
@@ -504,7 +504,7 @@ a 1-bit on/off mask, or anti-aliased 4-bit coverage. To use your own typeface:
    partially-covered stem pixels, so anti-aliased fonts look best at title and
    display sizes (roughly 16px and up); keep small body text on 1-bit fonts.
 
-2. **Point the target at it** — globally, or per slot so titles differ from body
+2. **Point the target at it** - globally, or per slot so titles differ from body
    text:
 
    ```cpp
@@ -514,7 +514,7 @@ a 1-bit on/off mask, or anti-aliased 4-bit coverage. To use your own typeface:
    draw.setFont(theme.tokens.fontTitle, freeink::ui::kMyFontFont);  // one slot
    ```
 
-That's the whole process — no rebuild of the SDK, no driver changes.
+That's the whole process - no rebuild of the SDK, no driver changes.
 `FreeInkUIFont.h` is the canonical home of the `FontGlyph`/`BitmapFont` struct
 definitions and carries the bundled Noto Sans data; generated font headers
 `#include` it for those structs.
@@ -598,7 +598,7 @@ tied to any application's screen structure:
   optional tap-outside dismiss action)
 - `gestureBar`
 - `header`
-- `list` (virtualized; see below — supports hug-content pill rows and
+- `list` (virtualized; see below - supports hug-content pill rows and
   selection markers)
 - settings rows: `settingRow`, `toggleRow`, `stepperRow`, `radioGroup`
 - `dropdown`
@@ -732,15 +732,15 @@ qwertyKeyboard(ui, keyboardRect, keyboard);
 
 The keyboard is stateless like every component: Shift and mode ("?123"/"ABC")
 keys only report their actions. With `symbols` set, `shifted` selects the
-second symbols page — the shift slot reads "#+=" on page one and "123" on page
+second symbols page - the shift slot reads "#+=" on page one and "123" on page
 two. The two pages plus the letter layers cover every printable ASCII
 character.
 
 `KeyboardEntry` owns the editing state so apps don't hand-roll it: the
 shift/symbol layer flags, layout-correct UTF-8 append, and multi-byte-aware
 backspace over a caller-owned buffer. Note that keys report stable ids in
-`ActionEvent::value` — ASCII keys their code point, localized keys (é, ñ, ß)
-ids above 1000 — so casting the value to `char` corrupts non-ASCII layouts;
+`ActionEvent::value` - ASCII keys their code point, localized keys (é, ñ, ß)
+ids above 1000 - so casting the value to `char` corrupts non-ASCII layouts;
 `KeyboardEntry::key()` (or the `keyboardOutputFor()` lookup) inserts the
 layout's real output.
 
@@ -890,11 +890,11 @@ Transient and edge-case surfaces are included too:
 
 ### Styling
 
-Every interactive component resolves a `StyleSet` — one `BoxStyle`
+Every interactive component resolves a `StyleSet` - one `BoxStyle`
 (background, foreground, border, radius, corner mask) per interaction state.
 Rounded looks are first-class: `BoxStyle.radius` applies to both background
 fills and borders, `tabBar` renders filled pill tabs, and
-`ListProps.hugContents` shrinks selection pills to the label width — no
+`ListProps.hugContents` shrinks selection pills to the label width - no
 custom drawing code needed.
 
 ### Drawing primitives
@@ -902,21 +902,21 @@ custom drawing code needed.
 The `DrawTarget` interface is small but covers everything hand-rolled
 e-reader chrome typically needs:
 
-- `fill` / `stroke` with per-corner radius masks (`Corners`) — cards that
+- `fill` / `stroke` with per-corner radius masks (`Corners`) - cards that
   round only their top or bottom band
-- `line()` — underlines, dividers, key-glyph art
-- `triangle()` — selection markers, arrows, bookmark notches, battery bolts
-- `text()` honoring alignment, `maxLines` wrapping, and ellipsis truncation —
+- `line()` - underlines, dividers, key-glyph art
+- `triangle()` - selection markers, arrows, bookmark notches, battery bolts
+- `text()` honoring alignment, `maxLines` wrapping, and ellipsis truncation -
   and implementors don't write that algorithm: `layoutText()` provides
   SDK-owned greedy word wrap, hard `\\n` breaks, character breaking for
   over-wide words, ellipsis shrinking, alignment, and vertical centering,
   built only on `measureText`. A target's `text()` reduces to drawing the
   emitted single-line runs; targets with a native bidi/kerning-aware wrapping
   pipeline (like the `GfxRenderer` adapter) keep using their own
-- `measureWrappedText()` — the bounds of text wrapped into a width (widest
+- `measureWrappedText()` - the bounds of text wrapped into a width (widest
   line × line count), built on `layoutText` so it agrees exactly with what
   renders. Use it to reserve space for wrapping titles, auto-size dialogs
-  (`optionDialogHeight()` is sugar over it), or compute row heights — never
+  (`optionDialogHeight()` is sugar over it), or compute row heights - never
   estimate line counts from single-line `measureText`
 - `bitmap()` for icon masks
 
@@ -935,8 +935,8 @@ logical coordinates, `DeviceContext.orientation` reports the active
 orientation, and the adapter's drawing pipeline maps to panel space. Remap
 touch coordinates app-side if the panel's touch space differs.
 
-Per-element rotation — an element rotated *relative to* its screen, such as
-side-bezel button hints — rides on `TextStyle.rotation` for labels and the
+Per-element rotation - an element rotated *relative to* its screen, such as
+side-bezel button hints - rides on `TextStyle.rotation` for labels and the
 `rotation` parameter of `DrawTarget::bitmap()` for icons (`CW90`, `R180`,
 `CCW90`). Rotated text is single-line, aligned along the rotated axis; the
 `GfxRenderer` adapter implements `CW90` natively and draws other text
@@ -946,11 +946,11 @@ standard row-major masks at any angle, composing freely with every
 
 Smaller displays scale through layout, not transforms: rects and flex splits
 adapt to any `DeviceContext` size, themes override sizes per device, and font
-slots bind smaller font ids — deliberate, since fractional glyph scaling
+slots bind smaller font ids - deliberate, since fractional glyph scaling
 produces mush on a 1-bit panel. Bitmaps do scale: every `BitmapMode`
 (`Center`, `Stretch`, `Contain`, `Cover`, `Tile`, `TileX`, `TileY`) is
 implemented via `forEachBitmapPixel()`, a shared nearest-neighbor sampling
-helper that adapters drive with a per-pixel callback — host-tested, clipped
+helper that adapters drive with a per-pixel callback - host-tested, clipped
 to the target rect, suitable for icons and pattern fills.
 
 ### Virtualized Lists
@@ -1004,7 +1004,7 @@ column) of option buttons that route through the normal action table, with an
 optional dithered scrim behind the panel. The slots cover the common
 confirmation shapes without hand-rolled cards: a small caption (`title`), a
 prominent multi-line headline that reserves exactly the lines it wraps to
-(`headline`), and a body line (`message`) — each honoring its own style's
+(`headline`), and a body line (`message`) - each honoring its own style's
 font, alignment, and maxLines:
 
 ```cpp
@@ -1040,7 +1040,7 @@ bottom-anchored rect with `fillBackground = true` over pre-rendered content.
 
 Ownership is split deliberately: **the SDK owns the in-memory types
 (`ThemeTokens`, `ThemeDocument`, `StyleSet`, `AssetResolver`); apps own JSON
-and storage parsing.** FreeInkUI never reads files, parses JSON, or allocates —
+and storage parsing.** FreeInkUI never reads files, parses JSON, or allocates -
 a firmware parses its theme files (with whatever JSON library and caching it
 already has) into `ThemeTokens` plus its own extension structs, then renders
 from those. This keeps the UI package dependency-free and lets each app evolve
@@ -1167,7 +1167,7 @@ class AppAssets : public freeink::ui::AssetResolver {
 
 Whole-UI inversion is one call, at the draw-target level rather than per
 component. `InvertedDrawTarget` wraps any `DrawTarget` and flips every color
-drawn through it — black↔white, light↔dark gray, dithers included — so
+drawn through it - black↔white, light↔dark gray, dithers included - so
 component defaults, theme styles, and app-drawn chrome all invert together:
 
 ```cpp
@@ -1187,7 +1187,7 @@ flags needed anywhere.
 FreeInkUI itself has no dependencies. Optional header-only adapters bridge it
 to common stacks, and only compile in firmwares that include them:
 
-- **`FreeInkUIGfxRenderer.h`** — `GfxRendererTarget`, a `DrawTarget` over the
+- **`FreeInkUIGfxRenderer.h`** - `GfxRendererTarget`, a `DrawTarget` over the
   `GfxRenderer` drawing library: dither-mapped colors, per-corner rounded
   rects, and text measurement/truncation/wrapping through the renderer's own
   pipeline. `deviceContext()` derives screen size and orientation.
@@ -1195,7 +1195,7 @@ to common stacks, and only compile in firmwares that include them:
   interaction buffer, and `Frame` into one stack object (binding the small/
   body/title font ids), so a render pass over the `GfxRenderer` stack is a
   single declaration instead of four.
-- **`FreeInkUIInputManager.h`** — builds the per-frame `InputSnapshot` from
+- **`FreeInkUIInputManager.h`** - builds the per-frame `InputSnapshot` from
   the SDK's `InputManager`:
 
 ```cpp
@@ -1213,13 +1213,13 @@ it.
 Touch hit areas are declarative: `minTouchSize` center-expands small targets,
 `ButtonProps.hitPadding` extends a button's tap band per edge (give adjacent
 controls contiguous, non-overlapping bands instead of overlapping centered
-expansion), and hit rects within 12px of a screen edge snap to the bezel —
+expansion), and hit rects within 12px of a screen edge snap to the bezel -
 all composed in `ensureMinTouchRect`, one interaction per control.
 
 Touch orientation mapping is SDK-owned: `touchToLogical()` converts
 normalized panel-native portrait coordinates to the logical frame for any
 `DeviceContext.orientation`, with `flipX`/`flipY` for mirrored panel mounting
-(a board property — set it once per device, not per app). The
+(a board property - set it once per device, not per app). The
 orientation-aware `snapshotFrom(input, device, flipX, flipY)` overload
 returns taps already mapped, so hit-testing works without hand-derived
 transforms:
@@ -1250,18 +1250,18 @@ it.
 1. Pick or write a `DrawTarget`. There are two paths, and text wrapping is
    the fork between them:
    - Firmwares built on the `GfxRenderer` drawing stack use the SDK's
-     `GfxRendererTarget` directly — it wraps and truncates through that
+     `GfxRendererTarget` directly - it wraps and truncates through that
      renderer's own bidi/kerning-aware text pipeline.
    - Everything else (lightweight glyph engines, bare framebuffers)
      implements the `DrawTarget` methods over its own renderer and delegates
-     `text()` to the SDK's `layoutText()` — wrap, ellipsis, alignment, and
+     `text()` to the SDK's `layoutText()` - wrap, ellipsis, alignment, and
      vertical centering come from the SDK; the target only draws the emitted
      single-line runs.
 2. Build the per-frame `InputSnapshot` from the firmware's input layer (the
    `FreeInkUIInputManager.h` adapter covers the SDK's own `InputManager`).
 3. Parse the theme format's token/state-style sections into `ThemeTokens`
    plus app extension structs in the existing theme loader.
-4. Port one screen of chrome first — a status bar + content slot + control
+4. Port one screen of chrome first - a status bar + content slot + control
    bar split is a good proof of pipeline.
 5. Move shared surfaces screen-by-screen: headers, lists, button hints,
    popups, keyboards. Each port should delete the hand-rolled layout code it
@@ -1284,14 +1284,14 @@ component set:
 - keyboard entry: character grids composed with special-key rows
   (shift/mode/space/delete/confirm via `KeyKind`), glyph art, secondary
   labels, and a chunk-measured `textField` cursor that stays accurate for
-  long URLs and passphrases (password masking stays app-side — pass the
+  long URLs and passphrases (password masking stays app-side - pass the
   masked string)
 - menus and settings: rows with label, subtitle, right-aligned value, icon,
   and the full selected/focused/active/disabled state set; disabled rows
   register no interactions; section header rows (`ListItem::isHeader`) render
   shorter, underlined, and non-interactive with configurable section padding
 - sleep/standby screens: app-drawn cover slot plus title block and a stats
-  overlay composed from `metricCard` cells, icons, and `progressBar` — no
+  overlay composed from `metricCard` cells, icons, and `progressBar` - no
   bespoke surface needed
 - statistics dashboards: value/label cells (`metricCard`), outlined section
   cards with dividers, and horizontal bar charts built from `progressBar`
@@ -1301,30 +1301,30 @@ component set:
 
 ## Recent additions
 
-- **`flatButtonStyles(radius)`** — the borderless sibling of
+- **`flatButtonStyles(radius)`** - the borderless sibling of
   `outlinedButtonStyles`: nothing drawn at rest, a light fill for
   selected/pressed feedback. Assign once (`theme.button =
   ui::flatButtonStyles(8)`) for the "just text on paper" look.
-- **Dropdown upgrades** — `DropdownProps` gained a leading `icon`
+- **Dropdown upgrades** - `DropdownProps` gained a leading `icon`
   (settingRow-style), a `subtitle` two-line layout (label over current
-  selection), and a legible default chevron (10 px, 2 px stroke — the old
+  selection), and a legible default chevron (10 px, 2 px stroke - the old
   8 px/1 px indicator was invisible on e-paper).
-- **`ButtonProps.iconSize`** — scales a button icon to any square size via
+- **`ButtonProps.iconSize`** - scales a button icon to any square size via
   nearest-neighbor `Contain`, so one asset serves several button sizes.
-- **`DisplayTarget::setOrientation()`** — runtime portrait/landscape (and
+- **`DisplayTarget::setOrientation()`** - runtime portrait/landscape (and
   flipped) switching; refresh your `DeviceContext` via `deviceContext()`
   and repaint. Touch mapping follows automatically.
-- **Runtime glyph fallback** — `DisplayTarget::setGlyphFallback(...)` takes
+- **Runtime glyph fallback** - `DisplayTarget::setGlyphFallback(...)` takes
   a `RuntimeGlyphSource` consulted whenever the bitmap font lacks a glyph,
   sized per slot and dithered like the alpha fonts. This is how UI chrome
   renders scripts too large to pre-bake (Hangul, CJK) from a TTF on the
   card.
 - **Opt-in bridges** (compilable only when the paired library is present,
   like `FreeInkUIGfxRenderer.h`):
-  - `FreeInkUIBookFont.h` — `BitmapBookFont` lets FreeInkBook read books
+  - `FreeInkUIBookFont.h` - `BitmapBookFont` lets FreeInkBook read books
     with the bundled bitmap font (typographic punctuation normalized to
     ASCII equivalents), and `TtfGlyphSource` adapts a FreeInkBook `TtfFont`
     as the chrome glyph fallback above.
-  - `FreeInkUIIcon.h` — `bitmapFromIcon()` adapts `freeink::Icon` assets
+  - `FreeInkUIIcon.h` - `bitmapFromIcon()` adapts `freeink::Icon` assets
     (generated at any size by `libs/assets/Icons/tools/gen_icons.py`) to
     the `BitmapRef` every component takes.

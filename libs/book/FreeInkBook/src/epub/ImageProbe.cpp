@@ -1,4 +1,4 @@
-// FreeInkBook — PNG/JPEG dimension probe without decoding.
+// FreeInkBook - PNG/JPEG dimension probe without decoding.
 
 #include "epub/ImageProbe.h"
 
@@ -65,7 +65,7 @@ BookStatus probeImage(BookSource& source, const ZipEntry& entry, Arena& scratch,
   status = BookStatus::Ok;
   if (!stream.readExact(hdr, 26)) {
     scratch.release(marked);
-    return BookStatus::Ok;  // too short to be an image we handle — skip
+    return BookStatus::Ok;  // too short to be an image we handle - skip
   }
 
   static const uint8_t kPngSig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
@@ -81,7 +81,7 @@ BookStatus probeImage(BookSource& source, const ZipEntry& entry, Arena& scratch,
     return BookStatus::Ok;
   }
 
-  if (hdr[0] == 0xFF && hdr[1] == 0xD8) {  // JPEG SOI — walk segments to a SOF
+  if (hdr[0] == 0xFF && hdr[1] == 0xD8) {  // JPEG SOI - walk segments to a SOF
     // The first 24 bytes after SOI are already in hdr; rewind logically by
     // treating them as the start of the segment stream.
     uint8_t seg[8];

@@ -1,13 +1,13 @@
 #pragma once
 
-// M5Stack PaperS3 pin map — the parallel-EPD bus and the board-support-only
+// M5Stack PaperS3 pin map - the parallel-EPD bus and the board-support-only
 // pins that don't live in the BoardProfile (SD/touch/RTC/battery/buzzer pins
 // are in BoardConfig::M5PAPER_S3).
 //
 // Sources: M5GFX autodetect (board_M5PaperS3 in src/M5GFX.cpp) cross-checked
 // against M5Unified and the official docs pinmap. Where the docs table
-// disagrees (it labels GPIO45 "PWR" and omits GPIO16/GPIO46), M5GFX — the
-// working vendor driver — is authoritative: OE=45, PWR=46, CL=16.
+// disagrees (it labels GPIO45 "PWR" and omits GPIO16/GPIO46), M5GFX - the
+// working vendor driver - is authoritative: OE=45, PWR=46, CL=16.
 
 // ED047TC1 8-bit parallel data bus, D0..D7.
 #define PAPERS3_EP_D0 6
@@ -20,7 +20,7 @@
 #define PAPERS3_EP_D7 10
 
 // Row/frame timing + power. Bus_EPD's stock power sequence drives OE/PWR/SPV
-// itself (on: OE, PWR, SPV with settling delays; off in reverse) — no PMIC.
+// itself (on: OE, PWR, SPV with settling delays; off in reverse) - no PMIC.
 #define PAPERS3_EP_SPH 13  // XSTL: start pulse, horizontal
 #define PAPERS3_EP_CL 16   // XCL: pixel clock
 #define PAPERS3_EP_LE 15   // XLE: latch enable
@@ -35,5 +35,5 @@
 #define PAPERS3_PWROFF_PULSE 44
 
 // Single PWM status LED (active-high). Not an addressable strip, so it is not
-// in the profile's LedConfig — drive it with LEDC/digitalWrite as needed.
+// in the profile's LedConfig - drive it with LEDC/digitalWrite as needed.
 #define PAPERS3_LED 0

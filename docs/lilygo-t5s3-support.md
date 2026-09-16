@@ -3,7 +3,7 @@
 The LilyGo T5S3-4.7-ePaper (PRO/Lite) is an ESP32-S3 board. Its panel is an
 **ED047TC1: a raw 960×540 16-gray parallel EPD with no on-glass controller**. The
 MCU clocks every row over the S3 LCD (i80) peripheral and an external PMIC
-generates the waveform rails — a different display class from FreeInk's SPI
+generates the waveform rails - a different display class from FreeInk's SPI
 single-chip drivers (SSD1677/UC8253/ED2208).
 
 Reference port: [ShallowGreen123/t5s3-reader](https://github.com/ShallowGreen123/t5s3-reader),
@@ -50,36 +50,36 @@ const LgfxEpdConfig& lilygoT5S3LgfxConfig() {
 A build sets `-DFREEINK_DEVICE_LILYGO=1 -DFREEINK_LGFX_EPD_CONFIG=lilygoT5S3LgfxConfig`
 and adds `m5stack/M5GFX` to that env's `lib_deps` (see `platformio.sample.ini`). The
 power-hook bodies (PCA9535 expander + TPS65185 PMIC register writes) live in the
-board-support layer. A complete implementation — the real parallel pins and the
-PCA9535/TPS65185 power sequence reusing the board's expander helpers — is in the
+board-support layer. A complete implementation - the real parallel pins and the
+PCA9535/TPS65185 power sequence reusing the board's expander helpers - is in the
 reference port at **`lib/Board_T5S3/FreeInkLgfxConfig.cpp`**.
 
 ## Peripherals
 
-- **Touch** — GT911, handled by `InputManager` (polled, reset/address dance). The
+- **Touch** - GT911, handled by `InputManager` (polled, reset/address dance). The
   profile uses `BoardConfig::LILYGO_T5_PRO_GT911`.
-- **Backlight** — PWM `FrontlightConfig` on BL_EN (GPIO11), driven by
+- **Backlight** - PWM `FrontlightConfig` on BL_EN (GPIO11), driven by
   `FrontlightManager`; `CAP_FRONTLIGHT` is on for this device.
-- **Battery** — `BatteryMonitor`'s I²C fuel-gauge backend
+- **Battery** - `BatteryMonitor`'s I²C fuel-gauge backend
   (`FREEINK_BATTERY_I2C_GAUGE`) reads SoC/voltage from the BQ27220 and charge
   status from the BQ25896, with addresses/pins from `BoardProfile.batteryGauge`. It
   presents the same API as the ADC path and uses a minimal raw-register read (no
   external library).
-- **Power button and sleep** — the power button is the BOOT button (GPIO0, a
+- **Power button and sleep** - the power button is the BOOT button (GPIO0, a
   direct RTC-capable GPIO); the profile sets `input.power = GPIO0`. `InputManager`
   reads it, and `PowerManager::armPowerButtonWakeup()` arms deep-sleep wake on it
   with the per-SoC source (`ext1` on the S3). This matches the reference port,
   which wakes on the same BOOT button.
-- **PCA9535 user button** — a second button behind the I²C expander.
+- **PCA9535 user button** - a second button behind the I²C expander.
   `InputManager::setButtonHook()` takes a board callback that reads the PCA9535 and
   returns a `BTN_*` bitmask, so `InputManager` carries no expander code. This
   button is not a deep-sleep wake source (neither is it in the reference port).
 
 ## Board-support (outside the SDK)
 
-- **PCA9535 expander and TPS65185 PMIC** — the EPD power sequence (via
+- **PCA9535 expander and TPS65185 PMIC** - the EPD power sequence (via
   `LgfxEpdConfig::power`) and the user-button read (via `setButtonHook`) both drive
   the same PCA9535, so the board owns the expander and feeds both seams.
-- **GT911 home key** — the GT911 backend surfaces the capacitive home-key bit
+- **GT911 home key** - the GT911 backend surfaces the capacitive home-key bit
   (status `0x10`) directly via `InputManager::wasHomeKeyPressed()`.
-- **PCF85063 RTC, LoRa, GPS** — board peripherals the SDK does not cover.
+- **PCF85063 RTC, LoRa, GPS** - board peripherals the SDK does not cover.

@@ -42,7 +42,7 @@ struct OptionDialogProps {
   bool dimBackground = false;
 };
 
-// Panel height optionDialog needs at the given width — thin sugar over
+// Panel height optionDialog needs at the given width - thin sugar over
 // measureWrappedText so callers size the dialog instead of guessing:
 //
 //   const int16_t h = optionDialogHeight(ui.target(), props, 340);

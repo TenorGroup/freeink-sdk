@@ -1,9 +1,9 @@
 #pragma once
 
-// FreeInk SDK — streaming XML parsing for FreeInkBook.
+// FreeInk SDK - streaming XML parsing for FreeInkBook.
 //
 // Thin SAX facade over the vendored expat. A ZIP entry is inflated and parsed
-// in fixed-size chunks, so document size never affects RAM use — there is no
+// in fixed-size chunks, so document size never affects RAM use - there is no
 // DOM anywhere in the engine. Element names arrive as raw qualified names
 // ("dc:title"); handlers match on the local part because EPUB files bind
 // namespace prefixes inconsistently.
@@ -44,7 +44,7 @@ class XmlSax {
  public:
   // Streams one ZIP entry through the handler. Inflate and parse buffers are
   // taken from `scratch` and released before returning. With
-  // `filterHtmlEntities` the bytes pass through EntityFilter first — use for
+  // `filterHtmlEntities` the bytes pass through EntityFilter first - use for
   // content documents (chapters); package documents parse strictly.
   static BookStatus parseEntry(BookSource& source, const ZipEntry& entry, Arena& scratch,
                                XmlHandler& handler, bool filterHtmlEntities = false);
@@ -53,7 +53,7 @@ class XmlSax {
 // Resumable form of XmlSax::parseEntry: the caller feeds the parse one chunk
 // at a time and may stop between chunks for as long as it likes (the expat
 // parser, inflate stream, and buffers stay live). This is what lets a chapter
-// lay out incrementally — a few pages per UI tick — instead of in one
+// lay out incrementally - a few pages per UI tick - instead of in one
 // blocking call. Buffers come from `scratch` at open() and are released by
 // the arena owner, not by close() (arena allocations have no free).
 class XmlSaxSession {
@@ -66,12 +66,12 @@ class XmlSaxSession {
   BookStatus open(BookSource& source, const ZipEntry& entry, Arena& scratch, XmlHandler& handler,
                   bool filterHtmlEntities = false);
   // Reads and parses ONE chunk. Sets *atEnd true once the final (empty) chunk
-  // has been fed — the document is then fully parsed. Returns ParseError /
+  // has been fed - the document is then fully parsed. Returns ParseError /
   // IoError on failure; Ok otherwise (including when the handler set
-  // stopParse — the caller checks that flag itself).
+  // stopParse - the caller checks that flag itself).
   BookStatus feedChunk(bool* atEnd);
   bool isOpen() const { return parser_ != nullptr; }
-  // Bytes of (filtered) input fed so far vs the entry's total — for
+  // Bytes of (filtered) input fed so far vs the entry's total - for
   // progress estimation while a chapter builds.
   uint64_t bytesConsumed() const { return bytesConsumed_; }
   void close();

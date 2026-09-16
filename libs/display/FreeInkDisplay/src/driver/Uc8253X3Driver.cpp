@@ -49,7 +49,7 @@ const Uc8253X3Config& uc8253X3DefaultConfig() {
 }
 
 // Resolution comes from the active BoardProfile (XTEINK_X3), exactly like every
-// other driver — the X3 profile is selected at runtime by setDisplayX3() before
+// other driver - the X3 profile is selected at runtime by setDisplayX3() before
 // begin() constructs this singleton, so ACTIVE already holds 792x528 here.
 Uc8253X3Driver::Uc8253X3Driver(const Uc8253X3Config& cfg)
     : _cfg(cfg),
@@ -145,7 +145,7 @@ void Uc8253X3Driver::begin(EpdBus& bus) {
   // whatever mode it asked for (see the doFullSync condition in displayStart). On a
   // consumer that boots into a splash that is measurable: the splash consumed sync #1 and
   // the first real screen still paid sync #2, so a FAST refresh that costs 435 ms once
-  // warm cost 2989 ms — the X4 running the identical boot paid 526 ms for the same paint.
+  // warm cost 2989 ms - the X4 running the identical boot paid 526 ms for the same paint.
   // The remaining sync still clears whatever the panel physically held (the sleep screen),
   // which is what the initial forced clean is for.
   _initialFullSyncsRemaining = 1;
@@ -304,7 +304,7 @@ void Uc8253X3Driver::displayGrayscaleBase(EpdBus& bus, const uint8_t* fb, Refres
     grayscaleRevert(bus, fb);
   }
   // _grayState.lsbValid means grayscale planes were written over DTM1/DTM2
-  // since the last display — the controller RAM no longer holds the displayed
+  // since the last display - the controller RAM no longer holds the displayed
   // BW frame even though _redRamSynced may still read true, so the
   // differential would mis-drive; take the clean fallback path instead.
   const bool cleanBaseNeeded =
@@ -339,7 +339,7 @@ void Uc8253X3Driver::preconditionGrayscale(EpdBus& bus, uint16_t x, uint16_t y, 
   // The settle is only meaningful (and only safe) when both DTM planes hold
   // the displayed BW frame. Skip when grayscale planes have been written over
   // them (lsbValid), a grayscale refresh left the RAM unsynced, or the gray
-  // bank is still loaded — firing the mid bank's strong BW/WB drives against
+  // bank is still loaded - firing the mid bank's strong BW/WB drives against
   // gray-coded state pairs would corrupt the region.
   if (_inGrayscaleMode || !_redRamSynced || _grayState.lsbValid) return;
   const uint16_t xEndLogical = static_cast<uint16_t>(((x + w - 1) < (_w - 1)) ? (x + w - 1) : (_w - 1));
@@ -422,7 +422,7 @@ void Uc8253X3Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, c
   // revert first; factory absolute mode self-cleans.
   _inGrayscaleMode = !factoryMode;
   if (factoryMode) {
-    // No dedicated absolute-grayscale bank on this driver — the OEM standalone
+    // No dedicated absolute-grayscale bank on this driver - the OEM standalone
     // "X3灰阶" flow needs a different panel init (PSR/PWR/VCOM rails) and DTM
     // framing that isn't ported. Factory mode reuses the _full B/W bank.
     loadBankCdi(bus, 0x29, 0x07, _cfg.full);
@@ -465,7 +465,7 @@ void Uc8253X3Driver::grayscaleRevert(EpdBus& bus, const uint8_t* fb) {
   bus.cmd(CMD_DATA_STOP);
   loadBankCdi(bus, 0xA9, 0x07, _cfg.half);
   triggerRefresh(bus, false);
-  // Both planes are now all-white (BW-coded), not grayscale planes — clear
+  // Both planes are now all-white (BW-coded), not grayscale planes - clear
   // lsbValid to match, or it stays true forever and forces the cleanBaseNeeded
   // path every page.
   _grayState.lsbValid = false;
@@ -493,7 +493,7 @@ void Uc8253X3Driver::deepSleep(EpdBus& bus) {
 }
 
 // Per-board waveform/LUT injection: a board that drives a different UC8253 panel
-// (different LUTs) supplies its own config without editing this driver — define
+// (different LUTs) supplies its own config without editing this driver - define
 // `const Uc8253X3Config& yourConfig();` in namespace freeink and build with
 // -DFREEINK_UC8253_X3_CONFIG=yourConfig. Resolution is orthogonal: it always
 // comes from that board's BoardProfile. A panel that also differs in init or

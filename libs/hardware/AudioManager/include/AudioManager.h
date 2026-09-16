@@ -7,12 +7,12 @@
 // the new ESP-IDF i2s_std driver, and stream 16-bit PCM WAV data from a
 // caller-supplied byte source. Two codecs are supported, selected by
 // AudioConfig::output: ES8388 (Murphy M3, OEM-recovered register sequence)
-// and ES8311 (M5 PaperColor, mirroring M5Unified's speaker bring-up — the
+// and ES8311 (M5 PaperColor, mirroring M5Unified's speaker bring-up - the
 // codec clocks itself from BCLK, plus the AW8737A amp on its ampEnable pin).
 //
 // Playback runs in a dedicated FreeRTOS task (priority above typical workers,
 // like the OEM "musicTask"), so play() returns immediately; with loop=true the
-// source is rewound and replayed until stop() is called — the alarm use case.
+// source is rewound and replayed until stop() is called - the alarm use case.
 //
 // The WAV source is a pair of callbacks instead of a FILE/Stream so the SDK
 // stays storage-agnostic: firmware can serve bytes from LittleFS, SD, or a

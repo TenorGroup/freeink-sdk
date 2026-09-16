@@ -6,7 +6,7 @@ namespace freeink {
 namespace ui {
 
 // The edge of the screen the sheet hangs from. The rule and grabber sit on
-// the opposite (free) edge — the edge the sheet is dragged from.
+// the opposite (free) edge - the edge the sheet is dragged from.
 enum class SheetEdge : uint8_t { Top, Bottom };
 
 // Chrome for a partial-height sheet pulled over the screen (an iOS-style

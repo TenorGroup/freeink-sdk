@@ -12,7 +12,7 @@
 
 // Orientation of the visible-row stream, switchable per build for field A/B.
 // Defaults (0/0) = the stock convention, HARDWARE-CONFIRMED upright on a field
-// UC8279 unit: rows forward, no byte/bit mirroring — orientation comes from the
+// UC8279 unit: rows forward, no byte/bit mirroring - orientation comes from the
 // PSR SHL bit (0x37), which must be written AFTER PON to latch (PON reloads the
 // MTP defaults).
 #ifndef FREEINK_UC8279X4_ROWREV
@@ -24,7 +24,7 @@
 
 namespace freeink {
 namespace {
-// UC8279 (800x480 X4 Pro variant) command set — UC81xx KW family, per the vendor
+// UC8279 (800x480 X4 Pro variant) command set - UC81xx KW family, per the vendor
 // X4 Pro display hardware reference.
 constexpr uint8_t CMD_PANEL_SETTING = 0x00;       // PSR
 constexpr uint8_t CMD_POWER_OFF = 0x02;           // POF
@@ -35,7 +35,7 @@ constexpr uint8_t CMD_DTM1 = 0x10;                // OLD plane in KW mode / AA p
 constexpr uint8_t CMD_DISPLAY_REFRESH = 0x12;     // DRF
 constexpr uint8_t CMD_DTM2 = 0x13;                // NEW plane in KW mode / AA plane1
 constexpr uint8_t CMD_PLL = 0x30;                 // PLL frame rate
-constexpr uint8_t CMD_VCOM_DATA_INTERVAL = 0x50;  // CDI — 1 data byte on this part
+constexpr uint8_t CMD_VCOM_DATA_INTERVAL = 0x50;  // CDI - 1 data byte on this part
 constexpr uint8_t CMD_RESOLUTION = 0x61;          // TRES
 constexpr uint8_t CMD_GATE_SOURCE_START = 0x65;   // GSST (4 data bytes)
 constexpr uint8_t CMD_PARTIAL_WINDOW = 0x90;      // PTL (window; stock re-issues per partial)
@@ -71,7 +71,7 @@ const GrayLut kXtfAa68[5] = {
     {0x24, {0x01, 0x02, 0x03, 0x81, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01}},  // BB
 };
 
-// UC8279_aa_prebw_mid — the stock non-flashing previous->current transition
+// UC8279_aa_prebw_mid - the stock non-flashing previous->current transition
 // waveform (Factory.bin DROM 0x3c5d826f, uploaded by FUN_4214d3a0). 5 tables,
 // command-prefixed, 42 data bytes each (distinct from the 49-byte display bank).
 // Same layout as the UC8179 sibling's kGrayPreBwMid.
@@ -87,7 +87,7 @@ const uint8_t kXtfPreBwMid[5][PREBW_LUT_LEN + 1] = {
 
 const GrayLut* selectAaLuts() {
   // LUT_VER stored by the boot probe. 0x02 has its own table; 0x68 is the newer
-  // set. Reserved 0x69 (and anything unknown) falls back to the 0x68 bytes —
+  // set. Reserved 0x69 (and anything unknown) falls back to the 0x68 bytes -
   // the reference defines no AA waveform for it, and its init/built-in paths
   // are identical.
   return BoardConfig::ACTIVE.displayControllerVariant == 0x02 ? kXtfAa02 : kXtfAa68;
@@ -214,12 +214,12 @@ constexpr uint8_t kQualityLutReg[5] = {0x20, 0x21, 0x23, 0x22, 0x24};
 const Uc8279X4Config& uc8279X4DefaultConfig() {
   static const Uc8279X4Config cfg = {
       0x37,  // psr0: stock X4C UC8279 vtable value, SHL set (rows forward, no RAM
-             // mirroring and writes PSR between PON and DRF — PON reloads MTP
+             // mirroring and writes PSR between PON and DRF - PON reloads MTP
              // settings, so only post-PON PSR writes latch). REG=1 (external LUT)
              // at init and for AA; built-in refreshes re-assert psr0 & 0xDF = 0x17
       0x4D,  // psr1
       0x20,  // pfs (0x03)
-      0x0E,  // pll (0x30) — X4 Pro only; stock X4C omits this command
+      0x0E,  // pll (0x30) - X4 Pro only; stock X4C omits this command
       0x02,  // gateScan (0xE1)
       0x02,  // ccset (0xE0)
       0x1E,  // tsset (0xE5) full refresh
@@ -227,8 +227,8 @@ const Uc8279X4Config& uc8279X4DefaultConfig() {
       0x97,  // cdiAa (0x50, 1 byte): constant on EVERY AA refresh, per stock
       0x97,  // cdiBwFull (0x50): stock writes it before every GC/full refresh
       0xD7,  // cdiBwFast (0x50): stock value for the windowed partial
-      600,   // tresHeight — addressed 800x600 (480 visible)
-      120,   // gateOffset — visible gates start at 120 on this variant
+      600,   // tresHeight - addressed 800x600 (480 visible)
+      120,   // gateOffset - visible gates start at 120 on this variant
   };
   return cfg;
 }
@@ -301,7 +301,7 @@ void Uc8279X4Driver::begin(EpdBus& bus) {
 void Uc8279X4Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
   // CrossPoint's AA path draws its B/W base with an ordinary Fast paint. Right
   // after an AA page, route that base through stock's non-flashing prev->current
-  // transition instead of a plain DU — this keeps the gray edge charge in check
+  // transition instead of a plain DU - this keeps the gray edge charge in check
   // continuously (like the UC8179 sibling), so the periodic Half scrub works
   // without a full flash. Same guard as UC8179.
   if (mode == RefreshMode::Fast && _redriveAfterGray && _grayRefreshedOnce && _oldPlaneValid && !_needFullClear) {
@@ -392,7 +392,7 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
   (void)prev;
   // Snapshot the B/W base for a grayscale overlay that may follow (the reader
   // draws this base, then folds it into the absolute AA planes). Harmless for
-  // pure B/W paints — it's just a memcpy that the next AA page consumes.
+  // pure B/W paints - it's just a memcpy that the next AA page consumes.
   _grayBaseValid = false;
   _absoluteGrayPlanes = false;
   if (_grayBase != nullptr && fb != nullptr) {
@@ -401,12 +401,12 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
   }
   // Same differential model as the UC8179 sibling: only an EXPLICIT Fast request
   // uses the PTIN/PTOUT DU partial (OLD plane = previous displayed frame). Full
-  // AND Half both run the clearing OTP GC waveform — but they seed the OLD plane
+  // AND Half both run the clearing OTP GC waveform - but they seed the OLD plane
   // DIFFERENTLY (this is the load-bearing distinction, copied from UC8179):
   //   * Half = charge SCRUB: OLD = complement of the target, so EVERY pixel
   //     (including white background) is forced through a transition cell and no
   //     WW/BB pixel idles with stale AA charge. A white-seed GC only redraws
-  //     black-target pixels and leaves background ghost parked in WW — that was
+  //     black-target pixels and leaves background ghost parked in WW - that was
   //     the residual ghosting seen after fix9's white-seed Half.
   //   * Full = absolute-from-white seed (the known clean full flash).
   // Half is CrossPoint's periodic ghost-cleanup (every getRefreshFrequency()
@@ -434,8 +434,8 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
   _redriveAfterGray = false;
 
   // Built-in refresh setup, byte-for-byte the stock FW trigger order (RE of
-  // Factory.bin FUN_4214d050 partial / FUN_4214cfe8 full): CDI first — stock
-  // writes the 1-byte CDI on EVERY refresh, 0x97 full / 0xD7 partial — then
+  // Factory.bin FUN_4214d050 partial / FUN_4214cfe8 full): CDI first - stock
+  // writes the 1-byte CDI on EVERY refresh, 0x97 full / 0xD7 partial - then
   // CCSET/TSSET (+ PFS/gate-scan on partial), PON, the partial window, and a
   // PSR rewrite between PON and DRF (same latch behavior as the AA path).
   bus.cmd(CMD_VCOM_DATA_INTERVAL);
@@ -454,7 +454,7 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
   powerOnIfNeeded(bus, " 8279x4_PON");
 
   if (fast) {
-    // Stock NEVER issues PTIN without a PTL (0x90) window — with PTL unset the
+    // Stock NEVER issues PTIN without a PTL (0x90) window - with PTL unset the
     // DU scans but develops nothing (first field unit: 443 ms DRF, no image).
     // Full-screen window; gate coords carry the 120-gate visible offset.
     const uint16_t xEnd = _w - 1;
@@ -562,7 +562,7 @@ void Uc8279X4Driver::copyGrayscaleLsb(EpdBus& bus, const uint8_t* lsb) {
 // Grey-mask coverage (percent of panel pixels) above which a gray pass is
 // treated as an image and refreshed with the scaled four-tone quality bank.
 // Deliberately high: only image-DOMINANT surfaces (sleep screens, standalone
-// image pages, full covers — typically 30%+) should cross it. Glyph AA marks
+// image pages, full covers - typically 30%+) should cross it. Glyph AA marks
 // 1-2%; book pages with modest inline images stay under it and keep stock AA.
 #ifndef FREEINK_UC8279X4_QUALITY_COVERAGE_PCT
 #define FREEINK_UC8279X4_QUALITY_COVERAGE_PCT 25
@@ -638,7 +638,7 @@ void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, c
   bus.cmd(CMD_DISPLAY_REFRESH);
   bus.waitBusy(" 8279x4_gray");
   // Vendor production behavior: the UC8279 AA path leaves analog power enabled
-  // between page refreshes (the UC8179 sibling does the same — its gray_aa sends
+  // between page refreshes (the UC8179 sibling does the same - its gray_aa sends
   // no POF). Honor only an explicit turnOff.
   if (turnOff) {
     bus.cmd(CMD_POWER_OFF);
@@ -649,7 +649,7 @@ void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, c
   // Restore the clean B/W base to BOTH controller planes (stock gray_aa does the
   // same). `_grayBase` was rebuilt to the base = plane0 & plane1 in
   // copyGrayscaleMsb. This keeps the next Fast B/W diff's OLD plane coherent AND
-  // stops a stale gray selector plane from being reused by a later refresh — the
+  // stops a stale gray selector plane from being reused by a later refresh - the
   // core of why absolute planes de-ghost where raw delta planes did not.
   (void)fb;
   if (_grayBaseValid && _grayBase != nullptr) {
@@ -663,7 +663,7 @@ void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, c
 
   // AA still leaves intermediate edge charge a plain DU diff can't neutralize;
   // flag the next B/W page to re-drive every pixel to its target (see
-  // displayStart), scrubbing residue with a cheap DU — an explicit Half GC
+  // displayStart), scrubbing residue with a cheap DU - an explicit Half GC
   // remains the strong purge.
   _redriveAfterGray = true;
   _absoluteInput = false;
@@ -766,7 +766,7 @@ void Uc8279X4Driver::cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) {
     _oldPlaneValid = false;
     return;
   }
-  // Re-seed the OLD plane (0x10) with the clean B/W frame the reader restored —
+  // Re-seed the OLD plane (0x10) with the clean B/W frame the reader restored -
   // same rationale as the UC8179 sibling. (displayGray already restored the base
   // to both planes; this covers callers that reach cleanup by another route.)
   streamPlane(bus, CMD_DTM1, bw);

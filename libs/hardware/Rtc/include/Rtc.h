@@ -32,7 +32,7 @@ class Rtc {
   bool present() const { return begun_; }
 
   // Reads the current time. Returns false on I2C error or if the RTC reports its
-  // oscillator stopped (low voltage / never set) — the time is then unreliable.
+  // oscillator stopped (low voltage / never set) - the time is then unreliable.
   bool now(DateTime& out);
 
   // Sets the time. Returns false on I2C error.

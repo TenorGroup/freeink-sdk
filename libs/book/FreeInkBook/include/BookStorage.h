@@ -1,13 +1,13 @@
 #pragma once
 
-// FreeInk SDK — storage interfaces for FreeInkBook.
+// FreeInk SDK - storage interfaces for FreeInkBook.
 //
 // The engine never touches a filesystem directly. The application supplies a
 // random-access view of the book container file (SD card, flash partition,
 // or a host file in unit tests). Interfaces are deliberately tiny so a board
 // adapter is a few lines.
 //
-// Freestanding C++17 — no Arduino or ESP-IDF dependency.
+// Freestanding C++17 - no Arduino or ESP-IDF dependency.
 
 #include <stdint.h>
 
@@ -27,11 +27,11 @@ class BookSource {
   virtual uint64_t size() const = 0;
 };
 
-// Writable store for one book's layout cache — flat file names inside a
+// Writable store for one book's layout cache - flat file names inside a
 // per-book directory the application owns. Writes are streaming (the engine
 // never holds a whole cache file in RAM) with a single write open at a time;
 // reads are random-access. A failed or interrupted write must leave either
-// the old file or no file, never a torn one — implementations should write a
+// the old file or no file, never a torn one - implementations should write a
 // temp name and rename on endWrite() where the filesystem allows.
 class CacheStorage {
  public:

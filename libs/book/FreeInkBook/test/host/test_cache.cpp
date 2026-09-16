@@ -298,7 +298,7 @@ void testRoundtripAndStaleness(HostCacheStorage& cache) {
 
 // The position-restore promise: pick a spot on a page at 16 px, relayout the
 // chapter at 22 px into a second generation, and land on the page containing
-// the same character — exactly, not approximately.
+// the same character - exactly, not approximately.
 void testPositionMigration(HostCacheStorage& cache) {
   HostFileSource source;
   CHECK(source.open(fixture("minimal.epub")));

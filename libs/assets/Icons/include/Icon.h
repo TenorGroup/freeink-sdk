@@ -8,7 +8,7 @@ namespace freeink {
 // tools/gen_icons.py (see libs/assets/Icons).
 //
 // Format: rows top-to-bottom, each (w + 7) / 8 bytes, MSB-first. Bit 1 = leave the
-// pixel (transparent), bit 0 = draw black. NOT pre-rotated — the renderer maps
+// pixel (transparent), bit 0 = draw black. NOT pre-rotated - the renderer maps
 // logical coordinates to the panel itself, so the same asset is correct in every
 // orientation.
 //

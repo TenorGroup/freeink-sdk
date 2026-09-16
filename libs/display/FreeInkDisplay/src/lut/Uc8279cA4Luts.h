@@ -3,7 +3,7 @@
 // EEGO A4 UC8279C waveform tables, from the stock firmware. Full refresh writes
 // all 49 bytes of each record to controller registers 0x20..0x24; fast refresh
 // writes the first 42 bytes of each 49-byte record; grayscale uses five 49-byte
-// records (OEM-extracted — replaces the fork's washed-out 42-byte table).
+// records (OEM-extracted - replaces the fork's washed-out 42-byte table).
 // Full bank SHA-256:  1ed90690ea30f78caf3e89c96693314e60023dcb9bc0257099d56fadc0ae1ed0
 // Fast bank SHA-256:  6bcb79bc45c53071254275623cd3e99ba7e21c913b892f1731b835694e2773ca
 
@@ -53,7 +53,7 @@ constexpr uint8_t A4_UC8279C_FAST_LUT[5 * A4_UC8279C_FAST_RECORD_LENGTH] = {
 // 49-byte records). The fork's earlier 5x42 table had weak/wrong drive phases,
 // producing washed-out grays; this one carries the real mid-gray phases
 // (0x8e/0x4e/0x8a/0x4a in WW/BW/WB/BB). Pair with full-power gray init
-// (PWR byte0 0x43, VCOM_DC 0x24) — see Uc8279cA4Driver::initController.
+// (PWR byte0 0x43, VCOM_DC 0x24) - see Uc8279cA4Driver::initController.
 constexpr uint8_t A4_UC8279C_GRAY_RECORD_LENGTH = 49;
 constexpr uint8_t A4_UC8279C_GRAY_LUT[5 * A4_UC8279C_GRAY_RECORD_LENGTH] = {
     // 0x20 VCOM

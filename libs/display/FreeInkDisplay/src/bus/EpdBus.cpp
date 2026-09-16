@@ -13,7 +13,7 @@
 #endif
 
 // Consumer escape hatch for boards whose EPD power/reset live behind glue the
-// SDK doesn't know. Weak REFERENCES only — an SDK-internal implementation
+// SDK doesn't know. Weak REFERENCES only - an SDK-internal implementation
 // can't ride these (a weak ref doesn't force the archive member that defines
 // it to link), which is why the Paper Mono path below is a direct call into
 // its board-support header instead.
@@ -80,7 +80,7 @@ void EpdBus::begin(const EpdPins& pins, uint32_t spiHz, BusyPolarity busy, int8_
   // Power the EPD rail first (boards that gate it, e.g. Sticky's EP_PWR_EN), so the
   // panel is alive before SPI bring-up and the reset pulse. No-op when unassigned.
   // gpio_hold_dis first: PowerManager::powerDownRailsForSleep() holds this pin LOW
-  // for deep sleep, and the hold survives the wake reset — without releasing it,
+  // for deep sleep, and the hold survives the wake reset - without releasing it,
   // the HIGH write silently bounces off the latch and the rail stays off.
   if (pins.powerEnable >= 0) {
     gpio_hold_dis(static_cast<gpio_num_t>(pins.powerEnable));
@@ -327,12 +327,12 @@ void EpdBus::waitRefreshComplete(const char* tag) {
   // interrupts do not fire during light sleep, so a completion edge taken while the
   // host is slept would be missed and the wait would stall to its 30 s timeout. The
   // slice hook already delivers GPIO-precise wake, so the ISR path buys these hosts
-  // nothing — fall back to the hooked poll.
+  // nothing - fall back to the hooked poll.
   if (_busyWaitSliceHook != nullptr) {
     // Refresh-completion context: BUSY assertion can trail MASTER_ACTIVATION
     // by a few microseconds, and the ActiveHigh polled path (unlike ActiveLow's
     // 100 ms grace loop, or the ISR path's 20 ms edge wait below) would fall
-    // through immediately — returning mid-waveform, after which single-buffer
+    // through immediately - returning mid-waveform, after which single-buffer
     // drivers rewrite controller RAM while the panel is still driving. Give
     // the poll the same bounded grace here, in the refresh-only context, so
     // waitBusy() itself (which also serves command waits where BUSY may never
@@ -379,7 +379,7 @@ void EpdBus::waitRefreshComplete(const char* tag) {
     }
   }
 
-  // Long sleep — fire the power hooks (if any) around it, matching the poll path.
+  // Long sleep - fire the power hooks (if any) around it, matching the poll path.
   const bool hook = (_busyWaitBeginHook != nullptr);
   if (hook) _busyWaitBeginHook();
   while (digitalRead(_pins.busy) != doneLevel) {

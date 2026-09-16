@@ -1,7 +1,7 @@
 #include <FreeInkUI.h>
 #include <FreeInkUIDisplayTarget.h>
 
-#include "gallery_font.h"   // kNotoSansSmallFont — a compact font for thumbnails
+#include "gallery_font.h"   // kNotoSansSmallFont - a compact font for thumbnails
 
 #include <cstdint>
 #include <cstdio>
@@ -24,7 +24,7 @@ struct Canvas {
   // Render at native landscape orientation (no rotation). The 4-arg DisplayTarget
   // ctor now auto-rotates a landscape panel (width > height) to Portrait for
   // held-tall readers; the gallery wants the panel drawn as-is, so pin it. And
-  // render with a compact font (~18px line) — the components' default metrics
+  // render with a compact font (~18px line) - the components' default metrics
   // (e.g. TableProps.rowHeight = 24) are tuned for a small UI font, so the 34px
   // device font would overflow every cell/row in these thumbnails.
   Canvas(int16_t w, int16_t h) : width(w), height(h), widthBytes((w + 7) / 8), fb(widthBytes * h, 0xFF),

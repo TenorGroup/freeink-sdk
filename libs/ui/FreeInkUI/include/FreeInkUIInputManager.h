@@ -1,7 +1,7 @@
 #pragma once
 
 // Optional adapter: builds a freeink::ui::InputSnapshot from the SDK's
-// InputManager each frame. Include this header from application code only —
+// InputManager each frame. Include this header from application code only -
 // FreeInkUI itself stays dependency-free, and PlatformIO will only require
 // InputManager when a compiled source actually includes this file.
 //
@@ -60,7 +60,7 @@ inline InputSnapshot snapshotFrom(const InputManager& input, const ButtonBinding
 // Orientation-aware variant: taps arrive as InputManager's normalized
 // panel-native coordinates and land in the snapshot already mapped to the
 // device's logical frame via touchToLogical(). flipX/flipY compensate for
-// mirrored panel mounting (a board property — set once per device, verified
+// mirrored panel mounting (a board property - set once per device, verified
 // on the bench, not rediscovered per app).
 inline InputSnapshot snapshotFrom(const InputManager& input, const DeviceContext& device, const bool touchFlipX = false,
                                   const bool touchFlipY = false, const ButtonBindings& bindings = ButtonBindings{}) {
@@ -95,7 +95,7 @@ inline InputSnapshot snapshotFrom(const InputManager& input, const DeviceContext
   }
   // Raw release the tap classifier didn't report (swipe end, drag-off).
   // Deliver it off-target: routing dispatches nothing, but the interaction
-  // buffer drops its pressed-element state — otherwise that state survives
+  // buffer drops its pressed-element state - otherwise that state survives
   // the next frame's rebuild and paints a phantom active highlight on
   // whatever lands in the same slot (e.g. after a swipe pages a list).
   if (input.hasTouch() && !snapshot.touchReleased && input.wasTouchReleased()) {
@@ -107,7 +107,7 @@ inline InputSnapshot snapshotFrom(const InputManager& input, const DeviceContext
 }
 
 // Long-press-aware variant: when the InputManager's classifier fires a
-// long-press (WHILE the finger is still down — the hold-to-act feel on
+// long-press (WHILE the finger is still down - the hold-to-act feel on
 // e-paper, where waiting for the lift reads as lag), this delivers it as a
 // touchReleased + longPress snapshot at the contact point; routing matches it
 // against InputLongPress-masked interactions. Acting on the long-press

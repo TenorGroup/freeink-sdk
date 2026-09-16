@@ -1,9 +1,9 @@
 #pragma once
 
-// FreeInk SDK — CSS subset for FreeInkBook (Phase 4).
+// FreeInk SDK - CSS subset for FreeInkBook (Phase 4).
 //
 // Implements the slice of CSS that reflowable books actually use, resolved
-// per element during the streaming parse — there is no style tree. The
+// per element during the streaming parse - there is no style tree. The
 // tokenizer is tolerant by design: unknown properties, selectors, at-rules,
 // and units are skipped, never fatal.
 //

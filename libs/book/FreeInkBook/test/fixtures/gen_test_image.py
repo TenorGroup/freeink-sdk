@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generates the fixture PNG (pure stdlib): 64x48 8-bit grayscale with a
-deterministic pattern — left half is a horizontal gradient, right half is
+deterministic pattern - left half is a horizontal gradient, right half is
 solid black top / solid white bottom, so scaled output rows have predictable
 values at known coordinates."""
 import struct

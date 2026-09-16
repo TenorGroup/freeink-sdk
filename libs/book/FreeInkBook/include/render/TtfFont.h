@@ -1,19 +1,19 @@
 #pragma once
 
-// FreeInk SDK — TTF/OTF font engine for FreeInkBook (Phase 6).
+// FreeInk SDK - TTF/OTF font engine for FreeInkBook (Phase 6).
 //
 // TtfFont implements BookFont over stb_truetype: real advances, kerning
 // ('kern' and GPOS pairs), and on-demand glyph rasterization to 8-bit
-// alpha bitmaps. The font file bytes are borrowed — point them at PSRAM, a
-// memory-mapped region, or an arena-loaded SD file — and all cache memory
+// alpha bitmaps. The font file bytes are borrowed - point them at PSRAM, a
+// memory-mapped region, or an arena-loaded SD file - and all cache memory
 // comes from a caller-sized glyph arena, so the engine's no-heap rule holds.
 //
-// Caching: advances live in a direct-mapped table (collisions overwrite —
+// Caching: advances live in a direct-mapped table (collisions overwrite -
 // always correct, occasionally recomputed). Rasterized glyphs append to the
 // glyph arena through a direct-mapped table; when the arena fills, the whole
 // cache flushes and rebuilds (bounded by construction, no LRU bookkeeping).
 //
-// Style flags are accepted but do not synthesize bold/italic — register the
+// Style flags are accepted but do not synthesize bold/italic - register the
 // real face per style and route through FontChain. FontChain also gives
 // per-codepoint fallback (user font → Latin default → CJK default) so mixed
 // scripts render without tofu.
@@ -38,7 +38,7 @@ namespace book {
 class TtfFont : public RenderFont {
  public:
   // `data` is borrowed and must outlive the font. The glyph arena backs all
-  // caches; 32–64 KB is comfortable for one active reading size.
+  // caches; 32-64 KB is comfortable for one active reading size.
   bool init(const uint8_t* data, uint32_t len, Arena& glyphArena);
   bool ready() const { return ready_; }
 
@@ -58,7 +58,7 @@ class TtfFont : public RenderFont {
 
   // Rasterizes (and caches) one glyph. Returns nullptr for missing glyphs or
   // when a single glyph exceeds the whole arena. The bitmap stays valid
-  // until the cache flushes — consume or blit before rasterizing many more.
+  // until the cache flushes - consume or blit before rasterizing many more.
   const GlyphBitmap* rasterize(uint32_t codepoint, uint16_t sizePx) override;
 
  private:
@@ -73,7 +73,7 @@ class TtfFont : public RenderFont {
   };
 
   // const so the const hasGlyph() can route through the same cache. It mutates
-  // only through advances_, which a const method may do — the pointer is const,
+  // only through advances_, which a const method may do - the pointer is const,
   // the slots it addresses are not.
   int32_t glyphIndexFor(uint32_t codepoint) const;
   void flushGlyphs();
@@ -92,7 +92,7 @@ class TtfFont : public RenderFont {
   GlyphSlot* glyphs_ = nullptr;
 
   // Profile-scaled: bigger caches on generous-RAM targets mean fewer stb
-  // re-rasterizations — the main page-render speed lever. Slot tables live
+  // re-rasterizations - the main page-render speed lever. Slot tables live
   // in the caller's glyph arena, so size the arena to match.
 #if FREEINK_BOOK_PROFILE == FREEINK_BOOK_PROFILE_SMALL
   static constexpr uint32_t kAdvanceSlots = 256;
@@ -127,7 +127,7 @@ class FontChain : public BookFont {
   bool covers(uint32_t codepoint) override;
 
   // The face that will draw `codepoint` in `styleFlags`. `faceFlagsOut`
-  // (optional) receives the chosen face's registered style — renderers use
+  // (optional) receives the chosen face's registered style - renderers use
   // it to synthesize bold when no real bold face exists.
   RenderFont* fontFor(uint32_t codepoint, uint8_t styleFlags = StyleNone,
                       uint8_t* faceFlagsOut = nullptr);

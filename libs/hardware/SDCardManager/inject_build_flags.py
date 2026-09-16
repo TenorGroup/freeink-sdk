@@ -3,7 +3,7 @@
 # library.json "flags" would not reach it).
 #
 # Without USE_UTF8_LONG_NAMES, SdFat returns mangled names for any file with
-# a non-ASCII character ("The 7½ Deaths..." listed but unopenable — no
+# a non-ASCII character ("The 7½ Deaths..." listed but unopenable - no
 # metadata, no cover, no reading). There is no situation where a FreeInk
 # firmware wants that, so this is not a user-facing option.
 Import("env")

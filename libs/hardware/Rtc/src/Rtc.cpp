@@ -282,7 +282,7 @@ bool Rtc::adjust(const int32_t seconds, DateTime* out) {
 
 }  // namespace freeink
 
-#else  // FREEINK_CAP_RTC — no RTC on this board.
+#else  // FREEINK_CAP_RTC - no RTC on this board.
 
 namespace freeink {
 bool Rtc::begin() { return false; }

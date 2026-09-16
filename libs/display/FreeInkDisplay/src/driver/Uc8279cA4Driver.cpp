@@ -204,7 +204,7 @@ void Uc8279cA4Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* pre
   }
   if (_firstRefreshPending) {
     // First refresh after begin(): the glass state is unknown (reflash/reset),
-    // so seed the old plane with the inverse of this frame — every pixel
+    // so seed the old plane with the inverse of this frame - every pixel
     // transitions and the full LUT drives the whole panel to a clean baseline.
     writeFrame(bus, CMD_DTM1, fb, /*invert=*/true);
     _firstRefreshPending = false;
@@ -255,7 +255,7 @@ void Uc8279cA4Driver::displayGray(EpdBus& bus, const uint8_t* fb, const bool tur
 
   hardwareReset(bus);
   initController(bus, true);
-  // LSB -> DTM1 (old, 0x10), MSB -> DTM2 (new, 0x13) — the plane order both proven
+  // LSB -> DTM1 (old, 0x10), MSB -> DTM2 (new, 0x13) - the plane order both proven
   // UC8279 drivers (Uc8279Driver / Uc8279X4Driver) use with the standard 0x21-0x24
   // transition LUT. The fork had these swapped, scrambling the four gray levels.
   writeFrame(bus, CMD_DTM1, _grayLsb);

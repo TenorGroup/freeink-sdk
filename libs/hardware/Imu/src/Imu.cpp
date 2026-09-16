@@ -236,7 +236,7 @@ bool Imu::wake() {
 
 }  // namespace freeink
 
-#else  // FREEINK_CAP_IMU — IMU absent.
+#else  // FREEINK_CAP_IMU - IMU absent.
 
 namespace freeink {
 bool Imu::begin() { return false; }

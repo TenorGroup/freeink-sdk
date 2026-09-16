@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — input abstraction.
+// FreeInk SDK - input abstraction.
 //
 // Reads buttons across board input styles (ADC resistor ladder, plain digital
 // buttons, confirm-hold-for-back, five-key) selected from BoardConfig::ACTIVE,
@@ -47,7 +47,7 @@ class InputManager {
   // True while a raw state change is still inside the debounce window (the last
   // raw sample differs from the committed state). A change only commits after
   // two consecutive matching samples, so hosts that poll slowly (e.g. a
-  // sleep-sliced idle loop) should re-poll quickly while this is set —
+  // sleep-sliced idle loop) should re-poll quickly while this is set -
   // otherwise a press shorter than the poll period lands in a single sample and
   // is dropped.
   bool isDebouncePending() const { return lastState != currentState; }
@@ -134,7 +134,7 @@ class InputManager {
   bool isTouchTapCandidate(float& nx, float& ny, unsigned long& heldMs) const;
   // True while a touch is down; writes the CURRENT contact position normalized
   // to 0..1 in the panel's native frame. Unlike #isTouchTapCandidate there is
-  // no tap-slop gate — the position follows the moving finger, for drag
+  // no tap-slop gate - the position follows the moving finger, for drag
   // interactions (sliders). Callers own any threshold/hysteresis they need.
   bool isTouchHeldAt(float& nx, float& ny) const;
   // Duration (ms) of the last touch contact, latched on release.
@@ -182,11 +182,11 @@ class InputManager {
   // already fired wasHomeKeyLongPressed(). Cleared each #update().
   bool wasHomeKeyTapped() const;
   // True once when the home key has been held past the long-press threshold
-  // (~700 ms), while still down — a hold shortcut (e.g. open the reader menu).
+  // (~700 ms), while still down - a hold shortcut (e.g. open the reader menu).
   // Cleared each #update().
   bool wasHomeKeyLongPressed() const;
 
-  // Optional board hook for buttons that aren't direct GPIOs — e.g. a key
+  // Optional board hook for buttons that aren't direct GPIOs - e.g. a key
   // behind an I2C IO-expander (the LilyGo T5 S3 user button on its PCA9535). It
   // returns a (1<<BTN_*) bitmask that is OR'd into every update(); the board
   // reads its expander, so InputManager itself stays device-agnostic. Default:
@@ -205,7 +205,7 @@ class InputManager {
   // Spawns a FreeRTOS task that samples the buttons every pollMs and latches
   // each press edge (a BTN_* index) into an internal queue. This decouples
   // input from rendering: on e-paper, a slow refresh blocks the app's main
-  // loop, so a press that lands mid-refresh is otherwise lost — the task keeps
+  // loop, so a press that lands mid-refresh is otherwise lost - the task keeps
   // sampling (refresh busy-waits yield via delay()) and the app drains presses
   // with popPress() afterward. No-op if already started.
   //
@@ -219,7 +219,7 @@ class InputManager {
 
   // Pop the next latched touch tap (normalized 0..1 panel-native coordinates,
   // same frame as wasTouchTap). The async task queues every completed tap, so
-  // taps that land while the app thread renders or waits are never lost —
+  // taps that land while the app thread renders or waits are never lost -
   // drain and route them afterwards. Returns false when no tap is pending.
   bool popTouchTap(float& nx, float& ny);
 
@@ -248,7 +248,7 @@ class InputManager {
   // (Back/Confirm/Left/Right on group 1, Up/Down on group 2); X3 and X4 share
   // this pinout. A button-test or calibration screen uses this to spot a
   // drifted divider whose reading no longer lands in the band the firmware
-  // expects — visible from the raw value regardless of how it classifies.
+  // expects - visible from the raw value regardless of how it classifies.
   struct ButtonAdcSample {
     int pin;     // GPIO sampled (BUTTON_ADC_PIN_1 / BUTTON_ADC_PIN_2)
     int raw;     // raw analogRead() value, or -1 if this board has no ADC ladder

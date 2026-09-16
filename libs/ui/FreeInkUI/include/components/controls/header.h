@@ -28,7 +28,7 @@ struct HeaderProps {
   uint8_t leadingRadius = 0;
   // Trailing action button on the right edge (a "Save"/"Done" mirroring the
   // leading back button). Label, icon, or both. Occupies the same slot as
-  // rightLabel — set one or the other.
+  // rightLabel - set one or the other.
   const char* trailingLabel = nullptr;
   BitmapRef trailingIcon{};
   AssetRef trailingIconAsset{};

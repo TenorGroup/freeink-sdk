@@ -15,7 +15,7 @@ namespace {
 
 // --- Recovery combo: Back + Up ---------------------------------------------
 // The two buttons sit on different ADC ladders (Back on GPIO1, Up on GPIO2),
-// which is the only kind of two-button combo the ladder can report at once —
+// which is the only kind of two-button combo the ladder can report at once -
 // buttons sharing a pin (e.g. Back+Right) collapse to a single reading. Reading
 // through InputManager keeps the board's calibrated ranges (and works on the
 // digital-button boards too) instead of hard-coding ADC thresholds here.

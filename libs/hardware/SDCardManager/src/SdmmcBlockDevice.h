@@ -1,11 +1,11 @@
 #pragma once
 
-// FreeInk SDK — native ESP-IDF SDMMC block device for SdFat.
+// FreeInk SDK - native ESP-IDF SDMMC block device for SdFat.
 //
 // SdFat has no ESP32 SDIO/SDMMC driver, so boards wired for 4-bit SDMMC (e.g.
 // de-link) can't use its SPI card path. This adapter implements SdFat's
 // FsBlockDeviceInterface on top of the ESP-IDF `sdmmc` host + `sdmmc_cmd` sector
-// API, so a plain FsVolume mounts on it and hands back ordinary FsFile objects —
+// API, so a plain FsVolume mounts on it and hands back ordinary FsFile objects -
 // the public SDCardManager API (and CrossPoint's HalFile, which stores FsFile by
 // value) keeps working unchanged. Only compiled when FREEINK_SD_SDMMC is set.
 //

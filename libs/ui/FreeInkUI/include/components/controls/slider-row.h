@@ -32,7 +32,7 @@ inline StyleSet sliderRowStepStyles(uint8_t radius) {
 // square icon button after the + (e.g. a lamp on/off toggle beside a
 // brightness slider). The explicit step buttons exist because a drag on
 // etched matte glass is unreliable and a hidden tap zone is worse than no
-// zone at all — the capsule stays draggable / tap-to-jump, the buttons land
+// zone at all - the capsule stays draggable / tap-to-jump, the buttons land
 // on exact values. When the band is too narrow for a capsule between the
 // buttons, the buttons alone still drive the value and the row stays usable.
 struct SliderRowProps {

@@ -73,8 +73,8 @@ void testMetrics(TtfFont& font) {
   CHECK(font.ready());
   CHECK(font.hasGlyph('A'));
   CHECK(font.hasGlyph(0x00E9));      // é
-  CHECK(font.hasGlyph(0x0416));      // Ж — DejaVu covers Cyrillic
-  CHECK(!font.hasGlyph(0x732B));     // 猫 — no CJK in DejaVu Sans
+  CHECK(font.hasGlyph(0x0416));      // Ж - DejaVu covers Cyrillic
+  CHECK(!font.hasGlyph(0x732B));     // 猫 - no CJK in DejaVu Sans
 
   const int16_t ascent = font.ascent(32);
   const int16_t lineHeight = font.lineHeight(32);
@@ -136,7 +136,7 @@ void testRasterization(TtfFont& font) {
   int ok = 0;
   int expected = 0;
   for (uint32_t cp = 0x21; cp < 0x21 + 150; ++cp) {
-    if (!font.hasGlyph(cp)) continue;  // C1 controls etc. — legitimately absent
+    if (!font.hasGlyph(cp)) continue;  // C1 controls etc. - legitimately absent
     for (uint16_t size : {uint16_t{40}, uint16_t{44}}) {
       ++expected;
       const GlyphBitmap* g = font.rasterize(cp, size);
@@ -241,7 +241,7 @@ void testPageRenderer(const char* fixturesDir, TtfFont& font) {
   static uint8_t grayFb[800 * 480];
   struct FirstPageSink : PageSink {
     bool onPage(const Page& page) override {
-      // Runs point into layout scratch — render inside the callback.
+      // Runs point into layout scratch - render inside the callback.
       FrameTarget mono{monoFb, 800, 480, 100, FrameFormat::Mono1Dithered};
       FrameTarget gray{grayFb, 800, 480, 800, FrameFormat::Gray8};
       std::memset(monoFb, 0xFF, sizeof(monoFb));
@@ -275,7 +275,7 @@ void testPageRenderer(const char* fixturesDir, TtfFont& font) {
   }
   CHECK_EQ(marginViolations, 0);
 
-  // Gray8: anti-aliasing is real — the page contains black, white, AND a
+  // Gray8: anti-aliasing is real - the page contains black, white, AND a
   // meaningful band of intermediate coverage values at glyph edges.
   uint32_t black = 0;
   uint32_t mid = 0;

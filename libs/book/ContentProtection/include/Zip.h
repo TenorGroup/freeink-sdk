@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk — minimal ZIP access for encrypted entries.
+// FreeInk - minimal ZIP access for encrypted entries.
 //
 // The content module is parser-agnostic: it does its own central-directory
 // scan so it works alongside any EPUB parser (CrossPoint's ZipFile,

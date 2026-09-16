@@ -47,7 +47,7 @@ void Buzzer::end() {
 
 }  // namespace freeink
 
-#else  // FREEINK_CAP_BUZZER — no buzzer on this board.
+#else  // FREEINK_CAP_BUZZER - no buzzer on this board.
 
 namespace freeink {
 bool Buzzer::begin() { return false; }

@@ -1,4 +1,4 @@
-// FreeInk SDK — BLE HID host implementation.
+// FreeInk SDK - BLE HID host implementation.
 //
 // The real NimBLE central path compiles only under FREEINK_CAP_BLE_HID_HOST; the
 // #else branch links stub bodies (and references no BLE code). Flow: scan ->
@@ -129,7 +129,7 @@ uint8_t extractPrimaryCode(const uint8_t* p, size_t n, size_t* codeIdx = nullptr
 #endif
 
 // Raw HID report logging. Define FREEINK_BLE_HID_REPORT_DEBUG=1 in the firmware to
-// dump every notification's bytes — the fastest way to learn what a new remote sends.
+// dump every notification's bytes - the fastest way to learn what a new remote sends.
 #ifndef FREEINK_BLE_HID_REPORT_DEBUG
 #define FREEINK_BLE_HID_REPORT_DEBUG 0
 #endif
@@ -318,7 +318,7 @@ class ClientCB : public NimBLEClientCallbacks {
   void onConfirmPasskey(NimBLEConnInfo& connInfo, uint32_t) override {
     NimBLEDevice::injectConfirmPasskey(connInfo, true);
   }
-  // Reject peripheral connection-parameter updates — some keyboards request one
+  // Reject peripheral connection-parameter updates - some keyboards request one
   // on the first keypress and drop the link if it's negotiated.
   bool onConnParamsUpdateRequest(NimBLEClient*, const ble_gap_upd_params*) override { return false; }
 };
@@ -383,7 +383,7 @@ bool BleKeyboardHost::begin(const char* hostName) {
   // CONTINUOUS listening (window == interval, 100% duty; values are ms).
   // Extended advertising splits data into an AUX packet on a secondary
   // channel that the controller must catch at a precise moment after the primary
-  // — if the scan window is closed when it lands, the name/HID UUID is lost. A
+  // - if the scan window is closed when it lands, the name/HID UUID is lost. A
   // windowed (low-duty) scan is fine for legacy keyboards but starves AUX
   // reception, which is the only data this keyboard exposes. Duplicate filtering
   // is OFF (above) so the AUX packet (same address as the primary) isn't dropped.
@@ -398,7 +398,7 @@ bool BleKeyboardHost::begin(const char* hostName) {
   g_client = NimBLEDevice::createClient();
   if (!g_client) {
     // NimBLE can refuse a new client if a previous one wasn't reclaimed (e.g. rapid
-    // deinit/init cycles). Don't dereference null — unwind cleanly so a later begin()
+    // deinit/init cycles). Don't dereference null - unwind cleanly so a later begin()
     // can retry from a clean state.
     Serial.println("[BleHid] begin: createClient() returned null");
     NimBLEDevice::deinit(true);
@@ -409,7 +409,7 @@ bool BleKeyboardHost::begin(const char* hostName) {
   // some operations block it for several seconds (e.g. the reader rebuilding a whole
   // chapter to reach its last page on a backward page turn across a section boundary).
   // NimBLE's default supervision timeout is only 2.56s, so those long renders overrun
-  // it and the controller drops the link — the peripheral then fails to re-encrypt on
+  // it and the controller drops the link - the peripheral then fails to re-encrypt on
   // auto-reconnect (HCI 0x08 "Connection Timeout" -> BLE_HS err 520). Request a low
   // interval for keypress responsiveness with an 8s supervision timeout (units:
   // interval 1.25ms, timeout 10ms) so a slow page render can't sever the connection.
@@ -455,7 +455,7 @@ void BleKeyboardHost::end() {
   // NimBLE keeps a fixed-size client array (m_pClients) that survives deinit/init, and
   // deleteClient() DEFERS deletion while the client is CONNECTED/DISCONNECTING (it sets
   // a flag and disconnects async). deinit() then tears down the host before that
-  // deferred delete runs, so the slot leaks — and the next begin()'s createClient()
+  // deferred delete runs, so the slot leaks - and the next begin()'s createClient()
   // returns null forever (BLE can't restart). Waiting for a real disconnect, then
   // deleting while DISCONNECTED, frees the slot for good.
   if (g_client) {
@@ -498,7 +498,7 @@ void BleKeyboardHost::poll() {
   scanning_ = NimBLEDevice::getScan()->isScanning();
 
   // Held-key release. Page-turner remotes stream a held key (and many omit a clean
-  // release frame), so we do NOT synthesize host-side auto-repeat — that turned one
+  // release frame), so we do NOT synthesize host-side auto-repeat - that turned one
   // tap into dozens of page turns. Instead, when reports stop arriving, age the held
   // key / last generic code out so one physical press == one event and the next press
   // (even of the same button) re-triggers. Covers both the keyboard and generic paths.
@@ -666,7 +666,7 @@ void BleKeyboardHost::emitUsage(uint8_t usage, uint8_t mods) {
   SpecialKey special;
   // Best-effort translation: known keyboard usages get a char / SpecialKey. Unknown
   // codes (page-turner consumer codes, vendor layouts) still surface with keycode set
-  // so a capture-then-assign UI can bind them — hidTranslate already zeroes ch/special.
+  // so a capture-then-assign UI can bind them - hidTranslate already zeroes ch/special.
   hidTranslate(usage, mods, ch, special);
   KeyEvent ev;
   ev.ch = ch;
@@ -1033,7 +1033,7 @@ void BleKeyboardHost::persistBonds() {
 
 }  // namespace freeink
 
-#else  // !FREEINK_CAP_BLE_HID_HOST — stub bodies, no BLE code linked.
+#else  // !FREEINK_CAP_BLE_HID_HOST - stub bodies, no BLE code linked.
 
 namespace freeink {
 

@@ -1,6 +1,6 @@
 #pragma once
 
-// FreeInk SDK — BLE HID host (singleton).
+// FreeInk SDK - BLE HID host (singleton).
 //
 // Pairs with and connects to a Bluetooth Low Energy HID peripheral (central
 // role) and exposes translated key events (printable chars + a SpecialKey enum)
@@ -16,7 +16,7 @@
 // BLE callbacks run on the NimBLE host task and hand data to the app through a
 // small spinlock-guarded ring; drain it from the main loop with popKey().
 //
-// BLE-only — the ESP32-C3/S3 has no Bluetooth Classic radio, so Classic-only HID
+// BLE-only - the ESP32-C3/S3 has no Bluetooth Classic radio, so Classic-only HID
 // peripherals cannot connect.
 
 #include <Arduino.h>
@@ -43,7 +43,7 @@ enum class SpecialKey : uint8_t {
   PageDown,
 };
 
-// One decoded key press (or auto-repeat). `pressed` is always true today — the
+// One decoded key press (or auto-repeat). `pressed` is always true today - the
 // host emits on the press edge and synthesizes repeats while a key is held; key
 // releases are tracked internally for repeat but not surfaced.
 struct KeyEvent {
@@ -88,7 +88,7 @@ class BleKeyboardHost {
 
   // Fully tear down the BLE stack: stop scanning, drop the link, delete the
   // connection task, and NimBLEDevice::deinit() so the NimBLE host + controller
-  // RAM (tens of KB) is returned to the heap. Use this — not disconnect() — when
+  // RAM (tens of KB) is returned to the heap. Use this - not disconnect() - when
   // the user turns Bluetooth off, so memory-hungry work (e.g. EPUB inflate) can
   // allocate again. Bonds persist in NVS; begin() re-inits cleanly afterwards.
   // Must run at normal CPU frequency (controller deinit), like begin().
@@ -133,7 +133,7 @@ class BleKeyboardHost {
   bool popKey(KeyEvent& out);
 
   // --- Internal: called by the NimBLE backend (not for app use). These keep the
-  // public header free of NimBLE types — the .cpp translates BLE objects into
+  // public header free of NimBLE types - the .cpp translates BLE objects into
   // these plain calls. -------------------------------------------------------
   void onScanResultIngest(const char* addr, const char* name, int rssi, uint8_t type, bool hid, bool connectable);
   void onReportIngest(const uint8_t* data, size_t len);

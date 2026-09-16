@@ -1,6 +1,6 @@
 #pragma once
 
-// UC8279d panel driver — Xteink X3, newer production run (792x528 B/W).
+// UC8279d panel driver - Xteink X3, newer production run (792x528 B/W).
 // UltraChip UC8279d ("d_B" silicon, TFT-module variant), driven in KW mode
 // with EXTERNAL/custom LUTs (PSR REG=1): 1-bpp differential, DTM1 (0x10) = OLD
 // plane, DTM2 (0x13) = NEW plane.
@@ -9,7 +9,7 @@
 // defaults, no per-temperature waveforms), so the host must drive EVERYTHING:
 // PSR, the drive voltages (PWR/VDCS), booster, PLL, the full-panel PTL window
 // (used instead of TRES), and the waveform LUT banks. An OTP-mode driver runs
-// the panel with no drive rails and leaves it completely dark — the failure
+// the panel with no drive rails and leaves it completely dark - the failure
 // seen on the first UC8279d field units.
 //
 // The entire register recipe and every waveform bank were reverse-engineered
@@ -22,8 +22,7 @@
 // (XTF_AA / XTH4 grayscale banks are also captured there for a later AA path.)
 //
 // BUSY_N: low while busy (PON/DRF/POF all flag), same two-phase shape as the
-// UC8253 X3 — reuses BusyPolarity::X3TwoPhase and the async start/finish split.
-
+// UC8253 X3 - reuses BusyPolarity::X3TwoPhase and the async start/finish split.
 
 #include "PanelDriver.h"
 
@@ -56,10 +55,11 @@ class Uc8279Driver : public PanelDriver {
   void preconditionGrayscale(EpdBus& bus, uint16_t x, uint16_t y, uint16_t w, uint16_t h) override;
   GrayscaleCapabilities grayscaleCapabilities(GrayscaleMode mode = GrayscaleMode::Overlay) const override {
     if (mode == GrayscaleMode::Absolute)
-      return {GrayscaleEncoding::AbsolutePlanes, GrayscaleBase::Separate, true, false, false};
+      return {GrayscaleEncoding::AbsolutePlanes, GrayscaleBase::Combined, true, false, false};
     if (mode != GrayscaleMode::Overlay) return {};
     return {GrayscaleEncoding::OverlayMasks, GrayscaleBase::Separate, true, false, false};
   }
+  void beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode mode, RefreshMode fallback, bool turnOff) override;
   void copyGrayscaleLsb(EpdBus& bus, const uint8_t* lsb) override;
   void copyGrayscaleMsb(EpdBus& bus, const uint8_t* msb) override;
   void writeGrayscalePlaneStrip(EpdBus& bus, GrayPlane plane, const uint8_t* rows, uint16_t yStart,

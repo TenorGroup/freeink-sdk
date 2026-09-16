@@ -1,6 +1,6 @@
 #pragma once
 
-// M5Stack PaperColor — official-library display backend.
+// M5Stack PaperColor - official-library display backend.
 //
 // An alternative to the fast hand-rolled Ed2208M5Driver: this wraps M5's own
 // stack (M5Unified + M5GFX, panel EL040EF1 / Spectra 6, 400x600) for users who
@@ -10,7 +10,7 @@
 // app renders identically regardless of backend.
 //
 // Selection: only linked when -DFREEINK_M5_OFFICIAL=1 (which also adds the M5
-// libraries to lib_deps — see platformio.sample.ini). Default M5 builds use the
+// libraries to lib_deps - see platformio.sample.ini). Default M5 builds use the
 // faster Ed2208M5Driver.
 
 #include "PanelDriver.h"

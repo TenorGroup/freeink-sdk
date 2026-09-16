@@ -32,7 +32,7 @@
 #define mz_adler32 crosspoint_mz_adler32
 #define mz_free crosspoint_mz_free
 // mz_inflate*, tinfl_decompressor_alloc/free, mz_uncompress*, mz_error,
-// mz_version, miniz_def_*: the host exports these under plain names — leave
+// mz_version, miniz_def_*: the host exports these under plain names - leave
 // them unprefixed so we bind to its definitions.
 
 #else  // standalone: our own copy, content_-prefixed.

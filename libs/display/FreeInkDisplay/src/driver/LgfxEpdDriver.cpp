@@ -179,7 +179,7 @@ void overlayCanvasGray() {
     uint8_t* drow = dst + static_cast<uint32_t>(y) * g_w;
     for (uint16_t bx = 0; bx < g_wb; ++bx) {
       const uint8_t l = lrow[bx], m = mrow[bx];
-      if ((l | m) == 0) continue;  // no selector bits in this byte — leave the B/W run alone
+      if ((l | m) == 0) continue;  // no selector bits in this byte - leave the B/W run alone
       for (uint8_t bit = 0; bit < 8; ++bit) {
         const uint8_t mask = 0x80 >> bit;
         const bool lb = (l & mask) != 0, mb = (m & mask) != 0;
@@ -316,8 +316,8 @@ void LgfxEpdDriver::deepSleep(EpdBus& bus) {
 #endif
 }
 
-// Per-board config injection. This driver has NO universal default — the bus pins
-// and power hooks are entirely board-specific — so a LilyGo-class board defines
+// Per-board config injection. This driver has NO universal default - the bus pins
+// and power hooks are entirely board-specific - so a LilyGo-class board defines
 // `const LgfxEpdConfig& yourConfig();` in namespace freeink and builds with
 // -DFREEINK_LGFX_EPD_CONFIG=yourConfig. The SDK's board-support libraries provide
 // the default configs for FREEINK_DEVICE_LILYGO (BoardT5S3) and

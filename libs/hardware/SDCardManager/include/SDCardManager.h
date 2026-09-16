@@ -1,10 +1,10 @@
 #pragma once
 
-// FreeInk SDK — SD card manager (singleton). Device-agnostic: it knows no board
+// FreeInk SDK - SD card manager (singleton). Device-agnostic: it knows no board
 // names. Two interchangeable backends behind one FsVolume& seam, so every op
 // returns ordinary FsFile objects:
 //   * SPI / SdFat (default).
-//   * Native 4-bit SDMMC (FREEINK_SD_SDMMC, e.g. de-link) — SdFat can't drive
+//   * Native 4-bit SDMMC (FREEINK_SD_SDMMC, e.g. de-link) - SdFat can't drive
 //     SDIO, so a plain FsVolume is mounted on an esp-idf SDMMC block device
 //     (src/SdmmcBlockDevice). Requires the build to set USE_BLOCK_DEVICE_INTERFACE=1.
 // Boards whose SD rail needs more than a GPIO (e.g. an I2C PMIC) register their
@@ -12,7 +12,7 @@
 // The public API is identical for both backends, so consumers are unchanged.
 //
 // Filenames are UTF-8: the library's build hook (inject_build_flags.py)
-// forces SdFat's USE_UTF8_LONG_NAMES on for the whole build — without it,
+// forces SdFat's USE_UTF8_LONG_NAMES on for the whole build - without it,
 // SdFat mangles any non-ASCII long filename into an unopenable path.
 
 #include <WString.h>
@@ -112,7 +112,7 @@ class SDCardManager {
 
   // All filesystem ops route through one FsVolume& so the backend is swappable.
   // SPI boards: `sd` (SdFs is-a FsVolume). SDMMC boards: a bare FsVolume mounted
-  // on a native esp-idf block device — both hand back ordinary FsFile objects.
+  // on a native esp-idf block device - both hand back ordinary FsFile objects.
 #if FREEINK_SD_SDMMC
   FsVolume _vol;
   freeink::SdmmcBlockDevice* _dev = nullptr;  // owned, created in begin()
