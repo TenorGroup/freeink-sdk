@@ -1,0 +1,20 @@
+.pio/
+.vscode/
+.cache/
+*.o
+*.a
+.DS_Store
+tools/firmware/DisplayAudit.java
+docs/xteink-x4pro-licorice-analysis.md
+
+# Local build and private project data
+__pycache__/
+*.pyc
+.env
+.env.*
+*.log
+/exploration/
+/AGENTS.md
+/CLAUDE.md
+/SESSION_HANDOFF.md
+/outputs/
