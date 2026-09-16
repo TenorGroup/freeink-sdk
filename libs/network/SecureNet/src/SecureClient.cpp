@@ -5,8 +5,9 @@
 // integration point for the TLS 1.3 transport.
 #if defined(FREEINK_NET_WOLFSSL)
 #include <wolfssl/ssl.h>
-#ifdef TENOR_OTA_ACCEPTANCE
+#if defined(TENOR_OTA_ACCEPTANCE) || defined(FREEINK_TLS_AUDIT)
 #include <wolfssl/wolfcrypt/memory.h>
+
 #include <cstdlib>
 #endif
 #endif
@@ -32,11 +33,12 @@ void SecureClient::setInsecure() { _insecure = true; }
 #if defined(FREEINK_NET_WOLFSSL)
 
 namespace {
-#ifdef TENOR_OTA_ACCEPTANCE
+#if defined(TENOR_OTA_ACCEPTANCE) || defined(FREEINK_TLS_AUDIT)
 void* auditMalloc(size_t size) {
   void* p = malloc(size);
-  if (!p) Serial.printf("[TLS_ALLOC] failed size=%u free=%u largest=%u\n", (unsigned)size,
-                         (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  if (!p)
+    Serial.printf("[TLS_ALLOC] failed size=%u free=%u largest=%u\n", (unsigned)size, (unsigned)ESP.getFreeHeap(),
+                  (unsigned)ESP.getMaxAllocHeap());
   return p;
 }
 void* auditRealloc(void* old, size_t size) {
@@ -75,7 +77,7 @@ bool isWantIo(const int err) {
 }
 }  // namespace
 
-int SecureClient::connectWithMethod(const char* host, uint16_t port, void* method, const char* label) {
+int SecureClient::connectWithMethod(const char* host, uint16_t port, bool tls12Only, const char* label) {
 #if defined(FREEINK_WOLFSSL_DEBUG)
   // Routes wolfSSL's internal trace through wolfSSL_Arduino_Serial_Print (the
   // application provides that hook). Shows exactly where a handshake stalls.
@@ -85,11 +87,12 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
     debugEnabled = true;
   }
 #endif
-#ifdef TENOR_OTA_ACCEPTANCE
+#if defined(TENOR_OTA_ACCEPTANCE) || defined(FREEINK_TLS_AUDIT)
   wolfSSL_SetAllocators(auditMalloc, free, auditRealloc);
 #endif
   const uint32_t started = millis();
   stop();
+  if (!_insecure && (!_rootCA || !*_rootCA)) return 0;
   const uint32_t timeoutMs = getTimeout();
   _transport.setConnectionTimeout(timeoutMs);
   if (!_transport.connect(host, port)) {
@@ -97,7 +100,8 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
     return 0;
   }
 
-  auto* ctx = wolfSSL_CTX_new(static_cast<WOLFSSL_METHOD*>(method));
+  // CTX owns the method. Create it only after trust and TCP checks succeed.
+  auto* ctx = wolfSSL_CTX_new(tls12Only ? wolfTLSv1_2_client_method() : wolfSSLv23_client_method());
   if (!ctx) {
     if (Serial)
       Serial.printf("[SecureClient] CTX alloc failed (%s), free heap %u\n", label, (unsigned)ESP.getFreeHeap());
@@ -110,12 +114,20 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
     wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, nullptr);
   } else if (_rootCA) {
     wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER, nullptr);
+#ifdef FREEINK_TLS_AUDIT
+    Serial.printf("[TLS_AUDIT] before-ca free=%u largest=%u\n", (unsigned)ESP.getFreeHeap(),
+                  (unsigned)ESP.getMaxAllocHeap());
+#endif
     if (wolfSSL_CTX_load_verify_buffer(ctx, reinterpret_cast<const unsigned char*>(_rootCA), strlen(_rootCA),
                                        WOLFSSL_FILETYPE_PEM) != WOLFSSL_SUCCESS) {
       stop();
       return 0;
     }
   }
+#ifdef FREEINK_TLS_AUDIT
+  Serial.printf("[TLS_AUDIT] after-ca free=%u largest=%u\n", (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap());
+#endif
   wolfSSL_SetIORecv(ctx, wcRecv);
   wolfSSL_SetIOSend(ctx, wcSend);
 
@@ -176,6 +188,10 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
     }
     delay(5);
   }
+#ifdef FREEINK_TLS_AUDIT
+  Serial.printf("[TLS_AUDIT] connected free=%u largest=%u min=%u\n", (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap(), (unsigned)ESP.getMinFreeHeap());
+#endif
   _connected = true;
   if (Serial) {
     Serial.printf("[SecureClient] handshake ok (%s): %s / %s in %lu ms\n", label, wolfSSL_get_version(ssl),
@@ -189,13 +205,13 @@ int SecureClient::connect(const char* host, uint16_t port) {
   // self-hosted / Let's Encrypt nginx often tops out at TLS 1.2, and a 1.3-only
   // client fails those handshakes outright. v23 still selects 1.3 when the peer
   // offers it (WOLFSSL_TLS13 is enabled) and falls back to 1.2 otherwise.
-  if (connectWithMethod(host, port, wolfSSLv23_client_method(), "auto")) return 1;
+  if (connectWithMethod(host, port, false, "auto")) return 1;
 
   // Some TLS 1.2-only servers are intolerant of a TLS 1.3-capable ClientHello
   // and abort with a fatal handshake_failure alert. Retry with an explicit
   // TLS 1.2 ClientHello before giving up.
   if (Serial) Serial.println("[SecureClient] retrying with TLS 1.2-only handshake");
-  return connectWithMethod(host, port, wolfTLSv1_2_client_method(), "tls1.2");
+  return connectWithMethod(host, port, true, "tls1.2");
 }
 
 int SecureClient::connect(IPAddress ip, uint16_t port) {
