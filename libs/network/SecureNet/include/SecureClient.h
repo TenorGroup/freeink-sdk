@@ -60,6 +60,9 @@ class SecureClient : public Client {
   void* _ssl = nullptr;  // WOLFSSL* (opaque to keep wolfSSL headers out of here)
   void* _ctx = nullptr;  // WOLFSSL_CTX*
   bool _connected = false;
+  int _lastFailureError = 0;
+  int _lastFailureAlert = -1;
+  int _lastFailureAlertLevel = -1;
 };
 
 }  // namespace freeink

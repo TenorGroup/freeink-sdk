@@ -1,30 +1,29 @@
 #!/usr/bin/env python3
-"""Rasterize a TrueType/OpenType font into an SDK-embeddable bitmap font header
-for FreeInkUI's DisplayTarget (FreeInkUIDisplayTarget.h).
+"""Raster hoá font TrueType/OpenType thành file header bitmap font để nhúng vào SDK
+cho DisplayTarget của FreeInkUI (FreeInkUIDisplayTarget.h).
 
-The output is a proportional 1-bit font in the Adafruit-GFX layout: every
-glyph's bitmap is packed MSB-first, row-major, and the glyph bitmaps are
-concatenated into one blob with a per-glyph metrics table. The DisplayTarget
-renders any BitmapFont with this shape, so you can swap the bundled Noto Sans
-for your own typeface.
+Kết quả là font tỉ lệ 1 bit theo bố cục Adafruit-GFX: bitmap của mỗi glyph được
+đóng gói MSB-first theo hàng, các bitmap nối liền thành một khối kèm bảng số đo
+cho từng glyph. DisplayTarget vẽ được mọi BitmapFont có dạng này, nên có thể thay
+Noto Sans đi kèm bằng mặt chữ của bạn.
 
-With --alpha the glyphs are instead rasterized anti-aliased and stored as
-4-bit coverage (two pixels per byte, high nibble first, 0 = transparent,
-15 = full ink; BitmapFont::bpp == 4). DisplayTarget reproduces the edge
-coverage on 1-bit panels with its ordered Bayer dither - noticeably smoother
-at display sizes (>= ~16px) for ~4x the flash of the 1-bit form.
+Với --alpha, glyph được raster có khử răng cưa và lưu dưới dạng độ phủ 4 bit
+(hai pixel mỗi byte, nửa byte cao trước, 0 = trong suốt, 15 = đậm hết;
+BitmapFont::bpp == 4). DisplayTarget tái tạo độ phủ viền trên màn 1 bit bằng
+cách dither Bayer có thứ tự - mượt hơn rõ rệt ở cỡ hiển thị (>= ~16px) với giá
+là bộ nhớ flash gấp khoảng 4 lần dạng 1 bit.
 
-Usage:
+Cách dùng:
     pip install pillow
     python3 gen_font.py --ttf MyFont.ttf --size 13 --name MyFont \\
         --out ../include/MyFontFont.h
 
-Then in your app:
+Sau đó trong ứng dụng:
     #include <MyFontFont.h>
-    target.setFont(freeink::ui::kMyFontFont);            // all slots
-    target.setFont(theme.tokens.fontTitle, kMyFontFont); // one slot
+    target.setFont(freeink::ui::kMyFontFont);            // mọi slot
+    target.setFont(theme.tokens.fontTitle, kMyFontFont); // một slot
 
-See docs/freeink-ui.md ("Swapping the font") for the full walk-through.
+Xem docs/freeink-ui.md ("Swapping the font") để có hướng dẫn đầy đủ.
 """
 import argparse
 import re
@@ -40,14 +39,14 @@ def c_ident(name: str) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--ttf", required=True, help="path to the .ttf/.otf to rasterize")
-    ap.add_argument("--size", type=int, default=13, help="pixel size (default 13)")
-    ap.add_argument("--name", default="Custom", help="symbol name, e.g. NotoSans -> kNotoSansFont")
+    ap.add_argument("--ttf", required=True, help="đường dẫn file .ttf/.otf cần raster")
+    ap.add_argument("--size", type=int, default=13, help="cỡ pixel (mặc định 13)")
+    ap.add_argument("--name", default="Custom", help="tên symbol, ví dụ NotoSans -> kNotoSansFont")
     ap.add_argument("--first", type=lambda v: int(v, 0), default=0x20)
     ap.add_argument("--last", type=lambda v: int(v, 0), default=0x7E)
     ap.add_argument("--alpha", action="store_true",
-                    help="emit anti-aliased 4-bit coverage glyphs instead of a 1-bit mask")
-    ap.add_argument("--out", required=True, help="output header path")
+                    help="sinh glyph khử răng cưa 4 bit thay cho mask 1 bit")
+    ap.add_argument("--out", required=True, help="đường dẫn file header đầu ra")
     args = ap.parse_args()
 
     sym = c_ident(args.name)
@@ -64,8 +63,8 @@ def main() -> None:
         bbox = font.getbbox(ch)
         off = len(bitmap)
         if off > 0xFFFF:
-            sys.exit(f"error: glyph U+{cp:04X} bitmap offset {off} overflows FontGlyph's uint16 "
-                     "bitmapOffset - reduce --size or the --first/--last range")
+            sys.exit(f"lỗi: glyph U+{cp:04X} có offset bitmap {off} vượt kiểu uint16 của FontGlyph "
+                     "bitmapOffset - hãy giảm --size hoặc thu hẹp khoảng --first/--last")
         if bbox is None or bbox[2] - bbox[0] <= 0 or bbox[3] - bbox[1] <= 0:
             glyphs.append((cp, off, 0, 0, xadv, 0, 0))
             continue
@@ -147,7 +146,7 @@ def main() -> None:
 
     with open(args.out, "w") as f:
         f.write("\n".join(out) + "\n")
-    print(f"wrote {args.out}: k{sym}Font  size={args.size}px bpp={4 if args.alpha else 1} "
+    print(f"đã ghi {args.out}: k{sym}Font  size={args.size}px bpp={4 if args.alpha else 1} "
           f"yAdvance={yadv} ascent={ascent} "
           f"glyphs={len(glyphs)} bitmap={len(bitmap)}B (~{len(bitmap) + len(glyphs) * 6}B flash)")
 
