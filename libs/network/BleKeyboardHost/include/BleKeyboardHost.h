@@ -19,6 +19,11 @@
 // BLE-only - the ESP32-C3/S3 has no Bluetooth Classic radio, so Classic-only HID
 // peripherals cannot connect.
 
+// C++-only. The guard keeps a `-include` of this header (see the x3-ble env in
+// platformio.ini) harmless in the firmware's C translation units (wolfSSL,
+// expat, FreeType, the Arduino core's .c files): there it expands to nothing.
+#ifdef __cplusplus
+
 #include <Arduino.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -86,13 +91,16 @@ class BleKeyboardHost {
   // capability is compiled out.
   bool begin(const char* hostName = "FreeInk");
 
-  // Fully tear down the BLE stack: stop scanning, drop the link, delete the
-  // connection task, and NimBLEDevice::deinit() so the NimBLE host + controller
-  // RAM (tens of KB) is returned to the heap. Use this - not disconnect() - when
-  // the user turns Bluetooth off, so memory-hungry work (e.g. EPUB inflate) can
-  // allocate again. Bonds persist in NVS; begin() re-inits cleanly afterwards.
-  // Must run at normal CPU frequency (controller deinit), like begin().
-  void end();
+  // Request a complete BLE teardown and return true only after the worker, client,
+  // and NimBLE stack are fully stopped. A timeout leaves the worker/client/stack
+  // intact and marks teardown pending, so a later end() can retry safely. The
+  // default budget is 1 second and is capped at 2 seconds. end(0) only services
+  // an already-safe teardown and never waits.
+  bool end(uint32_t timeoutMs = 1000);
+
+  // True after end() requested teardown but before every worker/client/stack
+  // resource has been released. begin() rejects while this is true.
+  bool isStopping() const;
 
   // Pump per main-loop iteration: drives auto-reconnect and key auto-repeat.
   // Cheap; never blocks.
@@ -186,3 +194,5 @@ class BleKeyboardHost {
 // App-friendly accessors. BleKbd is kept for source compatibility.
 #define BleHid ::freeink::BleKeyboardHost::getInstance()
 #define BleKbd ::freeink::BleKeyboardHost::getInstance()
+
+#endif  // __cplusplus

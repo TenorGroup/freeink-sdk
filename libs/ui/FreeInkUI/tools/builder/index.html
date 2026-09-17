@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -25,14 +25,14 @@
         </div>
       </div>
       <div class="topbar__actions">
-        <select id="deviceSelect" aria-label="Preview device"></select>
-        <select id="orientationSelect" aria-label="Preview orientation">
-          <option value="portrait">Portrait</option>
-          <option value="landscape">Landscape</option>
+        <select id="deviceSelect" aria-label="Thiết bị xem trước"></select>
+        <select id="orientationSelect" aria-label="Hướng xem trước">
+          <option value="portrait">Dọc</option>
+          <option value="landscape">Ngang</option>
         </select>
-        <button id="importBtn" type="button">Import JSON</button>
-        <button id="exportBtn" type="button">Export JSON</button>
-        <button id="generateBtn" type="button" class="primary">Generate C++</button>
+        <button id="importBtn" type="button">Nhập JSON</button>
+        <button id="exportBtn" type="button">Xuất JSON</button>
+        <button id="generateBtn" type="button" class="primary">Sinh mã C++</button>
       </div>
       <input id="fileInput" type="file" accept="application/json,.json" hidden>
     </header>
@@ -40,8 +40,8 @@
     <main class="shell">
       <aside class="panel palette">
         <div class="panel__head">
-          <h2>Palette</h2>
-          <input id="paletteFilter" type="search" placeholder="Filter">
+          <h2>Thành phần</h2>
+          <input id="paletteFilter" type="search" placeholder="Lọc">
         </div>
         <div id="paletteList" class="palette__list"></div>
       </aside>
@@ -49,25 +49,25 @@
       <section class="stage">
         <div class="stage__toolbar">
           <label class="toolbar-field">
-            <span>Screen</span>
-            <input id="screenName" type="text" aria-label="Screen name">
+            <span>Màn hình</span>
+            <input id="screenName" type="text" aria-label="Tên màn hình">
           </label>
-          <div class="toolbar-insets" role="group" aria-label="Safe area">
-            <span>Safe area</span>
+          <div class="toolbar-insets" role="group" aria-label="Vùng an toàn">
+            <span>Vùng an toàn</span>
             <div class="toolbar-insets__grid">
-              <input id="safeAreaTop" type="number" min="0" placeholder="T" aria-label="Safe area top">
-              <input id="safeAreaRight" type="number" min="0" placeholder="R" aria-label="Safe area right">
-              <input id="safeAreaBottom" type="number" min="0" placeholder="B" aria-label="Safe area bottom">
-              <input id="safeAreaLeft" type="number" min="0" placeholder="L" aria-label="Safe area left">
+              <input id="safeAreaTop" type="number" min="0" placeholder="T" aria-label="Vùng an toàn trên">
+              <input id="safeAreaRight" type="number" min="0" placeholder="R" aria-label="Vùng an toàn phải">
+              <input id="safeAreaBottom" type="number" min="0" placeholder="B" aria-label="Vùng an toàn dưới">
+              <input id="safeAreaLeft" type="number" min="0" placeholder="L" aria-label="Vùng an toàn trái">
             </div>
           </div>
-          <div class="toolbar-insets" role="group" aria-label="Margin">
-            <span>Margin</span>
+          <div class="toolbar-insets" role="group" aria-label="Lề">
+            <span>Lề</span>
             <div class="toolbar-insets__grid">
-              <input id="contentMarginTop" type="number" min="0" placeholder="T" aria-label="Content margin top">
-              <input id="contentMarginRight" type="number" min="0" placeholder="R" aria-label="Content margin right">
-              <input id="contentMarginBottom" type="number" min="0" placeholder="B" aria-label="Content margin bottom">
-              <input id="contentMarginLeft" type="number" min="0" placeholder="L" aria-label="Content margin left">
+              <input id="contentMarginTop" type="number" min="0" placeholder="T" aria-label="Lề nội dung trên">
+              <input id="contentMarginRight" type="number" min="0" placeholder="R" aria-label="Lề nội dung phải">
+              <input id="contentMarginBottom" type="number" min="0" placeholder="B" aria-label="Lề nội dung dưới">
+              <input id="contentMarginLeft" type="number" min="0" placeholder="L" aria-label="Lề nội dung trái">
             </div>
           </div>
         </div>
@@ -80,18 +80,18 @@
 
       <aside class="panel inspector">
         <div class="panel__head">
-          <h2>Inspector</h2>
-          <button id="deleteBtn" type="button">Delete</button>
+          <h2>Thuộc tính</h2>
+          <button id="deleteBtn" type="button">Xóa</button>
         </div>
         <div id="inspectorFields" class="inspector__fields"></div>
         <div class="panel__head panel__head--sub">
-          <h2>Schema</h2>
-          <button id="applyJsonBtn" type="button">Apply</button>
+          <h2>Lược đồ JSON</h2>
+          <button id="applyJsonBtn" type="button">Áp dụng</button>
         </div>
         <textarea id="schemaText" spellcheck="false"></textarea>
         <div class="panel__head panel__head--sub">
-          <h2>Generated C++</h2>
-          <button id="copyCppBtn" type="button">Copy</button>
+          <h2>Mã C++ đã sinh</h2>
+          <button id="copyCppBtn" type="button">Sao chép</button>
         </div>
         <pre id="cppOutput"></pre>
       </aside>

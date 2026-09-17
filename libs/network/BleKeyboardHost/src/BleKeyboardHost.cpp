@@ -24,8 +24,12 @@ BleKeyboardHost& BleKeyboardHost::getInstance() {
 
 #include <NimBLEDevice.h>
 #include <Preferences.h>
+#if defined(ESP_PLATFORM)
+#include <esp_bt.h>
+#endif
 
 #include <cstring>
+#include <atomic>
 #include <string>
 
 #include "HidKeymap.h"
@@ -40,6 +44,9 @@ constexpr uint16_t kCharProtocolMode = 0x2A4E;
 constexpr uint16_t kCharBootKbdInput = 0x2A22;
 constexpr uint16_t kCharReportMap = 0x2A4B;
 constexpr uint16_t kDescReportReference = 0x2908;
+// Input report characteristics kept for report-id identity (a HID peripheral
+// typically exposes one per report id; the ceiling bounds the lookup table).
+constexpr uint8_t kMaxInputReportChars = 4;
 
 // Page-turner remotes often stream a held key (or omit a clean release frame). If no
 // report arrives within this window, treat the key as released so one physical press
@@ -47,7 +54,9 @@ constexpr uint16_t kDescReportReference = 0x2908;
 constexpr uint32_t kReleaseTimeoutMs = 150;
 constexpr uint32_t kReconnectBackoffMs = 4000;
 constexpr uint32_t kConnectTimeoutMs = 8000;
-constexpr uint32_t kTeardownConnectWaitMs = kConnectTimeoutMs + 500;
+constexpr uint32_t kMaxTeardownTimeoutMs = 2000;
+constexpr uint32_t kTeardownPollMs = 10;
+constexpr uint32_t kScanCancelWaitMs = 1000;
 constexpr size_t kScanDebugPayloadMax = 31;
 
 portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -57,7 +66,18 @@ NimBLEClient* g_client = nullptr;
 // Connection task: connect() stores a target and notifies it; it runs the
 // blocking connect+pair+discover sequence off the main and NimBLE host tasks.
 TaskHandle_t g_connTask = nullptr;
-volatile bool g_connecting = false;
+std::atomic<bool> g_connecting{false};
+// end() sets this before touching NimBLE. The connection worker checks it before
+// every next blocking stage and parks itself for a safe external vTaskDelete().
+std::atomic<bool> g_stopRequested{false};
+// A scan request can cancel an in-flight connection without tearing down the host.
+std::atomic<bool> g_connectCancelRequested{false};
+std::atomic<bool> g_workerSafeToDelete{false};
+std::atomic<bool> g_teardownPending{false};
+// True when there is no live link, or after NimBLE's disconnect callback has run.
+// NimBLE keeps a client DISCONNECTING until that callback completes; end() waits
+// for both this acknowledgement and getDisconnectedClient() before deleteClient().
+std::atomic<bool> g_disconnectObserved{true};
 char g_targetAddr[18] = {0};
 uint8_t g_targetType = 0;
 bool g_targetTryAltType = false;
@@ -65,51 +85,116 @@ bool g_targetTryAltType = false;
 uint32_t g_lastReconnectMs = 0;
 uint8_t g_reconnectIdx = 0;
 
-// HID Report Map hints (parsed once per connection in setupHid). Many BLE
-// page-turner remotes are NOT plain boot keyboards: they place their code on the
-// Consumer Control page (0x0C) or at a non-standard byte offset. These hints, plus
-// the generic-extraction fallback in onReportIngest, let those remotes surface a
-// stable key code so the host (capture-then-assign UI) can bind it. g_lastGenericCode
-// edge-detects the generic path so one physical press = one key event.
-bool g_hasKeyboardPage = false;
-bool g_hasConsumerPage = false;
-uint8_t g_preferredByteIndex = 0xFF;  // byte the report map suggests holds the code
-uint8_t g_lastGenericCode = 0;        // last non-zero code seen on the generic path
+// HID Report Map (parsed item by item once per connection in setupHid). Every
+// incoming report is decoded through this map, so the modifier byte and the key
+// fields are read where the descriptor says they are - not where a byte pattern
+// suggests. Many BLE page-turner remotes are NOT plain boot keyboards: they place
+// their code on the Consumer Control page (0x0C) or at a non-standard byte offset,
+// and that is exactly what the map describes. g_lastGenericCode edge-detects the
+// last-resort extraction below so one physical press = one key event.
+HidReportMap g_hidMap;
+uint8_t g_lastGenericCode = 0;         // last non-zero code seen on the last-resort path
 volatile uint32_t g_lastReportMs = 0;  // millis() of the last HID notification (stale-release)
+
+// Report id each subscribed Input characteristic declares in its Report Reference
+// descriptor (0x2908). Keeps a report's identity when it arrives without the id
+// byte its own descriptor promises. 0xFFFF = unknown.
+struct InputReportChar {
+  uint16_t handle;
+  uint16_t reportId;
+};
+InputReportChar g_inputChars[kMaxInputReportChars];
+uint8_t g_inputCharCount = 0;
+uint16_t g_notifyReportId = 0xFFFF;  // report id of the characteristic that just notified
 
 BleKeyboardHost& self() { return BleKeyboardHost::getInstance(); }
 
-// Scan a HID Report Map descriptor for Usage Page (0x05 nn) items and note whether
-// a keyboard (0x07) or consumer (0x0C) page is present, plus a heuristic byte index
-// where the active code tends to live (keyboard reports: byte[2]; compact consumer
-// reports: byte[1]). This is a hint, not a full descriptor parse.
-void parseReportMapHints(const uint8_t* map, size_t len) {
-  g_hasKeyboardPage = false;
-  g_hasConsumerPage = false;
-  g_preferredByteIndex = 0xFF;
-  if (!map || len < 2) return;
-  for (size_t i = 0; i + 1 < len; ++i) {
-    if (map[i] == 0x05) {  // Usage Page (1-byte value follows)
-      if (map[i + 1] == 0x07) g_hasKeyboardPage = true;
-      else if (map[i + 1] == 0x0C) g_hasConsumerPage = true;
-    }
-  }
-  if (g_hasKeyboardPage) g_preferredByteIndex = 2;
-  else if (g_hasConsumerPage) g_preferredByteIndex = 1;
+bool stopRequested() { return g_stopRequested.load(std::memory_order_acquire); }
+
+bool operationCancelled() {
+  return stopRequested() || g_connectCancelRequested.load(std::memory_order_acquire);
 }
 
-// Pick a representative "primary" code from a report that the standard keyboard
-// slot decode did not handle (consumer / compact / non-standard layouts). Prefers
-// the report-map-hinted byte, else the first meaningful non-zero byte. Returns 0
-// when the report carries no code (a release frame).
+bool callbacksAllowed() {
+  // g_stopRequested is the cross-task synchronization point. begin_/isRunning()
+  // is owned by the app task and must not be read from a NimBLE callback thread.
+  return !operationCancelled();
+}
+
+void notifyConnectionWorker() {
+  if (g_connTask != nullptr) xTaskNotifyGive(g_connTask);
+}
+
+bool workerSafeToDelete() {
+  return g_connTask == nullptr || g_workerSafeToDelete.load(std::memory_order_acquire);
+}
+
+bool clientFullyDisconnected() {
+  if (g_client == nullptr) return true;
+  return g_disconnectObserved.load(std::memory_order_acquire) &&
+         NimBLEDevice::getDisconnectedClient() == g_client;
+}
+
+void cancelActiveClient() {
+  NimBLEClient* client = g_client;
+  if (client == nullptr) return;
+  if (g_connecting.load(std::memory_order_acquire)) client->cancelConnect();
+  if (client->isConnected()) client->disconnect();
+}
+
+uint32_t remainingBudget(uint32_t startMs, uint32_t budgetMs) {
+  const uint32_t elapsed = millis() - startMs;
+  return elapsed >= budgetMs ? 0 : budgetMs - elapsed;
+}
+
+bool waitForWorkerSafe(uint32_t timeoutMs) {
+  if (workerSafeToDelete()) return true;
+  if (timeoutMs == 0) return false;
+  const uint32_t startMs = millis();
+  while (!workerSafeToDelete()) {
+    // Repeat the cancellation while waiting. This closes the small race where the
+    // worker passes its stop check just as end() sends the first GAP cancel.
+    cancelActiveClient();
+    const uint32_t remaining = remainingBudget(startMs, timeoutMs);
+    if (remaining == 0) break;
+    vTaskDelay(pdMS_TO_TICKS(remaining < kTeardownPollMs ? remaining : kTeardownPollMs));
+  }
+  return workerSafeToDelete();
+}
+
+bool waitForClientDisconnected(uint32_t timeoutMs) {
+  if (clientFullyDisconnected()) return true;
+  if (timeoutMs == 0) return false;
+  const uint32_t startMs = millis();
+  while (!clientFullyDisconnected()) {
+    if (g_client->isConnected()) g_client->disconnect();
+    const uint32_t remaining = remainingBudget(startMs, timeoutMs);
+    if (remaining == 0) break;
+    vTaskDelay(pdMS_TO_TICKS(remaining < kTeardownPollMs ? remaining : kTeardownPollMs));
+  }
+  return clientFullyDisconnected();
+}
+
+// Report id of the characteristic that just notified, or 0xFFFF when unknown.
+uint16_t reportIdForCharHandle(uint16_t handle) {
+  for (uint8_t i = 0; i < g_inputCharCount; ++i) {
+    if (g_inputChars[i].handle == handle) return g_inputChars[i].reportId;
+  }
+  return 0xFFFF;
+}
+
+// Pick a representative "primary" code from a report that the parsed map could not
+// decode at all (no readable Report Map, an unknown report id, a descriptor past
+// the parse ceilings). Prefers the first mapped key byte, else the first meaningful
+// non-zero byte. Returns 0 when the report carries no code (a release frame).
 uint8_t extractPrimaryCode(const uint8_t* p, size_t n, size_t* codeIdx = nullptr) {
   const size_t lim = n < 8 ? n : 8;
   // NOTE: do NOT skip 0x01 here. In a keyboard report 0x01 is ErrorRollOver, but in
   // a consumer / vendor report it is a valid button code (e.g. a 3-byte page-turner
   // report of "01 00 00" on press, "00 00 00" on release). Only zero means "no code".
-  if (g_preferredByteIndex != 0xFF && g_preferredByteIndex < n && p[g_preferredByteIndex] != 0) {
-    if (codeIdx) *codeIdx = g_preferredByteIndex;
-    return p[g_preferredByteIndex];
+  if (g_hidMap.preferredByteIndex != 0xFF && g_hidMap.preferredByteIndex < n && p[g_hidMap.preferredByteIndex] != 0) {
+    if (codeIdx) *codeIdx = g_hidMap.preferredByteIndex;
+    return p[g_hidMap.preferredByteIndex];
   }
   for (size_t i = 0; i < lim; ++i) {
     if (p[i] != 0) {
@@ -148,7 +233,10 @@ void printPayloadHex(const NimBLEAdvertisedDevice* dev) {
 }
 #endif
 
-void onHidNotify(NimBLERemoteCharacteristic*, uint8_t* data, size_t len, bool) {
+void onHidNotify(NimBLERemoteCharacteristic* chr, uint8_t* data, size_t len, bool) {
+  if (!callbacksAllowed()) return;
+  // The characteristic identifies the report when the payload itself does not.
+  g_notifyReportId = chr ? reportIdForCharHandle(chr->getHandle()) : 0xFFFF;
   self().onReportIngest(data, len);
 }
 
@@ -163,19 +251,26 @@ bool setupHid(NimBLEClient* client) {
     proto->writeValue(&mode, 1, false);
   }
 
-  // Parse the HID Report Map for usage-page / byte-offset hints, so non-keyboard
-  // page-turner remotes can be decoded by the generic fallback in onReportIngest.
-  g_hasKeyboardPage = false;
-  g_hasConsumerPage = false;
-  g_preferredByteIndex = 0xFF;
+  // Parse the HID Report Map item by item: it is the only source of truth for
+  // where each report keeps its modifier bits and key usages, and for how many
+  // reports the device has (report ids).
+  g_hidMap = HidReportMap();
   g_lastGenericCode = 0;
+  g_inputCharCount = 0;
+  g_notifyReportId = 0xFFFF;
   if (NimBLERemoteCharacteristic* rmap = hid->getCharacteristic(NimBLEUUID(kCharReportMap))) {
     if (rmap->canRead()) {
       NimBLEAttValue v = rmap->readValue();
-      parseReportMapHints(v.data(), v.size());
+      parseHidReportMap(v.data(), v.size(), g_hidMap);
 #if FREEINK_BLE_HID_REPORT_DEBUG
-      Serial.printf("[BleHid] report map: kbd=%d consumer=%d preferredByte=%d len=%u\n", g_hasKeyboardPage,
-                    g_hasConsumerPage, (int)g_preferredByteIndex, (unsigned)v.size());
+      Serial.printf("[BleHid] report map: len=%u reports=%u kbd=%d consumer=%d usable=%d truncated=%d\n",
+                    (unsigned)v.size(), (unsigned)g_hidMap.reportCount, g_hidMap.hasKeyboardPage ? 1 : 0,
+                    g_hidMap.hasConsumerPage ? 1 : 0, g_hidMap.usable ? 1 : 0, g_hidMap.truncated ? 1 : 0);
+      for (uint8_t r = 0; r < g_hidMap.reportCount; ++r) {
+        const HidReportLayout& layout = g_hidMap.reports[r];
+        Serial.printf("[BleHid]   report id=%u bits=%u keys=%u fields mods=%u fields\n", (unsigned)layout.id,
+                      (unsigned)layout.bits, (unsigned)layout.keyFieldCount, (unsigned)layout.modFieldCount);
+      }
 #endif
     }
   }
@@ -185,19 +280,38 @@ bool setupHid(NimBLEClient* client) {
   for (NimBLERemoteCharacteristic* c : chars) {
     if (!c) continue;
     if (c->getUUID() != NimBLEUUID(kCharReport) || !c->canNotify()) continue;
-    // Report Reference descriptor (0x2908) byte[1] is the report type: 1=Input.
+    // Report Reference descriptor (0x2908): byte[0] is the report id, byte[1] the
+    // report type (1 = Input). Both are kept: the id identifies which layout the
+    // notifications on this characteristic belong to.
     bool isInput = true;
+    uint16_t reportId = 0xFFFF;
     NimBLERemoteDescriptor* ref = c->getDescriptor(NimBLEUUID(kDescReportReference));
     if (ref) {
       NimBLEAttValue v = ref->readValue();
       if (v.size() >= 2 && v[1] != 0x01) isInput = false;
+      if (v.size() >= 1) reportId = v[0];
     }
-    if (isInput && c->subscribe(true, onHidNotify)) subscribed = true;
+    if (!isInput) continue;
+    if (c->subscribe(true, onHidNotify)) {
+      subscribed = true;
+      if (g_inputCharCount < kMaxInputReportChars) {
+        g_inputChars[g_inputCharCount].handle = c->getHandle();
+        g_inputChars[g_inputCharCount].reportId = reportId;
+        g_inputCharCount++;
+      }
+    }
   }
 
   if (!subscribed) {  // fallback: boot keyboard input report
     NimBLERemoteCharacteristic* boot = hid->getCharacteristic(NimBLEUUID(kCharBootKbdInput));
-    if (boot && boot->canNotify() && boot->subscribe(true, onHidNotify)) subscribed = true;
+    if (boot && boot->canNotify() && boot->subscribe(true, onHidNotify)) {
+      subscribed = true;
+      if (g_inputCharCount < kMaxInputReportChars) {
+        g_inputChars[g_inputCharCount].handle = boot->getHandle();
+        g_inputChars[g_inputCharCount].reportId = 0xFFFF;  // boot report: layout id 0
+        g_inputCharCount++;
+      }
+    }
   }
   return subscribed;
 }
@@ -206,19 +320,26 @@ bool hasHidService(NimBLEClient* client) {
   return client && client->getService(NimBLEUUID(kHidService)) != nullptr;
 }
 
-void doConnect(const char* addrStr, uint8_t type) {
+void doConnect(const char* addrStr, uint8_t type, bool tryAltType) {
+  if (operationCancelled()) return;
   if (!g_client) {
-    self().onConnectFailed("BLE client unavailable");
+    if (!operationCancelled()) self().onConnectFailed("BLE client unavailable");
     return;
   }
+  if (operationCancelled()) return;
   NimBLEDevice::getScan()->stop();
   NimBLEAddress addr(std::string(addrStr), type);
+  if (operationCancelled()) return;
+  g_disconnectObserved.store(false, std::memory_order_release);
   if (!g_client->connect(addr)) {
+    g_disconnectObserved.store(true, std::memory_order_release);
 #if FREEINK_BLE_HID_SCAN_DEBUG
     Serial.printf("[BleHid] connect failed: %s type=%u err=%d\n", addrStr, type, g_client->getLastError());
 #endif
-    if (!g_targetTryAltType) {
-      self().onConnectFailed(g_client->getLastError() == BLE_HS_ETIMEOUT ? "Connect timeout" : "Connection failed");
+    if (!tryAltType || operationCancelled()) {
+      if (!operationCancelled()) {
+        self().onConnectFailed(g_client->getLastError() == BLE_HS_ETIMEOUT ? "Connect timeout" : "Connection failed");
+      }
       return;
     }
     type = type == 0 ? 1 : 0;
@@ -226,52 +347,113 @@ void doConnect(const char* addrStr, uint8_t type) {
     Serial.printf("[BleHid] retry connect: %s type=%u\n", addrStr, type);
 #endif
     addr = NimBLEAddress(std::string(addrStr), type);
+    if (operationCancelled()) return;
+    g_disconnectObserved.store(false, std::memory_order_release);
     if (!g_client->connect(addr)) {
+      g_disconnectObserved.store(true, std::memory_order_release);
 #if FREEINK_BLE_HID_SCAN_DEBUG
       Serial.printf("[BleHid] connect failed: %s type=%u err=%d\n", addrStr, type, g_client->getLastError());
 #endif
-      self().onConnectFailed(g_client->getLastError() == BLE_HS_ETIMEOUT ? "Connect timeout" : "Connection failed");
+      if (!operationCancelled()) {
+        self().onConnectFailed(g_client->getLastError() == BLE_HS_ETIMEOUT ? "Connect timeout" : "Connection failed");
+      }
       return;
     }
+  }
+  if (operationCancelled()) {
+    if (g_client->isConnected()) g_client->disconnect();
+    return;
   }
   if (!hasHidService(g_client)) {
 #if FREEINK_BLE_HID_SCAN_DEBUG
     Serial.printf("[BleHid] no HID service: %s\n", addrStr);
 #endif
-    g_client->disconnect();
-    self().onConnectFailed("Not a HID device");
+    if (g_client->isConnected()) g_client->disconnect();
+    if (!operationCancelled()) self().onConnectFailed("Not a HID device");
+    return;
+  }
+  if (operationCancelled()) {
+    if (g_client->isConnected()) g_client->disconnect();
     return;
   }
   if (!g_client->secureConnection()) {
 #if FREEINK_BLE_HID_SCAN_DEBUG
     Serial.printf("[BleHid] security failed: %s err=%d\n", addrStr, g_client->getLastError());
 #endif
-    g_client->disconnect();
-    self().onConnectFailed("Pairing failed");
+    if (g_client->isConnected()) g_client->disconnect();
+    if (!operationCancelled()) self().onConnectFailed("Pairing failed");
+    return;
+  }
+  if (operationCancelled()) {
+    if (g_client->isConnected()) g_client->disconnect();
     return;
   }
   if (!setupHid(g_client)) {
 #if FREEINK_BLE_HID_SCAN_DEBUG
     Serial.printf("[BleHid] HID setup failed: %s\n", addrStr);
 #endif
-    g_client->disconnect();
-    self().onConnectFailed("No HID input report");
+    if (g_client->isConnected()) g_client->disconnect();
+    if (!operationCancelled()) self().onConnectFailed("No HID input report");
+    return;
+  }
+  if (operationCancelled()) {
+    if (g_client->isConnected()) g_client->disconnect();
     return;
   }
   self().onLinkUp(addrStr, nullptr, type);  // name resolved from scan/bond lists
+  if (operationCancelled() && g_client->isConnected()) g_client->disconnect();
 }
 
 void connTaskFn(void*) {
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    doConnect(g_targetAddr, g_targetType);
-    g_connecting = false;
+    if (stopRequested()) break;
+    if (g_connectCancelRequested.load(std::memory_order_acquire)) {
+      self().onLinkDown();
+      g_connectCancelRequested.store(false, std::memory_order_release);
+      g_connecting.store(false, std::memory_order_release);
+      continue;
+    }
+
+    char addr[sizeof(g_targetAddr)];
+    uint8_t type = 0;
+    bool tryAltType = false;
+    portENTER_CRITICAL(&g_mux);
+    strncpy(addr, g_targetAddr, sizeof(addr) - 1);
+    addr[sizeof(addr) - 1] = '\0';
+    type = g_targetType;
+    tryAltType = g_targetTryAltType;
+    portEXIT_CRITICAL(&g_mux);
+
+    // doConnect() also checks a scan cancellation that arrives after the target
+    // snapshot. Let the normal cleanup below return this worker to its idle wait.
+    if (stopRequested()) break;
+    g_disconnectObserved.store(true, std::memory_order_release);
+    doConnect(addr, type, tryAltType);
+    if (stopRequested()) break;
+    if (g_connectCancelRequested.load(std::memory_order_acquire)) self().onLinkDown();
+    // startScan() cancels only this connection attempt. Clear the operation
+    // cancellation before returning to the normal idle wait.
+    g_connectCancelRequested.store(false, std::memory_order_release);
+    // Publish idle after cancellation cleanup, so startScan()/connect() cannot
+    // start a fresh operation while this worker still clears the previous one.
+    g_connecting.store(false, std::memory_order_release);
   }
+
+  g_connecting.store(false, std::memory_order_release);
+  // This only clears plain host state. User-visible link-up/failure callbacks have
+  // already been suppressed by operationCancelled().
+  self().onLinkDown();
+  g_workerSafeToDelete.store(true, std::memory_order_release);
+
+  // Keep the task parked after it leaves every NimBLE call. end() can now delete it
+  // safely from the outside; a blocked NimBLE waiter is never force-deleted.
+  for (;;) ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 }
 
 class ScanCB : public NimBLEScanCallbacks {
   void onResult(const NimBLEAdvertisedDevice* dev) override {
-    if (!dev) return;
+    if (!dev || operationCancelled()) return;
     // Store named/HID advertisers by default; optionally keep anonymous
     // non-HID probe candidates during bring-up. HID is still validated at
     // connect time. The name falls back to the address. Keep the callback cheap
@@ -305,9 +487,21 @@ class ScanCB : public NimBLEScanCallbacks {
 };
 
 class ClientCB : public NimBLEClientCallbacks {
-  void onDisconnect(NimBLEClient*, int) override { self().onLinkDown(); }
-  void onPassKeyEntry(NimBLEConnInfo& connInfo) override { NimBLEDevice::injectPassKey(connInfo, 123456); }
+  void onDisconnect(NimBLEClient*, int) override {
+    // NimBLE invokes this before it changes DISCONNECTING to DISCONNECTED. The
+    // acknowledgement lets end() wait for that transition before deleteClient().
+    g_disconnectObserved.store(true, std::memory_order_release);
+    // A teardown callback is intentionally silent; connTaskFn clears plain host
+    // state after it has left the blocking NimBLE call. Scan cancellation remains
+    // a normal host operation and may clear the link state immediately.
+    if (!stopRequested()) self().onLinkDown();
+  }
+  void onPassKeyEntry(NimBLEConnInfo& connInfo) override {
+    if (operationCancelled()) return;
+    NimBLEDevice::injectPassKey(connInfo, 123456);
+  }
   uint32_t onPassKeyDisplay(NimBLEConnInfo&) override {
+    if (operationCancelled()) return 0;
     const uint32_t passkey = NimBLEDevice::getSecurityPasskey();
     self().onPairingPasskey(passkey);
 #if FREEINK_BLE_HID_SCAN_DEBUG
@@ -316,6 +510,7 @@ class ClientCB : public NimBLEClientCallbacks {
     return passkey;
   }
   void onConfirmPasskey(NimBLEConnInfo& connInfo, uint32_t) override {
+    if (operationCancelled()) return;
     NimBLEDevice::injectConfirmPasskey(connInfo, true);
   }
   // Reject peripheral connection-parameter updates - some keyboards request one
@@ -331,6 +526,18 @@ ClientCB g_clientCb;
 // --- Lifecycle ---------------------------------------------------------------
 bool BleKeyboardHost::begin(const char* hostName) {
   if (begun_) return true;
+
+  // A timed-out end() deliberately leaves the NimBLE client and worker alive.
+  // Reject a new begin before any self-heal/deinit path can touch that live state.
+  if (g_teardownPending.load(std::memory_order_acquire) || g_stopRequested.load(std::memory_order_acquire) ||
+      g_connTask != nullptr || g_connecting.load(std::memory_order_acquire) || g_client != nullptr) {
+    Serial.println("[BleHid] begin: teardown or worker still pending");
+    return false;
+  }
+
+  g_workerSafeToDelete.store(false, std::memory_order_release);
+  g_disconnectObserved.store(true, std::memory_order_release);
+  g_connectCancelRequested.store(false, std::memory_order_release);
 
 #if FREEINK_BLE_HID_SCAN_DEBUG
   Serial.printf("[BleHid] begin: host='%s' bonds=%u\n", hostName ? hostName : "FreeInk", bondCount_);
@@ -353,6 +560,17 @@ bool BleKeyboardHost::begin(const char* hostName) {
 #endif
   if (!NimBLEDevice::init(hostName ? hostName : "FreeInk")) {
     Serial.println("[BleHid] begin: NimBLEDevice::init() failed");
+    // NimBLE 2.5.1 can return before setting its initialized flag after the
+    // controller was allocated. Its deinit() cannot unwind that partial state.
+    // Release it here so a failed opt-in does not strand the reader's heap.
+#if defined(ESP_PLATFORM)
+    if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED) {
+      esp_bt_controller_disable();
+    }
+    if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_INITED) {
+      esp_bt_controller_deinit();
+    }
+#endif
     return false;
   }
 
@@ -379,6 +597,10 @@ bool BleKeyboardHost::begin(const char* hostName) {
   // device shows up nameless or not at all. This (plus the windowed interval
   // below and the no-filter onResult) keeps scan response and extended adv data.
   scan->setScanCallbacks(&g_scanCb, true);
+  // The callback copies candidates into our fixed 24-entry table. NimBLE's
+  // default also retains every advertiser (including filtered beacons) on the
+  // heap. Callback-only mode releases each completed result after delivery.
+  scan->setMaxResults(0);
   scan->setActiveScan(true);  // send scan requests -> receive scan responses (names)
   // CONTINUOUS listening (window == interval, 100% duty; values are ms).
   // Extended advertising splits data into an AUX packet on a secondary
@@ -418,7 +640,28 @@ bool BleKeyboardHost::begin(const char* hostName) {
   g_client->setConnectionParams(/*minInterval=*/12, /*maxInterval=*/24, /*latency=*/0, /*timeout=*/800);
   g_client->setClientCallbacks(&g_clientCb, false);
 
-  xTaskCreate(connTaskFn, "ble-conn", 4096, nullptr, 3, &g_connTask);
+  // Task creation is the final resource acquisition in begin(). If it fails,
+  // leaving NimBLE initialized would make the UI report a running host that
+  // can never process connect() notifications, and the next begin() would
+  // inherit the live client/stack.
+  g_connTask = nullptr;
+  const BaseType_t taskResult = xTaskCreate(connTaskFn, "ble-conn", 4096, nullptr, 3, &g_connTask);
+  if (taskResult != pdTRUE || g_connTask == nullptr) {
+    Serial.println("[BleHid] begin: connection task create failed");
+    if (g_client != nullptr) {
+      NimBLEDevice::deleteClient(g_client);
+      g_client = nullptr;
+    }
+    NimBLEDevice::deinit(true);
+    g_connTask = nullptr;
+    g_connecting.store(false, std::memory_order_release);
+    g_stopRequested.store(false, std::memory_order_release);
+    g_connectCancelRequested.store(false, std::memory_order_release);
+    g_workerSafeToDelete.store(false, std::memory_order_release);
+    g_teardownPending.store(false, std::memory_order_release);
+    begun_ = false;
+    return false;
+  }
   begun_ = true;
 #if FREEINK_BLE_HID_SCAN_DEBUG
   Serial.println("[BleHid] begin: ok");
@@ -426,59 +669,84 @@ bool BleKeyboardHost::begin(const char* hostName) {
   return true;
 }
 
-void BleKeyboardHost::end() {
-  if (!begun_) return;
-  begun_ = false;
+bool BleKeyboardHost::end(uint32_t timeoutMs) {
+  const uint32_t budgetMs = timeoutMs > kMaxTeardownTimeoutMs ? kMaxTeardownTimeoutMs : timeoutMs;
 
-  NimBLEScan* scan = NimBLEDevice::getScan();
-  if (scan && scan->isScanning()) scan->stop();
-
-  // If auto-reconnect is in the middle of g_client->connect(), do not delete the
-  // worker or deinit NimBLE under it. Let the blocking connect path unwind first;
-  // killing it inside NimBLE leaves host/controller state inconsistent and can
-  // crash on Bluetooth-off, sleep, or the next begin().
-  if (g_connecting && g_client) g_client->cancelConnect();
-  const uint32_t waitStart = millis();
-  while (g_connecting && millis() - waitStart < kTeardownConnectWaitMs) {
-    vTaskDelay(pdMS_TO_TICKS(20));
+  // A fully idle, already-deinitialized host is idempotent. This also keeps the
+  // capability-off and failed-begin paths cheap.
+  if (!begun_ && !g_teardownPending.load(std::memory_order_acquire) && g_connTask == nullptr && g_client == nullptr &&
+      !NimBLEDevice::isInitialized()) {
+    return true;
   }
 
-  // Kill the connection worker once it is idle so it can't run doConnect() against
-  // the stack while we tear it down.
-  if (g_connTask) {
+  g_stopRequested.store(true, std::memory_order_release);
+  g_connectCancelRequested.store(true, std::memory_order_release);
+  g_teardownPending.store(true, std::memory_order_release);
+  begun_ = false;
+  const uint32_t startMs = millis();
+
+  // Stop scanner callbacks before asking the worker to leave. The scan object is
+  // still owned by NimBLE and remains alive until a successful final teardown.
+  if (NimBLEDevice::isInitialized()) {
+    NimBLEScan* scan = NimBLEDevice::getScan();
+    if (scan && scan->isScanning()) scan->stop();
+  }
+
+  // Both calls are intentional. cancelConnect() wakes GAP connect(), while
+  // disconnect() wakes secureConnection()/GATT discovery once a link exists.
+  cancelActiveClient();
+  notifyConnectionWorker();
+
+  if (!waitForWorkerSafe(remainingBudget(startMs, budgetMs))) {
+    if (budgetMs != 0) {
+      Serial.printf("[BleHid] end: worker pending (%lu ms)\n", static_cast<unsigned long>(budgetMs));
+    }
+    return false;
+  }
+
+  // The worker is parked outside every NimBLE call. It is now safe to delete and
+  // join it; a worker blocked in NimBLE never reaches this branch.
+  if (g_connTask != nullptr) {
     vTaskDelete(g_connTask);
     g_connTask = nullptr;
   }
-  g_connecting = false;
+  g_connecting.store(false, std::memory_order_release);
 
-  // Close the link and explicitly delete the client BEFORE deinit. This is critical:
-  // NimBLE keeps a fixed-size client array (m_pClients) that survives deinit/init, and
-  // deleteClient() DEFERS deletion while the client is CONNECTED/DISCONNECTING (it sets
-  // a flag and disconnects async). deinit() then tears down the host before that
-  // deferred delete runs, so the slot leaks - and the next begin()'s createClient()
-  // returns null forever (BLE can't restart). Waiting for a real disconnect, then
-  // deleting while DISCONNECTED, frees the slot for good.
-  if (g_client) {
-    if (g_client->isConnected()) g_client->disconnect();
-    for (int i = 0; i < 60 && g_client->isConnected(); ++i) {
-      vTaskDelay(pdMS_TO_TICKS(10));
+  // NimBLE's client status remains DISCONNECTING until the GAP callback finishes.
+  // Keep the client and stack intact if that callback does not arrive within the
+  // remaining budget so a later end() can retry the same teardown safely.
+  if (g_client != nullptr) {
+    if (!clientFullyDisconnected()) {
+      cancelActiveClient();
+      if (!waitForClientDisconnected(remainingBudget(startMs, budgetMs))) {
+        Serial.printf("[BleHid] end: client disconnect pending (%lu ms)\n", static_cast<unsigned long>(budgetMs));
+        return false;
+      }
     }
-    vTaskDelay(pdMS_TO_TICKS(150));  // let DISCONNECTING settle to DISCONNECTED
-    NimBLEDevice::deleteClient(g_client);
+    if (!clientFullyDisconnected() || !NimBLEDevice::deleteClient(g_client)) {
+      Serial.println("[BleHid] end: client delete deferred");
+      return false;
+    }
     g_client = nullptr;
   }
 
-  // Free the NimBLE host + BT controller memory back to the heap. Bonds live in
-  // NVS and survive this; begin() re-initializes cleanly. Retry once if the stack
-  // didn't fully tear down (stop raced something), so re-init isn't a no-op.
-  NimBLEDevice::deinit(true);
   if (NimBLEDevice::isInitialized()) {
-    vTaskDelay(pdMS_TO_TICKS(50));
     NimBLEDevice::deinit(true);
+    if (NimBLEDevice::isInitialized()) {
+      Serial.println("[BleHid] end: NimBLE deinit pending");
+      return false;
+    }
   }
-  g_connecting = false;
+
+  g_connecting.store(false, std::memory_order_release);
+  g_workerSafeToDelete.store(false, std::memory_order_release);
+  g_disconnectObserved.store(true, std::memory_order_release);
+  g_connectCancelRequested.store(false, std::memory_order_release);
+  g_stopRequested.store(false, std::memory_order_release);
+  g_teardownPending.store(false, std::memory_order_release);
   g_lastGenericCode = 0;
   g_lastReportMs = 0;
+  memset(prevKeys_, 0, sizeof(prevKeys_));  // no key survives a teardown
 
   portENTER_CRITICAL(&g_mux);
   connected_ = false;
@@ -489,10 +757,15 @@ void BleKeyboardHost::end() {
   ringTail_ = 0;
   heldUsage_ = 0;
   portEXIT_CRITICAL(&g_mux);
+  return true;
+}
+
+bool BleKeyboardHost::isStopping() const {
+  return g_teardownPending.load(std::memory_order_acquire);
 }
 
 void BleKeyboardHost::poll() {
-  if (!begun_) return;
+  if (!begun_ || stopRequested()) return;
 
   // Reflect the live scanner state.
   scanning_ = NimBLEDevice::getScan()->isScanning();
@@ -527,7 +800,7 @@ void BleKeyboardHost::poll() {
 
 // --- Discovery ---------------------------------------------------------------
 void BleKeyboardHost::startScan(uint32_t ms) {
-  if (!begun_) {
+  if (!begun_ || stopRequested()) {
 #if FREEINK_BLE_HID_SCAN_DEBUG
     Serial.println("[BleHid] scan start ignored: host not begun");
 #endif
@@ -537,11 +810,15 @@ void BleKeyboardHost::startScan(uint32_t ms) {
 #if FREEINK_BLE_HID_SCAN_DEBUG
     Serial.println("[BleHid] scan start: cancelling pending reconnect");
 #endif
+    g_connectCancelRequested.store(true, std::memory_order_release);
     g_client->cancelConnect();
+    if (g_client->isConnected()) g_client->disconnect();
     const uint32_t waitStart = millis();
-    while (g_connecting && millis() - waitStart < kTeardownConnectWaitMs) {
-      vTaskDelay(pdMS_TO_TICKS(20));
+    while (g_connecting.load(std::memory_order_acquire) && millis() - waitStart < kScanCancelWaitMs) {
+      vTaskDelay(pdMS_TO_TICKS(kTeardownPollMs));
     }
+    if (g_connecting.load(std::memory_order_acquire) || stopRequested()) return;
+    g_connectCancelRequested.store(false, std::memory_order_release);
   }
   portENTER_CRITICAL(&g_mux);
   deviceCount_ = 0;
@@ -583,7 +860,9 @@ void BleKeyboardHost::releaseScanResults() {
 
 // --- Connection --------------------------------------------------------------
 bool BleKeyboardHost::connect(const char* addr) {
-  if (!begun_ || !addr || g_connecting) return false;
+  if (!begun_ || stopRequested() || !addr || g_connecting.load(std::memory_order_acquire) || g_connTask == nullptr) {
+    return false;
+  }
 
   uint8_t type = 0;
   bool knownType = false;
@@ -602,16 +881,26 @@ bool BleKeyboardHost::connect(const char* addr) {
     }
   }
 
+  TaskHandle_t task = nullptr;
+  portENTER_CRITICAL(&g_mux);
+  if (!begun_ || stopRequested() || g_connecting.load(std::memory_order_acquire) || g_connTask == nullptr) {
+    portEXIT_CRITICAL(&g_mux);
+    return false;
+  }
   strncpy(g_targetAddr, addr, sizeof(g_targetAddr) - 1);
   g_targetAddr[sizeof(g_targetAddr) - 1] = '\0';
   g_targetType = type;
   g_targetTryAltType = !knownType;
-  g_connecting = true;
+  g_connectCancelRequested.store(false, std::memory_order_release);
+  g_disconnectObserved.store(true, std::memory_order_release);
+  g_connecting.store(true, std::memory_order_release);
   connecting_ = true;
   connectFailed_ = false;
   pairingPasskeyReady_ = false;
   connectFailure_[0] = '\0';
-  if (g_connTask) xTaskNotifyGive(g_connTask);
+  task = g_connTask;
+  portEXIT_CRITICAL(&g_mux);
+  if (task != nullptr) xTaskNotifyGive(task);
   return true;
 }
 
@@ -651,7 +940,12 @@ bool BleKeyboardHost::popKey(KeyEvent& out) {
 }
 
 void BleKeyboardHost::enqueue(const KeyEvent& ev) {
+  if (stopRequested()) return;
   portENTER_CRITICAL(&g_mux);
+  if (stopRequested()) {
+    portEXIT_CRITICAL(&g_mux);
+    return;
+  }
   const uint8_t next = static_cast<uint8_t>((ringHead_ + 1) % kKeyQueueLen);
   if (next != ringTail_) {  // drop on overflow rather than block
     ring_[ringHead_] = ev;
@@ -679,7 +973,7 @@ void BleKeyboardHost::emitUsage(uint8_t usage, uint8_t mods) {
 
 // --- Internal hooks from the BLE backend -------------------------------------
 void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
-  if (!data || len == 0) return;
+  if (!data || len == 0 || !callbacksAllowed()) return;
   g_lastReportMs = millis();  // freshness for the stale-release timeout in poll()
 
 #if FREEINK_BLE_HID_REPORT_DEBUG
@@ -694,16 +988,62 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
   }
 #endif
 
-  // Normalize: strip a leading report id (len 9). Boot/report-protocol keyboard
-  // reports are [mod][reserved][k0..k5] (8 bytes) or a compact [mod][k0..k5] (7).
+  // --- Decode through the parsed Report Map ----------------------------------
+  // The descriptor (parsed in setupHid) says which report id carries what, and
+  // where its modifier bits and key usages sit. Reports are decoded only from
+  // that map: no byte scan, no assumption that byte 0 is the modifier byte.
+  HidReportView view;
+  if (decodeHidReport(g_hidMap, data, len, view, g_notifyReportId)) {
+    // Emit a press for every usage newly present versus the previous report.
+    for (uint8_t i = 0; i < view.keyCount; ++i) {
+      const uint8_t k = view.keys[i];
+      if (k == 0) continue;
+      bool wasDown = false;
+      for (uint8_t j = 0; j < kHidMaxKeysPerReport; ++j) {
+        if (prevKeys_[j] == k) {
+          wasDown = true;
+          break;
+        }
+      }
+      if (!wasDown) emitUsage(k, view.mods);
+    }
+
+    // Track the last held key for auto-repeat.
+    uint8_t cur = 0;
+    for (uint8_t i = 0; i < view.keyCount; ++i) {
+      if (view.keys[i] != 0) cur = view.keys[i];
+    }
+    portENTER_CRITICAL(&g_mux);
+    if (cur == 0) {
+      heldUsage_ = 0;
+    } else if (cur != heldUsage_) {
+      heldUsage_ = cur;
+      heldMods_ = view.mods;
+      heldSince_ = millis();
+      lastRepeat_ = millis();
+    }
+    portEXIT_CRITICAL(&g_mux);
+
+    memcpy(prevKeys_, view.keys, sizeof(prevKeys_));
+    g_lastGenericCode = 0;
+    return;
+  }
+
+  // --- Last resort for reports the map cannot decode --------------------------
+  // Reached only when the descriptor was unreadable/rejected, the report id is
+  // unknown, or the payload does not match its own layout - i.e. when there is no
+  // map to decode with. Boot/report-protocol keyboard reports are
+  // [mod][reserved][k0..k5] (8 bytes) or a compact [mod][k0..k5] (7); a remote that
+  // puts its code on the Consumer Control page or at a non-standard offset is
+  // scanned for a representative code and surfaced edge-detected (one press == one
+  // event), so these devices keep working with no map at all.
   const uint8_t* p = data;
   size_t n = len;
-  if (n == 9) {
+  if (n == 9) {  // report-id byte the descriptor did not declare
     p += 1;
     n -= 1;
   }
 
-  // --- Standard keyboard report path -----------------------------------------
   uint8_t mod = 0;
   uint8_t keys[6] = {0};
   bool keyboardShaped = false;
@@ -719,7 +1059,6 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
 
   bool emittedKb = false;
   if (keyboardShaped) {
-    // Emit a press for every key newly present versus the previous report.
     for (int i = 0; i < 6; ++i) {
       const uint8_t k = keys[i];
       if (k == 0 || k == 0x01 /*ErrorRollOver*/) continue;
@@ -736,7 +1075,6 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
       }
     }
 
-    // Track the last held key for auto-repeat.
     uint8_t cur = 0;
     for (int i = 0; i < 6; ++i) {
       if (keys[i] != 0 && keys[i] != 0x01) cur = keys[i];
@@ -753,15 +1091,17 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
     portEXIT_CRITICAL(&g_mux);
 
     memcpy(prevKeys_, keys, sizeof(prevKeys_));
+    if (emittedKb) g_lastGenericCode = 0;
   }
 
-  // --- Generic fallback for non-keyboard remotes -----------------------------
-  // Many page turners are not boot keyboards: they emit on the Consumer Control
-  // page or place the code at a non-standard byte. When the keyboard slots produced
-  // nothing and the device doesn't look like a pure keyboard, scan the report for a
-  // representative code and surface it (edge-detected so one press == one event).
-  const bool tryGeneric = !emittedKb && (g_hasConsumerPage || !g_hasKeyboardPage || n < 7);
-  if (tryGeneric) {
+  // The boot keyboard shape owns every report it can express - including one that
+  // carried no NEW key, which means the key is still held down. Scanning such a
+  // report for a representative code as well would re-emit the held code on every
+  // notification: a phantom second press per report, which the edge detector above
+  // cannot suppress because the two paths keep separate "last code" state. Only a
+  // payload this shape cannot express (fewer than 7 bytes: a 3-byte value-coded
+  // remote, a 5-byte gamepad frame) is scanned generically.
+  if (!keyboardShaped) {
     size_t codeIdx = 0;
     const uint8_t code = extractPrimaryCode(p, n, &codeIdx);
     // Gamepad-style modes keep constant bits in the button byte and only clear
@@ -809,14 +1149,12 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
       emitUsage(code, 0);
     }
     g_lastGenericCode = code;
-  } else if (emittedKb) {
-    g_lastGenericCode = 0;
   }
 }
 
 void BleKeyboardHost::onScanResultIngest(const char* addr, const char* name, int rssi, uint8_t type, bool hid,
                                          bool connectable) {
-  if (!addr) return;
+  if (!addr || !callbacksAllowed()) return;
   // A "real" name (not the address fallback) should never be downgraded back to
   // the address on a later primary-only advertisement.
   const bool realName = name && name[0] && strcmp(name, addr) != 0;
@@ -830,6 +1168,11 @@ void BleKeyboardHost::onScanResultIngest(const char* addr, const char* name, int
   }
 #endif
   portENTER_CRITICAL(&g_mux);
+
+  if (!callbacksAllowed()) {
+    portEXIT_CRITICAL(&g_mux);
+    return;
+  }
 
   // Upsert by address.
   uint8_t idx = deviceCount_;
@@ -891,6 +1234,7 @@ void BleKeyboardHost::onScanResultIngest(const char* addr, const char* name, int
 }
 
 void BleKeyboardHost::onLinkUp(const char* addr, const char* name, uint8_t type) {
+  if (!callbacksAllowed()) return;
   // Resolve a friendly name from the scan or bond lists if the caller has none.
   const char* resolved = (name && name[0] && (!addr || strcmp(name, addr) != 0)) ? name : nullptr;
   if (!resolved && addr) {
@@ -920,6 +1264,7 @@ void BleKeyboardHost::onLinkUp(const char* addr, const char* name, uint8_t type)
   }
 
   // Persist the pairing if new.
+  if (!callbacksAllowed()) return;
   if (addr) {
     bool known = false;
     for (uint8_t i = 0; i < bondCount_; ++i) {
@@ -948,23 +1293,39 @@ void BleKeyboardHost::onLinkUp(const char* addr, const char* name, uint8_t type)
     }
   }
 
+  if (!callbacksAllowed()) return;
   g_reconnectIdx = 0;
+  portENTER_CRITICAL(&g_mux);
+  if (!callbacksAllowed()) {
+    portEXIT_CRITICAL(&g_mux);
+    return;
+  }
   connecting_ = false;
   connected_ = true;
-}
-
-void BleKeyboardHost::onLinkDown() {
-  connected_ = false;
-  connecting_ = false;
-  portENTER_CRITICAL(&g_mux);
-  heldUsage_ = 0;
   portEXIT_CRITICAL(&g_mux);
 }
 
-void BleKeyboardHost::onConnectFailed(const char* reason) {
+void BleKeyboardHost::onLinkDown() {
+  portENTER_CRITICAL(&g_mux);
   connected_ = false;
   connecting_ = false;
+  heldUsage_ = 0;
+  portEXIT_CRITICAL(&g_mux);
+  // No key is held across a link drop: the next session's first press of the same
+  // key must read as a press, not as a continuation of a hold that never ended.
+  memset(prevKeys_, 0, sizeof(prevKeys_));
+  g_lastGenericCode = 0;
+}
+
+void BleKeyboardHost::onConnectFailed(const char* reason) {
+  if (!callbacksAllowed()) return;
   portENTER_CRITICAL(&g_mux);
+  if (!callbacksAllowed()) {
+    portEXIT_CRITICAL(&g_mux);
+    return;
+  }
+  connected_ = false;
+  connecting_ = false;
   strncpy(connectFailure_, reason && reason[0] ? reason : "Connection failed", sizeof(connectFailure_) - 1);
   connectFailure_[sizeof(connectFailure_) - 1] = '\0';
   connectFailed_ = true;
@@ -987,7 +1348,12 @@ bool BleKeyboardHost::takeConnectFailure(char* out, size_t outLen) {
 }
 
 void BleKeyboardHost::onPairingPasskey(uint32_t passkey) {
+  if (!callbacksAllowed()) return;
   portENTER_CRITICAL(&g_mux);
+  if (!callbacksAllowed()) {
+    portEXIT_CRITICAL(&g_mux);
+    return;
+  }
   pairingPasskey_ = passkey;
   pairingPasskeyReady_ = true;
   portEXIT_CRITICAL(&g_mux);
@@ -1007,18 +1373,41 @@ bool BleKeyboardHost::takePairingPasskey(uint32_t& out) {
 
 // --- NVS persistence ---------------------------------------------------------
 void BleKeyboardHost::loadBonds() {
+  // A missing/short blob must not reuse records from an earlier begin(). The
+  // count and blob are separate NVS writes, so an interrupted save can disagree.
+  bondCount_ = 0;
+  for (auto& bond : bonds_) bond = PairedHidDevice{};
   Preferences p;
   if (!p.begin("freeink-hid", true)) return;
-  bondCount_ = p.getUChar("n", 0);
-  if (bondCount_ > kMaxBonds) bondCount_ = kMaxBonds;
-  if (bondCount_ > 0) p.getBytes("b", bonds_, bondCount_ * sizeof(PairedHidDevice));
+  const uint8_t storedCount = p.getUChar("n", 0);
+  const size_t expectedBytes = storedCount * sizeof(PairedHidDevice);
+  const bool validBlob = storedCount > 0 && storedCount <= kMaxBonds &&
+                         p.getBytes("b", bonds_, expectedBytes) == expectedBytes;
   p.end();
+  if (!validBlob) return;
+
   bool cleaned = false;
-  for (uint8_t i = 0; i < bondCount_; ++i) {
-    if (bonds_[i].name[0] && strcmp(bonds_[i].name, bonds_[i].addr) == 0) {
-      bonds_[i].name[0] = '\0';
+  for (uint8_t i = 0; i < storedCount; ++i) {
+    auto& bond = bonds_[i];
+    bool validAddress = bond.addr[17] == '\0' && bond.addrType <= 3;
+    for (size_t j = 0; j < 17 && validAddress; ++j) {
+      const char c = bond.addr[j];
+      validAddress = j % 3 == 2 ? c == ':' :
+          ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
+    }
+    if (!validAddress) {
+      cleaned = true;
+      continue;
+    }
+    if (bond.name[sizeof(bond.name) - 1] != '\0') {
+      bond.name[sizeof(bond.name) - 1] = '\0';
       cleaned = true;
     }
+    if (bond.name[0] && strcmp(bond.name, bond.addr) == 0) {
+      bond.name[0] = '\0';
+      cleaned = true;
+    }
+    bonds_[bondCount_++] = bond;
   }
   if (cleaned) persistBonds();
 }
@@ -1026,8 +1415,10 @@ void BleKeyboardHost::loadBonds() {
 void BleKeyboardHost::persistBonds() {
   Preferences p;
   if (!p.begin("freeink-hid", false)) return;
-  p.putUChar("n", bondCount_);
-  if (bondCount_ > 0) p.putBytes("b", bonds_, bondCount_ * sizeof(PairedHidDevice));
+  const size_t bytes = bondCount_ * sizeof(PairedHidDevice);
+  // Publish the count only after the payload was stored successfully. A failed
+  // blob write must not claim a new record exists in the previous payload.
+  if (bondCount_ == 0 || p.putBytes("b", bonds_, bytes) == bytes) p.putUChar("n", bondCount_);
   p.end();
 }
 
@@ -1038,7 +1429,8 @@ void BleKeyboardHost::persistBonds() {
 namespace freeink {
 
 bool BleKeyboardHost::begin(const char*) { return false; }
-void BleKeyboardHost::end() {}
+bool BleKeyboardHost::end(uint32_t) { return true; }
+bool BleKeyboardHost::isStopping() const { return false; }
 void BleKeyboardHost::poll() {}
 void BleKeyboardHost::startScan(uint32_t) {}
 void BleKeyboardHost::stopScan() {}

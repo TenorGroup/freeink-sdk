@@ -231,12 +231,12 @@ function normalizeSchemaDefaults() {
 }
 
 function componentSummary(child) {
-  if (child.type === "qwertyKeyboard") return "QWERTY keyboard";
-  if (child.type === "table") return `${(child.rows || []).length} rows`;
-  if (child.type === "list") return `${(child.items || []).length} items`;
-  if (child.type === "radioGroup") return `${(child.options || []).length} options`;
-  if (child.type === "optionDialog") return `${(child.options || []).length} options`;
-  if (child.type === "footer") return `${(child.buttons || []).length} actions`;
+  if (child.type === "qwertyKeyboard") return "Bàn phím QWERTY";
+  if (child.type === "table") return `${(child.rows || []).length} dòng`;
+  if (child.type === "list") return `${(child.items || []).length} mục`;
+  if (child.type === "radioGroup") return `${(child.options || []).length} lựa chọn`;
+  if (child.type === "optionDialog") return `${(child.options || []).length} lựa chọn`;
+  if (child.type === "footer") return `${(child.buttons || []).length} nút`;
   if (child.type === "bookCard") return child.title || child.author || "";
   if (child.type === "statusBar") return child.title || child.leading || "";
   if (child.type === "textArea") return child.text || "";
@@ -245,12 +245,12 @@ function componentSummary(child) {
 
 function addChild(type, index = state.schema.children.length) {
   if (!supported.has(type)) {
-    showToast(`${type} is not editable in the builder yet`);
+    showToast(`${type} chưa sửa được trong trình dựng này`);
     return;
   }
   const child = defaultChild(type);
   if (!child) {
-    showToast(`${type} is not editable in the builder yet`);
+    showToast(`${type} chưa sửa được trong trình dựng này`);
     return;
   }
   state.selectedIndex = index;
@@ -334,20 +334,20 @@ function renderCanvas() {
   if (!children.length) {
     const empty = document.createElement("div");
     empty.className = "drop-hint";
-    empty.textContent = "Drop components here";
+    empty.textContent = "Kéo thành phần vào đây";
     el.screenCanvas.appendChild(empty);
   }
 
   const preview = document.createElement("img");
   preview.className = "screen-preview-img is-loading";
-  preview.alt = "Rendered FreeInkUI screen preview";
+  preview.alt = "Ảnh xem trước màn hình FreeInkUI";
   el.screenCanvas.appendChild(preview);
 
   const loader = document.createElement("div");
   loader.className = "preview-loader";
   loader.setAttribute("role", "status");
   loader.setAttribute("aria-live", "polite");
-  loader.innerHTML = `<span class="preview-loader__spinner" aria-hidden="true"></span><span>Rendering preview</span>`;
+  loader.innerHTML = `<span class="preview-loader__spinner" aria-hidden="true"></span><span>Đang dựng ảnh xem trước</span>`;
   el.screenCanvas.appendChild(loader);
 
   const topChildren = [];
@@ -446,8 +446,8 @@ async function updateRenderedPreview(preview, loader) {
     if (!response.ok) {
       preview.removeAttribute("src");
       preview.classList.add("is-loading");
-      setPreviewLoaderError(loader, "Preview render failed");
-      showToast("Preview render failed");
+      setPreviewLoaderError(loader, "Dựng ảnh xem trước thất bại");
+      showToast("Dựng ảnh xem trước thất bại");
       return;
     }
     const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
@@ -466,8 +466,8 @@ async function updateRenderedPreview(preview, loader) {
       if (seq !== state.renderSeq) return;
       preview.removeAttribute("src");
       preview.classList.add("is-loading");
-      setPreviewLoaderError(loader, "Preview image failed");
-      showToast("Preview image failed");
+      setPreviewLoaderError(loader, "Không hiển thị được ảnh xem trước");
+      showToast("Không hiển thị được ảnh xem trước");
     };
     preview.src = url;
   } catch (error) {
@@ -519,7 +519,7 @@ function renderInspector() {
   el.deleteBtn.disabled = !child;
   el.inspectorFields.innerHTML = "";
   if (!child) {
-    el.inspectorFields.textContent = "Select a component.";
+    el.inspectorFields.textContent = "Chọn một thành phần.";
     return;
   }
   for (const [name, kind, readonly] of fieldSpec(child)) {
@@ -551,7 +551,7 @@ function renderInspector() {
       for (const value of ["", "top", "bottom"]) {
         const option = document.createElement("option");
         option.value = value;
-        option.textContent = value || "default";
+        option.textContent = value || "mặc định";
         input.appendChild(option);
       }
       input.value = child[name] || "";
@@ -572,12 +572,12 @@ function renderInspector() {
     } else if (kind === "edgeMask") {
       input = document.createElement("select");
       for (const [value, label] of [
-        ["none", "None"],
-        ["top", "Top"],
-        ["bottom", "Bottom"],
-        ["topBottom", "Top + bottom"],
-        ["leftRight", "Left + right"],
-        ["all", "All"],
+        ["none", "Không"],
+        ["top", "Trên"],
+        ["bottom", "Dưới"],
+        ["topBottom", "Trên + dưới"],
+        ["leftRight", "Trái + phải"],
+        ["all", "Tất cả"],
       ]) {
         const option = document.createElement("option");
         option.value = value;
@@ -587,7 +587,7 @@ function renderInspector() {
       input.value = child[name] || "top";
     } else if (kind === "selectionMarker") {
       input = document.createElement("select");
-      for (const [value, label] of [["none", "None"], ["underline", "Underline"], ["triangle", "Triangle"]]) {
+      for (const [value, label] of [["none", "Không"], ["underline", "Gạch chân"], ["triangle", "Tam giác"]]) {
         const option = document.createElement("option");
         option.value = value;
         option.textContent = label;
@@ -596,7 +596,7 @@ function renderInspector() {
       input.value = child[name] || "none";
     } else if (kind === "textAlign") {
       input = document.createElement("select");
-      for (const [value, label] of [["left", "Left"], ["center", "Center"], ["right", "Right"]]) {
+      for (const [value, label] of [["left", "Trái"], ["center", "Giữa"], ["right", "Phải"]]) {
         const option = document.createElement("option");
         option.value = value;
         option.textContent = label;
@@ -681,11 +681,11 @@ async function generateCpp() {
   const text = await response.text();
   if (!response.ok) {
     el.cppOutput.textContent = text;
-    showToast("Generation failed");
+    showToast("Sinh mã thất bại");
     return;
   }
   el.cppOutput.textContent = text;
-  showToast("Generated C++");
+  showToast("Đã sinh mã C++");
 }
 
 async function init() {
@@ -729,7 +729,7 @@ async function init() {
       state.schema = JSON.parse(el.schemaText.value);
       state.selectedIndex = -1;
       renderAll();
-      showToast("Schema applied");
+      showToast("Đã áp dụng lược đồ");
     } catch (error) {
       showToast(error.message);
     }
@@ -749,7 +749,7 @@ async function init() {
   });
   el.copyCppBtn.addEventListener("click", async () => {
     await navigator.clipboard.writeText(el.cppOutput.textContent);
-    showToast("Copied");
+    showToast("Đã sao chép");
   });
   el.screenCanvas.addEventListener("dragover", (event) => event.preventDefault());
   el.screenCanvas.addEventListener("drop", (event) => {

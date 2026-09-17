@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a FreeInkApp screen function from a small JSON screen schema."""
+"""Sinh hàm màn hình FreeInkApp từ một lược đồ JSON gọn."""
 
 import argparse
 import json
@@ -735,7 +735,7 @@ def generate(schema):
         elif kind == "textArea":
             emit_text_area(child, lines, index)
         else:
-            raise SystemExit(f"unsupported component type: {kind!r}")
+            raise SystemExit(f"loại thành phần không được hỗ trợ: {kind!r}")
     lines.append("}")
     lines.append("")
     return "\n".join(lines)
