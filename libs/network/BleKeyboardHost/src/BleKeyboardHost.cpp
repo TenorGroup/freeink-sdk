@@ -364,15 +364,14 @@ void doConnect(const char* addrStr, uint8_t type, bool tryAltType) {
     if (g_client->isConnected()) g_client->disconnect();
     return;
   }
-  // Some keyboards only expose (or only let us discover) the HID service once
-  // the link is encrypted, so pair before giving up on a peer that connected
-  // but showed no 0x1812. A page turner that advertises it plainly still takes
-  // the short path: discover first, pair second.
-  bool hid = hasHidService(g_client);
+  if (!hasHidService(g_client)) {
 #if FREEINK_BLE_HID_SCAN_DEBUG
-  Serial.printf("[BleHid] HID service before pairing: %s -> %d (err=%d)\n", addrStr, hid ? 1 : 0,
-                g_client->getLastError());
+    Serial.printf("[BleHid] no HID service: %s (err=%d)\n", addrStr, g_client->getLastError());
 #endif
+    if (g_client->isConnected()) g_client->disconnect();
+    if (!operationCancelled()) self().onConnectFailed("Not a HID device");
+    return;
+  }
   if (operationCancelled()) {
     if (g_client->isConnected()) g_client->disconnect();
     return;
@@ -382,20 +381,7 @@ void doConnect(const char* addrStr, uint8_t type, bool tryAltType) {
     Serial.printf("[BleHid] security failed: %s err=%d\n", addrStr, g_client->getLastError());
 #endif
     if (g_client->isConnected()) g_client->disconnect();
-    if (!operationCancelled()) self().onConnectFailed(hid ? "Pairing failed" : "Not a HID device");
-    return;
-  }
-  if (!hid && !operationCancelled()) {
-    g_client->getServices(true);  // rediscover now that the link is encrypted
-    hid = hasHidService(g_client);
-#if FREEINK_BLE_HID_SCAN_DEBUG
-    Serial.printf("[BleHid] HID service after pairing: %s -> %d (err=%d)\n", addrStr, hid ? 1 : 0,
-                  g_client->getLastError());
-#endif
-  }
-  if (!hid) {
-    if (g_client->isConnected()) g_client->disconnect();
-    if (!operationCancelled()) self().onConnectFailed("Not a HID device");
+    if (!operationCancelled()) self().onConnectFailed("Pairing failed");
     return;
   }
   if (operationCancelled()) {
@@ -1173,7 +1159,10 @@ void BleKeyboardHost::onScanResultIngest(const char* addr, const char* name, int
   // the address on a later primary-only advertisement.
   const bool realName = name && name[0] && strcmp(name, addr) != 0;
 #if !FREEINK_BLE_HID_SHOW_UNNAMED_DEVICES
-  if (!realName && !hid) {
+  // Only peers that advertise the HID service or a keyboard appearance are
+  // listed. A named sensor (a radar module was picked on 18/09/2026) connects,
+  // fails the HID check and, on the C3, took the controller down with it.
+  if (!hid) {
 #if FREEINK_BLE_HID_SCAN_DEBUG
     Serial.printf("[BleHid] scan filtered: %s name='%s' rssi=%d hid=%d conn=%d type=%u\n", addr, name ? name : "",
                   rssi, hid ? 1 : 0, connectable ? 1 : 0, type);

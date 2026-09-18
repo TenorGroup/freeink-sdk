@@ -1,5 +1,7 @@
 #include "EpdBus.h"
 
+#include <string.h>
+
 #include <BoardConfig.h>
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
@@ -396,8 +398,29 @@ void EpdBus::waitRefreshComplete(const char* tag) {
 void EpdBus::sendPlaneFlipped(uint8_t ramCmd, const uint8_t* plane, uint16_t height, uint16_t widthBytes) {
   cmd(ramCmd);  // own CS pulse
   beginTxn();   // single CS-low burst for the whole plane
-  for (int y = static_cast<int>(height) - 1; y >= 0; y--) {
-    rawWriteBytes(plane + static_cast<uint32_t>(y) * widthBytes, widthBytes);
+  // Rows go out bottom-first, so they cannot be streamed straight from the
+  // framebuffer. Staging several reversed rows per write cuts the number of
+  // SPI transfers: the Arduino path pushes 64 bytes per FIFO round, and a
+  // 66-byte row on its own cost a full round plus a 2-byte one (measured
+  // ~48 ms per 52 KB plane on the X3 against 26 ms of wire time).
+  uint8_t chunk[1024];
+  const uint16_t rowsPerChunk = widthBytes > 0 && widthBytes <= sizeof(chunk) ? sizeof(chunk) / widthBytes : 0;
+  if (rowsPerChunk == 0) {
+    for (int y = static_cast<int>(height) - 1; y >= 0; y--) {
+      rawWriteBytes(plane + static_cast<uint32_t>(y) * widthBytes, widthBytes);
+    }
+    endTxn();
+    return;
+  }
+  int y = static_cast<int>(height) - 1;
+  while (y >= 0) {
+    uint16_t n = 0;
+    while (y >= 0 && n < rowsPerChunk) {
+      memcpy(chunk + static_cast<uint32_t>(n) * widthBytes, plane + static_cast<uint32_t>(y) * widthBytes, widthBytes);
+      ++n;
+      --y;
+    }
+    rawWriteBytes(chunk, static_cast<uint16_t>(n * widthBytes));
   }
   endTxn();
 }
