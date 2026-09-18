@@ -15,6 +15,5 @@ __pycache__/
 *.log
 /exploration/
 /AGENTS.md
-/CLAUDE.md
 /SESSION_HANDOFF.md
 /outputs/
