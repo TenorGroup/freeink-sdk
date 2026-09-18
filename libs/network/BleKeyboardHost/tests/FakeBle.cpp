@@ -338,6 +338,10 @@ void FakeState::advertise(const char* addr, const char* name, int rssi) {
   dev.name_ = name;
   dev.haveName_ = name[0] != '\0';
   dev.rssi_ = rssi;
+  // Fakes stand in for page turners and keyboards: advertise the keyboard
+  // appearance, since only HID peers are listed (18/09/2026).
+  dev.haveAppearance_ = true;
+  dev.appearance_ = 0x03C1;
   scan.callbacks_->onResult(&dev);
 }
 
