@@ -532,6 +532,146 @@ TEST_F(IngestTest, ScanCancellationBeforeWorkerWakeAllowsTheNextConnection) {
   EXPECT_EQ(fakeble::connectTo(kAddr), fakeble::LinkResult::Connected);
 }
 
+TEST_F(IngestTest, AutoReconnectMakesOnePassAndExplicitConnectRearmsIt) {
+  PairedHidDevice bonds[2] = {};
+  strcpy(bonds[0].addr, kAddr);
+  strcpy(bonds[1].addr, "AA:BB:CC:DD:EE:FE");
+  fakeble::state().nvs["freeink-hid/n"] = {2};
+  const auto* bytes = reinterpret_cast<const uint8_t*>(bonds);
+  fakeble::state().nvs["freeink-hid/b"] = {bytes, bytes + sizeof bonds};
+  fakeble::setConnectSucceeds(false);
+  ASSERT_TRUE(fakeble::beginHost());
+  for (int i = 0; i < 5; ++i) {
+    fakeble::advanceMillis(4001);
+    fakeble::host().poll();
+    ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  }
+  EXPECT_EQ(fakeble::state().connectCalls, 2u);
+
+  ASSERT_TRUE(fakeble::host().connect(kAddr));
+  ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  for (int i = 0; i < 4; ++i) {
+    fakeble::advanceMillis(4001);
+    fakeble::host().poll();
+    ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  }
+  // The explicit request already tried bond zero; only bond one remains.
+  EXPECT_EQ(fakeble::state().connectCalls, 4u);
+}
+
+TEST_F(IngestTest, LinkLossRearmsOnceAndExplicitDisconnectRemainsDisconnected) {
+  serveReportMap(hidtest::kBootKeyboard, sizeof hidtest::kBootKeyboard);
+  serveInputReport(nullptr, 0);
+  ASSERT_TRUE(beginAndConnect());
+  ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  fakeble::state().client->disconnect();  // peer loss, not the public user action
+  fakeble::advanceMillis(4001);
+  fakeble::host().poll();
+  ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  EXPECT_TRUE(fakeble::host().isConnected());
+  EXPECT_EQ(fakeble::state().connectCalls, 2u);
+
+  fakeble::host().disconnect();
+  fakeble::advanceMillis(4001);
+  fakeble::host().poll();
+  ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  EXPECT_FALSE(fakeble::host().isConnected());
+  EXPECT_EQ(fakeble::state().connectCalls, 2u);
+}
+
+class ConnectionDeadlineTest : public IngestTest, public ::testing::WithParamInterface<fakeble::BlockingStage> {};
+
+TEST_P(ConnectionDeadlineTest, CancelsWholeAttemptWithoutDeletingTheLiveStack) {
+  serveReportMap(hidtest::kBootKeyboard, sizeof hidtest::kBootKeyboard);
+  serveInputReport(nullptr, 0);
+  ASSERT_TRUE(fakeble::beginHost());
+  fakeble::setBlockingStage(GetParam());
+  ASSERT_TRUE(fakeble::host().connect(kAddr));
+  ASSERT_TRUE(fakeble::waitForBlockingStage(GetParam()));
+  auto* client = fakeble::state().client;
+  fakeble::advanceMillis(14999);
+  fakeble::host().poll();
+  EXPECT_EQ(fakeble::state().cancelConnectCalls, 0u);
+  fakeble::advanceMillis(1);
+  fakeble::host().poll();
+  EXPECT_GT(fakeble::state().cancelConnectCalls, 0u);
+  EXPECT_TRUE(fakeble::waitForWorkerIdle());
+  EXPECT_FALSE(fakeble::host().isConnecting());
+  EXPECT_FALSE(fakeble::host().isConnected());
+  EXPECT_EQ(fakeble::state().client, client);
+  EXPECT_EQ(fakeble::state().deleteClientCalls, 0u);
+  EXPECT_TRUE(fakeble::host().isRunning());
+  char failure[48] = {};
+  EXPECT_TRUE(fakeble::host().takeConnectFailure(failure, sizeof failure));
+  EXPECT_STREQ(failure, "Connect timeout");
+  // A second poll must not resurrect the cancelled target from a stale wake.
+  fakeble::host().poll();
+  EXPECT_EQ(fakeble::state().connectCalls, 1u);
+}
+
+INSTANTIATE_TEST_SUITE_P(AllStages, ConnectionDeadlineTest,
+                        ::testing::Values(fakeble::BlockingStage::Connect, fakeble::BlockingStage::Security,
+                                          fakeble::BlockingStage::Discovery));
+
+TEST_F(IngestTest, QueuedAttemptDeadlineSurvivesClockWrapAndSkipsLateWorkerWake) {
+  ASSERT_TRUE(fakeble::beginHost());
+  fakeble::holdWorkerNotifications(true);
+  fakeble::advanceMillis(UINT32_MAX - fakeble::clockMs() - 7000);
+  ASSERT_TRUE(fakeble::host().connect(kAddr));
+  fakeble::advanceMillis(15000);
+  fakeble::host().poll();
+  fakeble::holdWorkerNotifications(false);
+  ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  EXPECT_EQ(fakeble::state().connectCalls, 0u);
+  EXPECT_FALSE(fakeble::host().isConnecting());
+  char failure[48] = {};
+  EXPECT_TRUE(fakeble::host().takeConnectFailure(failure, sizeof failure));
+  EXPECT_STREQ(failure, "Connect timeout");
+}
+
+TEST_F(IngestTest, DeadlineRetainsUncooperativeWorkerAndSuppressesLateSuccess) {
+  serveReportMap(hidtest::kBootKeyboard, sizeof hidtest::kBootKeyboard);
+  serveInputReport(nullptr, 0);
+  ASSERT_TRUE(fakeble::beginHost());
+  fakeble::setBlockingStage(fakeble::BlockingStage::Security, /*ignoreCancellation=*/true);
+  ASSERT_TRUE(fakeble::host().connect(kAddr));
+  ASSERT_TRUE(fakeble::waitForBlockingStage(fakeble::BlockingStage::Security));
+  auto* client = fakeble::state().client;
+  fakeble::advanceMillis(15000);
+  fakeble::host().poll();
+  EXPECT_EQ(fakeble::state().client, client);
+  EXPECT_EQ(fakeble::state().deleteClientCalls, 0u);
+  EXPECT_FALSE(fakeble::host().connect(kAddr));
+  fakeble::host().onLinkUp(kAddr, "Late peer", 0);
+  EXPECT_FALSE(fakeble::host().isConnected());
+  fakeble::releaseBlockingCall();
+  ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  EXPECT_FALSE(fakeble::host().isConnected());
+  EXPECT_EQ(fakeble::state().connectCalls, 1u);
+}
+
+TEST_F(IngestTest, DeadlineRetryWaitsForTheClientToFinishDisconnecting) {
+  serveReportMap(hidtest::kBootKeyboard, sizeof hidtest::kBootKeyboard);
+  serveInputReport(nullptr, 0);
+  ASSERT_TRUE(fakeble::beginHost());
+  fakeble::setBlockingStage(fakeble::BlockingStage::Security);
+  fakeble::setDisconnectAtDisconnecting(true);
+  ASSERT_TRUE(fakeble::host().connect(kAddr));
+  ASSERT_TRUE(fakeble::waitForBlockingStage(fakeble::BlockingStage::Security));
+  fakeble::advanceMillis(15000);
+  fakeble::host().poll();
+  ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  EXPECT_EQ(NimBLEDevice::getDisconnectedClient(), nullptr);
+  EXPECT_FALSE(fakeble::host().connect(kAddr));
+  ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  EXPECT_EQ(fakeble::state().connectCalls, 1u);
+
+  fakeble::completeDisconnect();
+  ASSERT_TRUE(fakeble::host().connect(kAddr));
+  ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  EXPECT_TRUE(fakeble::host().isConnected());
+}
+
 TEST_F(IngestTest, MissingBondBlobCannotResurrectPreviousSessionRecords) {
   serveReportMap(hidtest::kBootKeyboard, sizeof hidtest::kBootKeyboard);
   serveInputReport(nullptr, 0);

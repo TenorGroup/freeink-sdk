@@ -54,6 +54,7 @@ constexpr uint8_t kMaxInputReportChars = 4;
 constexpr uint32_t kReleaseTimeoutMs = 150;
 constexpr uint32_t kReconnectBackoffMs = 4000;
 constexpr uint32_t kConnectTimeoutMs = 8000;
+constexpr uint32_t kConnectAttemptTimeoutMs = 15000;  // GAP + pairing + GATT
 constexpr uint32_t kMaxTeardownTimeoutMs = 2000;
 constexpr uint32_t kTeardownPollMs = 10;
 constexpr uint32_t kScanCancelWaitMs = 1000;
@@ -83,7 +84,12 @@ uint8_t g_targetType = 0;
 bool g_targetTryAltType = false;
 
 uint32_t g_lastReconnectMs = 0;
-uint8_t g_reconnectIdx = 0;
+// Protected by g_mux. Each disconnected episode tries each saved bond once.
+uint8_t g_reconnectTriedMask = 0;
+bool g_autoReconnect = false;
+bool g_userDisconnect = false;
+uint32_t g_connectStartedMs = 0;
+bool g_connectTimedOut = false;
 
 // HID Report Map (parsed item by item once per connection in setupHid). Every
 // incoming report is decoded through this map, so the modifier byte and the key
@@ -408,12 +414,7 @@ void connTaskFn(void*) {
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     if (stopRequested()) break;
-    if (g_connectCancelRequested.load(std::memory_order_acquire)) {
-      self().onLinkDown();
-      g_connectCancelRequested.store(false, std::memory_order_release);
-      g_connecting.store(false, std::memory_order_release);
-      continue;
-    }
+    if (!g_connecting.load(std::memory_order_acquire)) continue;  // stale wake
 
     char addr[sizeof(g_targetAddr)];
     uint8_t type = 0;
@@ -434,10 +435,16 @@ void connTaskFn(void*) {
     if (g_connectCancelRequested.load(std::memory_order_acquire)) self().onLinkDown();
     // startScan() cancels only this connection attempt. Clear the operation
     // cancellation before returning to the normal idle wait.
+    // Serialize the final result with poll(), which may be servicing the same
+    // deadline. The nested onConnectFailed() critical section uses this mutex.
+    portENTER_CRITICAL(&g_mux);
     g_connectCancelRequested.store(false, std::memory_order_release);
+    if (g_connectTimedOut) self().onConnectFailed("Connect timeout");
+    g_connectTimedOut = false;
     // Publish idle after cancellation cleanup, so startScan()/connect() cannot
     // start a fresh operation while this worker still clears the previous one.
     g_connecting.store(false, std::memory_order_release);
+    portEXIT_CRITICAL(&g_mux);
   }
 
   g_connecting.store(false, std::memory_order_release);
@@ -538,6 +545,11 @@ bool BleKeyboardHost::begin(const char* hostName) {
   g_workerSafeToDelete.store(false, std::memory_order_release);
   g_disconnectObserved.store(true, std::memory_order_release);
   g_connectCancelRequested.store(false, std::memory_order_release);
+  g_connectTimedOut = false;
+  g_userDisconnect = false;
+  g_reconnectTriedMask = 0;
+  g_autoReconnect = true;
+  g_lastReconnectMs = millis();
 
 #if FREEINK_BLE_HID_SCAN_DEBUG
   Serial.printf("[BleHid] begin: host='%s' bonds=%u\n", hostName ? hostName : "FreeInk", bondCount_);
@@ -751,6 +763,8 @@ bool BleKeyboardHost::end(uint32_t timeoutMs) {
   portENTER_CRITICAL(&g_mux);
   connected_ = false;
   connecting_ = false;
+  g_autoReconnect = false;
+  g_connectTimedOut = false;
   scanning_ = false;
   deviceCount_ = 0;
   ringHead_ = 0;
@@ -770,6 +784,21 @@ void BleKeyboardHost::poll() {
   // Reflect the live scanner state.
   scanning_ = NimBLEDevice::getScan()->isScanning();
 
+  // NimBLE's GAP timeout does not bound security or GATT waits. Request their
+  // existing cancellation path at the overall deadline, without deleting the
+  // worker/client. Retry cancellation until the worker has left NimBLE, closing
+  // the race where it entered a blocking stage just after the first cancel.
+  bool cancelAttempt = false;
+  portENTER_CRITICAL(&g_mux);
+  if (g_connecting.load(std::memory_order_acquire) && !connected_ &&
+      static_cast<uint32_t>(millis() - g_connectStartedMs) >= kConnectAttemptTimeoutMs) {
+    g_connectTimedOut = true;
+    g_connectCancelRequested.store(true, std::memory_order_release);
+    cancelAttempt = true;
+  }
+  portEXIT_CRITICAL(&g_mux);
+  if (cancelAttempt) cancelActiveClient();
+
   // Held-key release. Page-turner remotes stream a held key (and many omit a clean
   // release frame), so we do NOT synthesize host-side auto-repeat - that turned one
   // tap into dozens of page turns. Instead, when reports stop arriving, age the held
@@ -786,16 +815,18 @@ void BleKeyboardHost::poll() {
     g_lastGenericCode = 0;
   }
 
-  // Auto-reconnect to a bonded HID peripheral.
-  if (!connected_ && !g_connecting && !scanning_ && bondCount_ > 0) {
-    const uint32_t now = millis();
-    if (now - g_lastReconnectMs > kReconnectBackoffMs) {
-      g_lastReconnectMs = now;
-      g_reconnectIdx = static_cast<uint8_t>(g_reconnectIdx % bondCount_);
-      connect(bonds_[g_reconnectIdx].addr);
-      g_reconnectIdx++;
+  char reconnectAddr[18] = {};
+  portENTER_CRITICAL(&g_mux);
+  if (!connected_ && !g_connecting && !scanning_ && g_autoReconnect &&
+      static_cast<uint32_t>(millis() - g_lastReconnectMs) >= kReconnectBackoffMs) {
+    for (uint8_t i = 0; i < bondCount_; ++i) {
+      if (g_reconnectTriedMask & (1u << i)) continue;
+      memcpy(reconnectAddr, bonds_[i].addr, sizeof reconnectAddr);
+      break;
     }
   }
+  portEXIT_CRITICAL(&g_mux);
+  if (reconnectAddr[0]) connectInternal(reconnectAddr, /*explicitRequest=*/false);
 }
 
 // --- Discovery ---------------------------------------------------------------
@@ -860,9 +891,16 @@ void BleKeyboardHost::releaseScanResults() {
 
 // --- Connection --------------------------------------------------------------
 bool BleKeyboardHost::connect(const char* addr) {
+  return connectInternal(addr, /*explicitRequest=*/true);
+}
+
+bool BleKeyboardHost::connectInternal(const char* addr, const bool explicitRequest) {
   if (!begun_ || stopRequested() || !addr || g_connecting.load(std::memory_order_acquire) || g_connTask == nullptr) {
     return false;
   }
+  // GAP may acknowledge cancellation before NimBLE leaves DISCONNECTING. The
+  // previous attempt must release the client before a new worker uses it.
+  if (!clientFullyDisconnected()) return false;
 
   uint8_t type = 0;
   bool knownType = false;
@@ -891,6 +929,17 @@ bool BleKeyboardHost::connect(const char* addr) {
   g_targetAddr[sizeof(g_targetAddr) - 1] = '\0';
   g_targetType = type;
   g_targetTryAltType = !knownType;
+  if (explicitRequest) {
+    g_reconnectTriedMask = 0;
+    g_autoReconnect = true;
+  }
+  for (uint8_t i = 0; i < bondCount_; ++i) {
+    if (strncmp(bonds_[i].addr, addr, sizeof bonds_[i].addr) == 0) g_reconnectTriedMask |= 1u << i;
+  }
+  g_connectStartedMs = millis();
+  g_lastReconnectMs = g_connectStartedMs;
+  g_connectTimedOut = false;
+  g_userDisconnect = false;
   g_connectCancelRequested.store(false, std::memory_order_release);
   g_disconnectObserved.store(true, std::memory_order_release);
   g_connecting.store(true, std::memory_order_release);
@@ -905,6 +954,10 @@ bool BleKeyboardHost::connect(const char* addr) {
 }
 
 void BleKeyboardHost::disconnect() {
+  portENTER_CRITICAL(&g_mux);
+  g_autoReconnect = false;
+  g_userDisconnect = true;
+  portEXIT_CRITICAL(&g_mux);
   if (g_client && g_client->isConnected()) g_client->disconnect();
 }
 
@@ -921,6 +974,10 @@ void BleKeyboardHost::forget(const char* addr) {
     NimBLEDevice::deleteBond(NimBLEAddress(std::string(bonds_[i].addr), bonds_[i].addrType));
     for (uint8_t j = i + 1; j < bondCount_; ++j) bonds_[j - 1] = bonds_[j];
     bondCount_--;
+    portENTER_CRITICAL(&g_mux);
+    g_reconnectTriedMask = (g_reconnectTriedMask & ((1u << i) - 1u)) |
+                           ((g_reconnectTriedMask >> (i + 1)) << i);
+    portEXIT_CRITICAL(&g_mux);
     persistBonds();
     return;
   }
@@ -1297,7 +1354,6 @@ void BleKeyboardHost::onLinkUp(const char* addr, const char* name, uint8_t type)
   }
 
   if (!callbacksAllowed()) return;
-  g_reconnectIdx = 0;
   portENTER_CRITICAL(&g_mux);
   if (!callbacksAllowed()) {
     portEXIT_CRITICAL(&g_mux);
@@ -1305,11 +1361,18 @@ void BleKeyboardHost::onLinkUp(const char* addr, const char* name, uint8_t type)
   }
   connecting_ = false;
   connected_ = true;
+  g_autoReconnect = false;
   portEXIT_CRITICAL(&g_mux);
 }
 
 void BleKeyboardHost::onLinkDown() {
   portENTER_CRITICAL(&g_mux);
+  if (connected_ && !g_userDisconnect && !operationCancelled()) {
+    g_reconnectTriedMask = 0;
+    g_autoReconnect = true;
+    g_lastReconnectMs = millis();
+  }
+  g_userDisconnect = false;
   connected_ = false;
   connecting_ = false;
   heldUsage_ = 0;

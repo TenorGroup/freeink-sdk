@@ -11,6 +11,7 @@
 #include "FakeBle.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -52,7 +53,7 @@ void operator delete[](void* p, size_t) noexcept { std::free(p); }
 // Arduino stubs
 // ---------------------------------------------------------------------------
 SerialStub Serial;
-static uint32_t g_clockMs = 1000;
+static std::atomic<uint32_t> g_clockMs{1000};
 
 unsigned long millis() { return g_clockMs; }
 
@@ -80,6 +81,7 @@ struct TaskThread {
   bool notified = false;
   bool notificationsHeld = false;
   bool stopRequested = false;
+  bool waiting = false;
 };
 
 TaskThread* g_task = nullptr;
@@ -160,7 +162,10 @@ uint32_t ulTaskNotifyTake(BaseType_t clearOnExit, uint32_t ticksToWait) {
   TaskThread* task = t_currentTask;
   if (task == nullptr) return 0;
   std::unique_lock<std::mutex> lock(task->mutex);
+  task->waiting = true;
+  task->cv.notify_all();
   task->cv.wait(lock, [task] { return (task->notified && !task->notificationsHeld) || task->stopRequested; });
+  task->waiting = false;
   if (task->stopRequested) throw TaskStop{};
   if (clearOnExit == pdTRUE) task->notified = false;
   return 1;
@@ -189,6 +194,14 @@ void holdWorkerNotifications(bool hold) {
     g_task->notificationsHeld = hold;
   }
   g_task->cv.notify_all();
+}
+
+bool waitForWorkerIdle(uint32_t timeoutMs) {
+  if (!g_task) return true;
+  std::unique_lock<std::mutex> lock(g_task->mutex);
+  return g_task->cv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [] {
+    return g_task->waiting && !g_task->notified;
+  });
 }
 
 void setBlockingStage(BlockingStage stage, bool ignoreCancellation) {
@@ -512,7 +525,9 @@ bool NimBLEClient::secureConnection() {
 }
 bool NimBLEClient::cancelConnect() {
   fakeble::state().cancelConnectCalls++;
-  requestBlockingCancellation();
+  // GAP cancellation cannot wake security/GATT waits on an established link.
+  // Those waits must be released by disconnect(), matching the real client.
+  if (fakeble::blockingStage() == fakeble::BlockingStage::Connect) requestBlockingCancellation();
   return true;
 }
 

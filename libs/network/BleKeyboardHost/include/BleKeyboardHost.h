@@ -102,7 +102,7 @@ class BleKeyboardHost {
   // resource has been released. begin() rejects while this is true.
   bool isStopping() const;
 
-  // Pump per main-loop iteration: drives auto-reconnect and key auto-repeat.
+  // Pump per main-loop iteration: drives bounded auto-reconnect and held-key expiry.
   // Cheap; never blocks.
   void poll();
 
@@ -122,7 +122,9 @@ class BleKeyboardHost {
 
   // --- Connection ------------------------------------------------------------
   // Begin an async connect to a scanned/bonded address. isConnected() flips once
-  // the link is encrypted and the HID input report is subscribed.
+  // the link is encrypted and the HID input report is subscribed. Each complete
+  // attempt has a 15-second deadline serviced by poll(). Explicit connect rearms
+  // one pass through saved bonds; disconnect suppresses automatic reconnection.
   bool connect(const char* addr);
   void disconnect();
   bool isConnected() const { return connected_; }
@@ -151,6 +153,7 @@ class BleKeyboardHost {
   void onPairingPasskey(uint32_t passkey);
 
  private:
+  bool connectInternal(const char* addr, bool explicitRequest);
   void enqueue(const KeyEvent& ev);    // ring push (spinlock-guarded)
   void emitUsage(uint8_t usage, uint8_t mods);  // translate + enqueue
   void persistBonds();

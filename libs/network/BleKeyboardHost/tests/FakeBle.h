@@ -109,6 +109,9 @@ std::string lastConnectFailure();
 // successful NimBLE init when its connection worker cannot be created.
 void setTaskCreateSucceeds(bool ok);
 void holdWorkerNotifications(bool hold);
+// Wait until the connection worker has consumed its notification and returned
+// to its idle wait, so assertions do not race the worker's final state writes.
+bool waitForWorkerIdle(uint32_t timeoutMs = 500);
 
 // Lifecycle fault injection. When ignoreCancellation is true, end() must time out
 // without deleting the worker/client; releaseBlockingCall() then permits a later
