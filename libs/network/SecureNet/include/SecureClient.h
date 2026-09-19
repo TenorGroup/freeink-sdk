@@ -22,6 +22,8 @@
 #include <Client.h>
 #include <WiFiClient.h>
 
+#include <functional>
+
 namespace freeink {
 
 class SecureClient : public Client {
@@ -32,6 +34,10 @@ class SecureClient : public Client {
   // Certificate / verification configuration (applied before connect()).
   void setCACert(const char* rootCA);
   void setInsecure();  // skip peer verification (testing only)
+  // Called from cooperative TLS waits as well as around the TCP connection.
+  // The platform DNS lookup and TCP connect remain blocking calls.
+  void setAbortCallback(const std::function<bool()>& callback) { _shouldAbort = callback; }
+  void setConnectionTimeout(uint32_t ms) { _connectTimeoutMs = ms; }
 
   // Connect and perform a TLS 1.3 handshake to host:port (uses the SNI host).
   int connect(IPAddress ip, uint16_t port) override;
@@ -60,6 +66,8 @@ class SecureClient : public Client {
   void* _ssl = nullptr;  // WOLFSSL* (opaque to keep wolfSSL headers out of here)
   void* _ctx = nullptr;  // WOLFSSL_CTX*
   bool _connected = false;
+  std::function<bool()> _shouldAbort;
+  uint32_t _connectTimeoutMs = 3000;
   int _lastFailureError = 0;
   int _lastFailureAlert = -1;
   int _lastFailureAlertLevel = -1;

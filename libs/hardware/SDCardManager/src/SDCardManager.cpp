@@ -1,3 +1,4 @@
+#include <RecoverableFile.h>
 #include "SDCardManager.h"
 
 #include <BoardConfig.h>
@@ -247,16 +248,28 @@ String SDCardManager::readFile(const char* path) {
     return {""};
   }
 
-  String content = "";
-  constexpr size_t maxSize = 50000;  // Limit to 50KB
-  size_t readSize = 0;
-  while (f.available() && readSize < maxSize) {
-    const char c = static_cast<char>(f.read());
-    content += c;
-    readSize++;
+  constexpr size_t maxSize = 50000;
+  const uint64_t expected = f.fileSize();
+  String content;
+  if (expected > maxSize || !content.reserve(static_cast<size_t>(expected))) {
+    f.close();
+    return "";
   }
-  f.close();
-  return content;
+  char buffer[128];
+  size_t remaining = static_cast<size_t>(expected);
+  bool complete = true;
+  while (remaining > 0) {
+    const size_t wanted = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+    const int count = f.read(buffer, wanted);
+    if (count <= 0 || static_cast<size_t>(count) > wanted ||
+        !content.concat(buffer, static_cast<size_t>(count))) {
+      complete = false;
+      break;
+    }
+    remaining -= static_cast<size_t>(count);
+  }
+  const bool closed = f.close();
+  return complete && closed ? content : String();
 }
 
 bool SDCardManager::readFileToStream(const char* path, Print& out, const size_t chunkSize) {
@@ -353,19 +366,25 @@ bool SDCardManager::writeFile(const char* path, const String& content) {
     return false;
   }
 
-  if (vol().exists(path)) {
-    vol().remove(path);
-  }
-
+  if (!freeink::recoverFile(*this, path)) return false;
+  const std::string staging = std::string(path) + ".davtmp";
+  const std::string backup = std::string(path) + ".davbak";
+  // Preserve an unresolved backup until its consumer has validated the main file.
+  if (exists(backup.c_str())) return false;
   FsFile f;
-  if (!openFileForWrite("SD", path, f)) {
-    if (Serial) Serial.printf("Failed to open file for write: %s\n", path);
+  if (!openFileForWrite("SD", staging.c_str(), f)) return false;
+  const bool written = f.print(content) == content.length();
+  const bool synced = written && f.sync();
+  const bool closed = f.close();
+  if (!synced || !closed) {
+    remove(staging.c_str());
     return false;
   }
-
-  const size_t written = f.print(content);
-  f.close();
-  return written == content.length();
+  bool cleanupPending = false;
+  const bool committed = freeink::replaceFile(*this, staging.c_str(), path, &cleanupPending);
+  if (!committed) remove(staging.c_str());
+  if (cleanupPending && Serial) Serial.printf("SD: committed %s; backup retained\n", path);
+  return committed;
 }
 
 bool SDCardManager::ensureDirectoryExists(const char* path) {

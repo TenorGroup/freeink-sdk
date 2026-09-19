@@ -107,12 +107,17 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, bool tls12O
   _lastFailureError = 0;
   _lastFailureAlert = -1;
   _lastFailureAlertLevel = -1;
+  if (_shouldAbort && _shouldAbort()) return 0;
   if (!_insecure && (!_rootCA || !*_rootCA)) return 0;
   const uint32_t timeoutMs = getTimeout();
-  _transport.setConnectionTimeout(timeoutMs);
+  _transport.setConnectionTimeout(_connectTimeoutMs < timeoutMs ? _connectTimeoutMs : timeoutMs);
   if (!_transport.connect(host, port)) {
     // Changing the ClientHello cannot fix a failure before TLS starts.
     if (Serial) Serial.printf("[SecureClient] TCP connect failed (%s): %s:%u\n", label, host, port);
+    return 0;
+  }
+  if (_shouldAbort && _shouldAbort()) {
+    stop();
     return 0;
   }
 
@@ -191,7 +196,13 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, bool tls12O
   // rather than called once.
   const uint32_t deadline = millis() + timeoutMs;
   int ret;
-  while ((ret = wolfSSL_connect(ssl)) != WOLFSSL_SUCCESS) {
+  for (;;) {
+    if (_shouldAbort && _shouldAbort()) {
+      stop();
+      return 0;
+    }
+    ret = wolfSSL_connect(ssl);
+    if (ret == WOLFSSL_SUCCESS) break;
     const int err = wolfSSL_get_error(ssl, ret);
     if (!isWantIo(err)) {
       _lastFailureError = err;
@@ -231,6 +242,7 @@ int SecureClient::connect(const char* host, uint16_t port) {
   // Negotiate the highest mutually supported version.
   // Retry TLS 1.2 only for allowlisted protocol or transport failures.
   if (connectWithMethod(host, port, false, "auto")) return 1;
+  if (_shouldAbort && _shouldAbort()) return 0;
   if (!isRetryableTls12Fallback(_lastFailureError, _lastFailureAlert, _lastFailureAlertLevel)) return 0;
   if (Serial) Serial.println("[SecureClient] retrying with TLS 1.2-only handshake");
   return connectWithMethod(host, port, true, "tls1.2");

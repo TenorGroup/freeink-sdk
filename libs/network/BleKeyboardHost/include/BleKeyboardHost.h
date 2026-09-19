@@ -25,6 +25,7 @@
 #ifdef __cplusplus
 
 #include <Arduino.h>
+#include <atomic>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -109,7 +110,7 @@ class BleKeyboardHost {
   // True while the NimBLE stack is initialized (between a successful begin() and
   // end()). Lets the app gate CPU-frequency and lifecycle decisions on whether BLE
   // is actually resident, independent of the user's on/off preference.
-  bool isRunning() const { return begun_; }
+  bool isRunning() const { return begun_.load(std::memory_order_acquire); }
 
   // --- Discovery -------------------------------------------------------------
   void startScan(uint32_t ms = 5000);
@@ -180,7 +181,7 @@ class BleKeyboardHost {
   volatile bool connectFailed_ = false;
   volatile bool pairingPasskeyReady_ = false;
   volatile bool scanning_ = false;
-  bool begun_ = false;
+  std::atomic<bool> begun_{false};
 
   // Key auto-repeat: HID delivers one report per state change, so holding a key
   // (backspace, arrows) only sends a single press. The backend records the held

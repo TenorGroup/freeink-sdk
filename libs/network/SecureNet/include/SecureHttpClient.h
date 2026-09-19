@@ -238,7 +238,7 @@ class SecureHttpClient {
     for (int attempt = 0; attempt < 2; ++attempt) {
       const bool reusing = connectionMatches();
       if (isAborted(shouldAbort)) return -1;
-      if (!ensureConnected()) return -1;
+      if (!ensureConnected(shouldAbort)) return -1;
 
       if (!writeRequest(method, payload, payloadLen)) {
         closeConnection();
@@ -253,53 +253,86 @@ class SecureHttpClient {
         if (reusing && attempt == 0 && !_aborted) continue;
         return -1;
       }
-      // "HTTP/1.1 200 OK" - the status code starts at offset 9.
-      _status = line.size() >= 12 ? atoi(line.c_str() + 9) : 0;
-      // HTTP/1.0 peers default to connection-per-request; only an explicit
-      // Connection: keep-alive header (below) overrides that.
-      bool keepAlive = line.compare(0, 9, "HTTP/1.0 ") != 0;
-
+      bool keepAlive = false;
       std::string transferEncoding;
       size_t headerBytes = 0;
       size_t headerCount = 0;
-      bool headersComplete = false;
-      while (readLine(*_conn, line, headerDeadline, shouldAbort)) {
-        if (line.empty()) {
-          headersComplete = true;
-          break;
-        }
-        headerBytes += line.size();
-        if (++headerCount > 32 || headerBytes > 8192) {
+      // Interim responses share the same deadline and header budget as the
+      // final response, so a peer cannot keep this transaction alive forever.
+      for (unsigned interimCount = 0;; ++interimCount) {
+        if ((line.compare(0, 9, "HTTP/1.0 ") != 0 && line.compare(0, 9, "HTTP/1.1 ") != 0) ||
+            line.size() < 12 || line[9] < '1' || line[9] > '5' || line[10] < '0' || line[10] > '9' ||
+            line[11] < '0' || line[11] > '9' || (line.size() > 12 && line[12] != ' ')) {
           closeConnection();
           return -1;
         }
-        const size_t colon = line.find(':');
-        if (colon == std::string::npos) continue;
-        std::string name = line.substr(0, colon);
-        std::string value = line.substr(colon + 1);
-        while (!value.empty() && value.front() == ' ') value.erase(value.begin());
-        std::transform(name.begin(), name.end(), name.begin(),
-                       [](unsigned char c) { return static_cast<char>(tolower(c)); });
-        _responseHeaders.push_back(Header{name, value});
-        if (name == "content-length") {
-          _contentLength = static_cast<size_t>(strtoul(value.c_str(), nullptr, 10));
-          _haveContentLength = true;
-        } else if (name == "transfer-encoding") {
-          std::transform(value.begin(), value.end(), value.begin(),
+        _status = (line[9] - '0') * 100 + (line[10] - '0') * 10 + line[11] - '0';
+        keepAlive = line.compare(0, 9, "HTTP/1.0 ") != 0;
+        _responseHeaders.clear();
+        _contentLength = 0;
+        _haveContentLength = false;
+        transferEncoding.clear();
+        bool headersComplete = false;
+        while (readLine(*_conn, line, headerDeadline, shouldAbort)) {
+          if (line.empty()) {
+            headersComplete = true;
+            break;
+          }
+          headerBytes += line.size();
+          if (++headerCount > 32 || headerBytes > 8192) {
+            closeConnection();
+            return -1;
+          }
+          const size_t colon = line.find(':');
+          if (colon == std::string::npos || colon == 0) {
+            closeConnection();
+            return -1;
+          }
+          std::string name = line.substr(0, colon);
+          std::string value = line.substr(colon + 1);
+          while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) value.erase(value.begin());
+          while (!value.empty() && (value.back() == ' ' || value.back() == '\t')) value.pop_back();
+          std::transform(name.begin(), name.end(), name.begin(),
                          [](unsigned char c) { return static_cast<char>(tolower(c)); });
-          transferEncoding = value;
-        } else if (name == "connection") {
-          std::string v = value;
-          std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(tolower(c)); });
-          if (v.find("close") != std::string::npos)
-            keepAlive = false;
-          else if (v.find("keep-alive") != std::string::npos)
-            keepAlive = true;
+          _responseHeaders.push_back(Header{name, value});
+          if (name == "content-length") {
+            size_t length = 0;
+            if (!parseSize(value, 10, length) || (_haveContentLength && length != _contentLength)) {
+              closeConnection();
+              return -1;
+            }
+            _contentLength = length;
+            _haveContentLength = true;
+          } else if (name == "transfer-encoding") {
+            std::transform(value.begin(), value.end(), value.begin(),
+                           [](unsigned char c) { return static_cast<char>(tolower(c)); });
+            // HEAD and 304 may advertise coding for a hypothetical body.
+            // A body we actually receive must use the coding we decode.
+            if (!transferEncoding.empty() || value.empty() ||
+                (value != "chunked" && std::string(method) != "HEAD" && _status != 304)) {
+              closeConnection();
+              return -1;
+            }
+            transferEncoding = value;
+          } else if (name == "connection") {
+            std::transform(value.begin(), value.end(), value.begin(),
+                           [](unsigned char c) { return static_cast<char>(tolower(c)); });
+            if (value.find("close") != std::string::npos)
+              keepAlive = false;
+            else if (value.find("keep-alive") != std::string::npos)
+              keepAlive = true;
+          }
         }
-      }
-      if (_aborted || !headersComplete) {
-        closeConnection();
-        return -1;
+        if (_aborted || !headersComplete || (!transferEncoding.empty() && _haveContentLength)) {
+          closeConnection();
+          return -1;
+        }
+        if (_status >= 200) break;
+        // Protocol upgrades are outside this HTTP client's supported framing.
+        if (_status == 101 || interimCount >= 8 || !readLine(*_conn, line, headerDeadline, shouldAbort)) {
+          closeConnection();
+          return -1;
+        }
       }
 
       // A close-delimited body (no framing) ends WITH the connection, so it can
@@ -314,17 +347,17 @@ class SecureHttpClient {
       _reportProgress = !discardBody && static_cast<bool>(_progress);
 
       bool reusableFraming = true;
-      if (transferEncoding.find("chunked") != std::string::npos) {
+      // These responses end at the header terminator. Content-Length on HEAD
+      // or 304 describes a representation, not bytes to consume from the wire.
+      if (std::string(method) == "HEAD" || _status == 204 || _status == 304) {
+        _bodyComplete = true;
+      } else if (transferEncoding == "chunked") {
         _bodyComplete = readChunked(*_conn, bodySink, shouldAbort);
-      } else if (transferEncoding.empty() || transferEncoding == "identity") {
-        if (_haveContentLength) {
-          _bodyComplete = readFixed(*_conn, _contentLength, bodySink, shouldAbort);
-        } else {
-          _bodyComplete = readUntilClose(*_conn, bodySink, shouldAbort);
-          reusableFraming = false;
-        }
+      } else if (_haveContentLength) {
+        _bodyComplete = readFixed(*_conn, _contentLength, bodySink, shouldAbort);
       } else {
-        _bodyComplete = false;
+        _bodyComplete = readUntilClose(*_conn, bodySink, shouldAbort);
+        reusableFraming = false;
       }
 
       // Reuse only a provably clean connection. An aborted/truncated body
@@ -434,7 +467,7 @@ class SecureHttpClient {
   }
 
   // Reuse the kept-alive connection when it matches, else (re)connect.
-  bool ensureConnected() {
+  bool ensureConnected(const AbortCallback& shouldAbort) {
     if (connectionMatches()) return true;
     closeConnection();
     if (_scheme == "https") {
@@ -444,18 +477,28 @@ class SecureHttpClient {
         _secure.setCACert(_rootCA);
       }
       _secure.setTimeout(_timeoutMs);
-      if (!_secure.connect(_host.c_str(), _port)) return false;
+      _secure.setConnectionTimeout(std::min(_timeoutMs, uint32_t{3000}));
+      // The callback reference belongs to this synchronous request. Clear the
+      // stored wrapper before returning, including failed handshakes.
+      _secure.setAbortCallback([this, &shouldAbort] { return isAborted(shouldAbort); });
+      const bool connected = _secure.connect(_host.c_str(), _port);
+      _secure.setAbortCallback(nullptr);
+      if (!connected) return false;
       _conn = &_secure;
       _connHttps = true;
     } else {
       _plain.setTimeout(_timeoutMs);
-      _plain.setConnectionTimeout(_timeoutMs);
+      _plain.setConnectionTimeout(std::min(_timeoutMs, uint32_t{3000}));
       if (!_plain.connect(_host.c_str(), _port)) return false;
       _conn = &_plain;
       _connHttps = false;
     }
     _connHost = _host;
     _connPort = _port;
+    if (isAborted(shouldAbort)) {
+      closeConnection();
+      return false;
+    }
     return true;
   }
 
@@ -570,6 +613,20 @@ class SecureHttpClient {
     }
   }
 
+  // Parse framing lengths without accepting signs, suffixes or overflow.
+  static bool parseSize(const std::string& text, unsigned base, size_t& result) {
+    if (text.empty()) return false;
+    result = 0;
+    for (const unsigned char c : text) {
+      const unsigned digit = c >= '0' && c <= '9' ? c - '0' :
+                             c >= 'a' && c <= 'f' ? c - 'a' + 10 :
+                             c >= 'A' && c <= 'F' ? c - 'A' + 10 : base;
+      if (digit >= base || result > (SIZE_MAX - digit) / base) return false;
+      result = result * base + digit;
+    }
+    return true;
+  }
+
   // Decodes a chunked body. Stops at the zero-size chunk and drains trailers.
   bool readChunked(Client& c, const DataCallback& onData, const AbortCallback& shouldAbort = nullptr) {
     std::string line;
@@ -578,16 +635,22 @@ class SecureHttpClient {
       if (!readLine(c, line, millis() + _timeoutMs, shouldAbort)) return false;
       const size_t ext = line.find(';');
       const std::string sizeText = ext == std::string::npos ? line : line.substr(0, ext);
-      char* parseEnd = nullptr;
-      const unsigned long size = strtoul(sizeText.c_str(), &parseEnd, 16);
-      if (parseEnd == sizeText.c_str()) return false;
+      size_t size = 0;
+      if (!parseSize(sizeText, 16, size)) return false;
       if (size == 0) {
-        while (readLine(c, line, millis() + _timeoutMs, shouldAbort) && !line.empty()) {
+        size_t trailerBytes = 0;
+        size_t trailerCount = 0;
+        const unsigned long deadline = millis() + _timeoutMs;
+        while (readLine(c, line, deadline, shouldAbort)) {
+          if (line.empty()) return true;
+          trailerBytes += line.size();
+          const size_t colon = line.find(':');
+          if (++trailerCount > 32 || trailerBytes > 8192 || colon == 0 || colon == std::string::npos) return false;
         }
-        return !_aborted;
+        return false;
       }
       if (!readFixed(c, size, onData, shouldAbort)) return false;
-      if (!readLine(c, line, millis() + _timeoutMs, shouldAbort)) return false;  // consume trailing CRLF
+      if (!readLine(c, line, millis() + _timeoutMs, shouldAbort) || !line.empty()) return false;
     }
   }
 
