@@ -53,6 +53,8 @@ constexpr uint8_t kMaxInputReportChars = 4;
 // yields one event and the next press re-triggers.
 constexpr uint32_t kReleaseTimeoutMs = 150;
 constexpr uint32_t kReconnectBackoffMs = 4000;
+constexpr uint8_t kSelectedReconnectAttempts = 6;
+constexpr uint32_t kSelectedReconnectWindowMs = 120000;
 constexpr uint32_t kConnectTimeoutMs = 8000;
 constexpr uint32_t kConnectAttemptTimeoutMs = 15000;  // GAP + pairing + GATT
 constexpr uint32_t kMaxTeardownTimeoutMs = 2000;
@@ -87,6 +89,11 @@ uint32_t g_lastReconnectMs = 0;
 // Protected by g_mux. Each disconnected episode tries each saved bond once.
 uint8_t g_reconnectTriedMask = 0;
 bool g_autoReconnect = false;
+// Optional reader policy. Kept across a successful link so an unexpected loss
+// retries the same selected peer; begin and explicit user actions reset it.
+char g_selectedReconnectAddr[18] = {};
+uint8_t g_selectedAttemptsLeft = 0;
+uint32_t g_selectedReconnectStartedMs = 0;
 bool g_userDisconnect = false;
 uint32_t g_connectStartedMs = 0;
 bool g_connectTimedOut = false;
@@ -548,6 +555,8 @@ bool BleKeyboardHost::begin(const char* hostName) {
   g_connectTimedOut = false;
   g_userDisconnect = false;
   g_reconnectTriedMask = 0;
+  g_selectedReconnectAddr[0] = '\0';
+  g_selectedAttemptsLeft = 0;
   g_autoReconnect = true;
   g_lastReconnectMs = millis();
 
@@ -765,6 +774,8 @@ bool BleKeyboardHost::end(uint32_t timeoutMs) {
   connecting_ = false;
   g_autoReconnect = false;
   g_connectTimedOut = false;
+  g_selectedReconnectAddr[0] = '\0';
+  g_selectedAttemptsLeft = 0;
   scanning_ = false;
   deviceCount_ = 0;
   ringHead_ = 0;
@@ -817,12 +828,20 @@ void BleKeyboardHost::poll() {
 
   char reconnectAddr[18] = {};
   portENTER_CRITICAL(&g_mux);
+  if (g_selectedReconnectAddr[0] &&
+      static_cast<uint32_t>(millis() - g_selectedReconnectStartedMs) >= kSelectedReconnectWindowMs) {
+    g_autoReconnect = false;
+  }
   if (!connected_ && !g_connecting && !scanning_ && g_autoReconnect &&
       static_cast<uint32_t>(millis() - g_lastReconnectMs) >= kReconnectBackoffMs) {
-    for (uint8_t i = 0; i < bondCount_; ++i) {
-      if (g_reconnectTriedMask & (1u << i)) continue;
-      memcpy(reconnectAddr, bonds_[i].addr, sizeof reconnectAddr);
-      break;
+    if (g_selectedReconnectAddr[0]) {
+      if (g_selectedAttemptsLeft) memcpy(reconnectAddr, g_selectedReconnectAddr, sizeof reconnectAddr);
+    } else {
+      for (uint8_t i = 0; i < bondCount_; ++i) {
+        if (g_reconnectTriedMask & (1u << i)) continue;
+        memcpy(reconnectAddr, bonds_[i].addr, sizeof reconnectAddr);
+        break;
+      }
     }
   }
   portEXIT_CRITICAL(&g_mux);
@@ -894,6 +913,29 @@ bool BleKeyboardHost::connect(const char* addr) {
   return connectInternal(addr, /*explicitRequest=*/true);
 }
 
+bool BleKeyboardHost::armSelectedPeerReconnect(const char* addr) {
+  if (!addr || strnlen(addr, sizeof g_selectedReconnectAddr) != 17) return false;
+  portENTER_CRITICAL(&g_mux);
+  if (!begun_ || stopRequested() || connected_ || g_connecting.load(std::memory_order_acquire) ||
+      scanning_ || g_connTask == nullptr || g_selectedReconnectAddr[0]) {
+    portEXIT_CRITICAL(&g_mux);
+    return false;
+  }
+  bool bonded = false;
+  for (uint8_t i = 0; i < bondCount_; ++i) {
+    if (strncmp(bonds_[i].addr, addr, sizeof bonds_[i].addr) == 0) bonded = true;
+  }
+  if (bonded) {
+    memcpy(g_selectedReconnectAddr, addr, sizeof g_selectedReconnectAddr);
+    g_selectedAttemptsLeft = kSelectedReconnectAttempts;
+    g_selectedReconnectStartedMs = millis();
+    g_lastReconnectMs = g_selectedReconnectStartedMs - kReconnectBackoffMs;
+    g_autoReconnect = true;
+  }
+  portEXIT_CRITICAL(&g_mux);
+  return bonded;
+}
+
 bool BleKeyboardHost::connectInternal(const char* addr, const bool explicitRequest) {
   if (!begun_ || stopRequested() || !addr || g_connecting.load(std::memory_order_acquire) || g_connTask == nullptr) {
     return false;
@@ -925,13 +967,27 @@ bool BleKeyboardHost::connectInternal(const char* addr, const bool explicitReque
     portEXIT_CRITICAL(&g_mux);
     return false;
   }
+  // poll snapshots a target outside this lock. Recheck the policy here so a
+  // disconnect or exhausted plan cannot queue an extra attempt afterwards.
+  if (!explicitRequest &&
+      (!g_autoReconnect || (g_selectedReconnectAddr[0] &&
+                            (g_selectedAttemptsLeft == 0 || strcmp(g_selectedReconnectAddr, addr) != 0 ||
+                             static_cast<uint32_t>(millis() - g_selectedReconnectStartedMs) >=
+                                 kSelectedReconnectWindowMs)))) {
+    portEXIT_CRITICAL(&g_mux);
+    return false;
+  }
   strncpy(g_targetAddr, addr, sizeof(g_targetAddr) - 1);
   g_targetAddr[sizeof(g_targetAddr) - 1] = '\0';
   g_targetType = type;
   g_targetTryAltType = !knownType;
   if (explicitRequest) {
+    g_selectedReconnectAddr[0] = '\0';
+    g_selectedAttemptsLeft = 0;
     g_reconnectTriedMask = 0;
     g_autoReconnect = true;
+  } else if (g_selectedReconnectAddr[0]) {
+    --g_selectedAttemptsLeft;
   }
   for (uint8_t i = 0; i < bondCount_; ++i) {
     if (strncmp(bonds_[i].addr, addr, sizeof bonds_[i].addr) == 0) g_reconnectTriedMask |= 1u << i;
@@ -956,9 +1012,17 @@ bool BleKeyboardHost::connectInternal(const char* addr, const bool explicitReque
 void BleKeyboardHost::disconnect() {
   portENTER_CRITICAL(&g_mux);
   g_autoReconnect = false;
+  g_selectedReconnectAddr[0] = '\0';
+  g_selectedAttemptsLeft = 0;
   g_userDisconnect = true;
+  const bool connecting = g_connecting.load(std::memory_order_acquire);
+  if (connecting) g_connectCancelRequested.store(true, std::memory_order_release);
   portEXIT_CRITICAL(&g_mux);
-  if (g_client && g_client->isConnected()) g_client->disconnect();
+  if (connecting) {
+    cancelActiveClient();
+  } else if (g_client && g_client->isConnected()) {
+    g_client->disconnect();
+  }
 }
 
 // --- Pairings ----------------------------------------------------------------
@@ -975,6 +1039,11 @@ void BleKeyboardHost::forget(const char* addr) {
     for (uint8_t j = i + 1; j < bondCount_; ++j) bonds_[j - 1] = bonds_[j];
     bondCount_--;
     portENTER_CRITICAL(&g_mux);
+    if (strcmp(g_selectedReconnectAddr, addr) == 0) {
+      g_selectedReconnectAddr[0] = '\0';
+      g_selectedAttemptsLeft = 0;
+      g_autoReconnect = false;
+    }
     g_reconnectTriedMask = (g_reconnectTriedMask & ((1u << i) - 1u)) |
                            ((g_reconnectTriedMask >> (i + 1)) << i);
     portEXIT_CRITICAL(&g_mux);
@@ -1371,6 +1440,10 @@ void BleKeyboardHost::onLinkDown() {
     g_reconnectTriedMask = 0;
     g_autoReconnect = true;
     g_lastReconnectMs = millis();
+    if (g_selectedReconnectAddr[0]) {
+      g_selectedAttemptsLeft = kSelectedReconnectAttempts;
+      g_selectedReconnectStartedMs = g_lastReconnectMs;
+    }
   }
   g_userDisconnect = false;
   connected_ = false;
@@ -1395,6 +1468,7 @@ void BleKeyboardHost::onConnectFailed(const char* reason) {
   strncpy(connectFailure_, reason && reason[0] ? reason : "Connection failed", sizeof(connectFailure_) - 1);
   connectFailure_[sizeof(connectFailure_) - 1] = '\0';
   connectFailed_ = true;
+  if (g_selectedReconnectAddr[0]) g_lastReconnectMs = millis();
   heldUsage_ = 0;
   portEXIT_CRITICAL(&g_mux);
 }
@@ -1506,6 +1580,7 @@ const DiscoveredDevice& BleKeyboardHost::device(uint8_t) const {
 }
 void BleKeyboardHost::releaseScanResults() {}
 bool BleKeyboardHost::connect(const char*) { return false; }
+bool BleKeyboardHost::armSelectedPeerReconnect(const char*) { return false; }
 void BleKeyboardHost::disconnect() {}
 const PairedHidDevice& BleKeyboardHost::paired(uint8_t) const {
   static const PairedHidDevice kEmpty{};

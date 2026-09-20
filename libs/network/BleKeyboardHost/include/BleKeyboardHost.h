@@ -127,6 +127,13 @@ class BleKeyboardHost {
   // attempt has a 15-second deadline serviced by poll(). Explicit connect rearms
   // one pass through saved bonds; disconnect suppresses automatic reconnection.
   bool connect(const char* addr);
+  // Opt into one selected bonded peer for this reader visit: six total attempts,
+  // four seconds after each failure; no new attempt after 120 seconds. Each
+  // started attempt retains its 15-second deadline. Call once after begin,
+  // before poll. Rejects unknown peers or a busy/scanning/connected host without
+  // changing its schedule. Explicit connect/disconnect and end cancel this plan.
+  // Unexpected loss after success starts a fresh bounded plan for the same peer.
+  bool armSelectedPeerReconnect(const char* addr);
   void disconnect();
   bool isConnected() const { return connected_; }
   bool isConnecting() const { return connecting_; }

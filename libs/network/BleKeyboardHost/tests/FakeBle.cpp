@@ -275,6 +275,7 @@ void FakeState::reset() {
   disconnectCalls = 0;
   disconnectCallbackCalls = 0;
   connectCalls = 0;
+  connectAddresses.clear();
   holdDisconnectAtDisconnecting = false;
   nvs.clear();
   nvsPutBytesSucceeds = true;
@@ -371,6 +372,10 @@ bool beginHost(const char* name) { return host().begin(name != nullptr ? name : 
 
 void endHost() {
   holdWorkerNotifications(false);
+  // A prior deadline test may intentionally leave the fake client in NimBLE's
+  // DISCONNECTING state. Complete that test-only transition before resetting
+  // the world, so a later fixture cannot observe a dangling SDK client.
+  if (state().holdDisconnectAtDisconnecting) state().completeDisconnect();
   if (host().isRunning() || host().isStopping()) {
     // Test-only escape hatch for an intentionally uncooperative fake waiter so
     // fixture teardown can release it before resetting the fake client.
@@ -476,9 +481,9 @@ const std::vector<NimBLERemoteCharacteristic*>& NimBLERemoteService::getCharacte
 }
 
 bool NimBLEClient::connect(const NimBLEAddress& address) {
-  (void)address;
   fakeble::FakeState& s = fakeble::state();
   s.connectCalls++;
+  s.connectAddresses.push_back(address.toString());
   bool cancelled = false;
   waitAtBlockingStage(fakeble::BlockingStage::Connect, cancelled);
   if (cancelled) {

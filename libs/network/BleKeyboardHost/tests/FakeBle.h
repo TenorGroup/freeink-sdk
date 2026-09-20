@@ -60,6 +60,7 @@ struct FakeState {
   size_t disconnectCalls = 0;
   size_t disconnectCallbackCalls = 0;
   size_t connectCalls = 0;
+  std::vector<std::string> connectAddresses;
   // NimBLE invokes onDisconnect while the client can still report DISCONNECTING.
   // The test driver can hold that state until completeDisconnect() is called.
   bool holdDisconnectAtDisconnecting = false;

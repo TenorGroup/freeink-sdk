@@ -88,6 +88,8 @@ struct KeyboardProps {
   // color follows the key's resolved foreground; set the font here (typically
   // the small slot).
   TextStyle altText{};
+  // Reserve a separate upper line for alternates on enlarged app keyboards.
+  bool stackAlternates = false;
   StyleSet keyStyles{};
   Insets padding{5, 5, 5, 5};
   int16_t gap = 3;
@@ -546,7 +548,19 @@ void keyboard(Frame<MaxInteractions>& frame, Rect rect, const KeyboardProps& pro
     bp.hitPadding.bottom = rowHitOverflow;
     bp.radius = props.keyRadius;
     bp.enabled = key.enabled && key.kind != KeyKind::Disabled;
+    const bool stackAlternate = props.stackAlternates && key.kind == KeyKind::Normal && key.alt;
+    const char* mainLabel = bp.label;
+    if (stackAlternate) bp.label = nullptr;
     button(frame, keyRect, bp);
+    if (stackAlternate && mainLabel) {
+      const int16_t altHeight = frame.target().lineHeight(props.altText.font);
+      TextStyle mainStyle = keyText;
+      mainStyle.color = styles.resolve(frame.stateFor(action, key.value, state)).foreground.color;
+      frame.target().text(Rect{static_cast<int16_t>(keyRect.x + 4),
+                               static_cast<int16_t>(keyRect.y + altHeight + 4),
+                               static_cast<int16_t>(keyRect.width - 8),
+                               static_cast<int16_t>(keyRect.height - altHeight - 6)}, mainLabel, mainStyle);
+    }
 
     // Delete and the script switch carry a glyph instead of a word: both mean
     // the same thing in every language, and the switch key in particular has

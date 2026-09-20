@@ -799,7 +799,13 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
                                 consumedIndexes > 0 &&
                                 consumedIndexes < props.count &&
                                 props.count <= visible;
+    // The rendered index is authoritative. Tab callers retain a 1-based
+    // cursor with zero reserved for their tab band. Feedback is synchronous
+    // and invokes no callbacks, so restore that caller index before returning.
+    const int callerSelected = props.nav->selected;
+    props.nav->selected = props.selectedIndex;
     props.nav->onListRendered(top, consumedIndexes, selectedDrawn);
+    props.nav->selected = callerSelected;
     if (consumedIndexes > 0)
       props.nav->drawnCount = props.count;
     if (clipDiscovered)
