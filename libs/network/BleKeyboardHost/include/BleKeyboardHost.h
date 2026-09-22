@@ -49,9 +49,11 @@ enum class SpecialKey : uint8_t {
   PageDown,
 };
 
-// One decoded key press (or auto-repeat). `pressed` is always true today - the
-// host emits on the press edge and synthesizes repeats while a key is held; key
-// releases are tracked internally for repeat but not surfaced.
+// One decoded key edge. `pressed` is true on the press edge and false on the
+// matching release, so an app can time how long a button was held (a page-turner
+// remote that means "next chapter" when its next-page button is held needs both
+// edges). No auto-repeat is synthesized: one physical press is one press event.
+// One usage is tracked at a time, which is what a page-turner sends.
 struct KeyEvent {
   char ch = 0;                          // printable ASCII, or 0 for a special key
   uint8_t keycode = 0;                  // raw HID usage id
@@ -150,6 +152,12 @@ class BleKeyboardHost {
   // Pop the next key event. Returns false when the queue is empty.
   bool popKey(KeyEvent& out);
 
+  // True while the peer is still streaming input reports - one arrived inside the
+  // host's own stale-release window. Lets an app tell "the button is still down and
+  // the remote keeps saying so" from "the remote went quiet", which is the only way
+  // to time a button HOLD on a remote that streams instead of sending a release frame.
+  bool reportStreamFresh() const;
+
   // --- Internal: called by the NimBLE backend (not for app use). These keep the
   // public header free of NimBLE types - the .cpp translates BLE objects into
   // these plain calls. -------------------------------------------------------
@@ -163,7 +171,8 @@ class BleKeyboardHost {
  private:
   bool connectInternal(const char* addr, bool explicitRequest);
   void enqueue(const KeyEvent& ev);    // ring push (spinlock-guarded)
-  void emitUsage(uint8_t usage, uint8_t mods);  // translate + enqueue
+  void emitUsage(uint8_t usage, uint8_t mods, bool pressed);  // translate + enqueue
+  bool payOwedRelease();               // emit the release a recorded press still owes
   void persistBonds();
   void loadBonds();
   BleKeyboardHost() = default;
@@ -198,6 +207,16 @@ class BleKeyboardHost {
   volatile uint32_t heldSince_ = 0;
   volatile uint32_t lastRepeat_ = 0;
   uint8_t prevKeys_[6] = {0};  // backend-task only
+
+  // The release a press still owes. emitUsage() records it on the press edge and
+  // payOwedRelease() settles it - when the usage leaves the report, or (only for a
+  // remote that was streaming) when the reports stop. It deliberately outlives the
+  // stale-release timeout below: a remote that sends one frame per edge can hold a
+  // button far longer than that window, and capping the release there would cap
+  // every hold at 150 ms.
+  volatile uint8_t owedUsage_ = 0;
+  volatile uint8_t owedMods_ = 0;
+  volatile uint8_t reportsSincePress_ = 0;  // 1 = press only, >1 = the remote streams
 };
 
 }  // namespace freeink

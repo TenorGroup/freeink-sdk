@@ -200,6 +200,16 @@ uint16_t reportIdForCharHandle(uint16_t handle) {
 // decode at all (no readable Report Map, an unknown report id, a descriptor past
 // the parse ceilings). Prefers the first mapped key byte, else the first meaningful
 // non-zero byte. Returns 0 when the report carries no code (a release frame).
+// True when `usage` is still one of the keys the report says are down. Usage 0 is
+// "nothing owed", which is never held.
+bool hidReportHoldsUsage(const uint8_t* keys, size_t count, uint8_t usage) {
+  if (usage == 0) return true;
+  for (size_t i = 0; i < count; ++i) {
+    if (keys[i] == usage) return true;
+  }
+  return false;
+}
+
 uint8_t extractPrimaryCode(const uint8_t* p, size_t n, size_t* codeIdx = nullptr) {
   const size_t lim = n < 8 ? n : 8;
   // NOTE: do NOT skip 0x01 here. In a keyboard report 0x01 is ErrorRollOver, but in
@@ -781,6 +791,8 @@ bool BleKeyboardHost::end(uint32_t timeoutMs) {
   ringHead_ = 0;
   ringTail_ = 0;
   heldUsage_ = 0;
+  owedUsage_ = 0;
+  reportsSincePress_ = 0;
   portEXIT_CRITICAL(&g_mux);
   return true;
 }
@@ -825,6 +837,16 @@ void BleKeyboardHost::poll() {
     memset(prevKeys_, 0, sizeof(prevKeys_));
     g_lastGenericCode = 0;
   }
+
+  // The owed release is settled on its own terms, not by the press-edge timeout
+  // above. Silence only means "the button came up" for a remote that was STREAMING
+  // the held key; one that says nothing between its two edges is still holding, and
+  // paying here would cut every hold down to this 150 ms window. That remote's own
+  // release frame settles it instead.
+  portENTER_CRITICAL(&g_mux);
+  const bool streamed = owedUsage_ != 0 && reportsSincePress_ > 1;
+  portEXIT_CRITICAL(&g_mux);
+  if (streamed && (millis() - g_lastReportMs) > kReleaseTimeoutMs) payOwedRelease();
 
   char reconnectAddr[18] = {};
   portENTER_CRITICAL(&g_mux);
@@ -1065,6 +1087,13 @@ bool BleKeyboardHost::popKey(KeyEvent& out) {
   return got;
 }
 
+bool BleKeyboardHost::reportStreamFresh() const {
+  if (!begun_.load(std::memory_order_acquire) || !connected_) return false;
+  const uint32_t last = g_lastReportMs;
+  if (last == 0) return false;
+  return static_cast<uint32_t>(millis() - last) <= kReleaseTimeoutMs;
+}
+
 void BleKeyboardHost::enqueue(const KeyEvent& ev) {
   if (stopRequested()) return;
   portENTER_CRITICAL(&g_mux);
@@ -1080,7 +1109,7 @@ void BleKeyboardHost::enqueue(const KeyEvent& ev) {
   portEXIT_CRITICAL(&g_mux);
 }
 
-void BleKeyboardHost::emitUsage(uint8_t usage, uint8_t mods) {
+void BleKeyboardHost::emitUsage(uint8_t usage, uint8_t mods, bool pressed) {
   if (usage == 0) return;
   char ch;
   SpecialKey special;
@@ -1093,14 +1122,44 @@ void BleKeyboardHost::emitUsage(uint8_t usage, uint8_t mods) {
   ev.keycode = usage;
   ev.mods = mods;
   ev.special = special;
-  ev.pressed = true;
+  ev.pressed = pressed;
+  if (pressed) {
+    // One press owes one release, carrying the modifiers the PRESS was read with so
+    // an app that ignores modified keys treats both edges the same way.
+    portENTER_CRITICAL(&g_mux);
+    owedUsage_ = usage;
+    owedMods_ = mods;
+    reportsSincePress_ = 1;
+    portEXIT_CRITICAL(&g_mux);
+  }
   enqueue(ev);
+}
+
+bool BleKeyboardHost::payOwedRelease() {
+  uint8_t usage = 0;
+  uint8_t mods = 0;
+  portENTER_CRITICAL(&g_mux);  // enqueue() takes the same lock, so read and clear first
+  usage = owedUsage_;
+  mods = owedMods_;
+  owedUsage_ = 0;
+  owedMods_ = 0;
+  reportsSincePress_ = 0;
+  portEXIT_CRITICAL(&g_mux);
+  if (usage == 0) return false;
+  emitUsage(usage, mods, false);
+  return true;
 }
 
 // --- Internal hooks from the BLE backend -------------------------------------
 void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
   if (!data || len == 0 || !callbacksAllowed()) return;
   g_lastReportMs = millis();  // freshness for the stale-release timeout in poll()
+  portENTER_CRITICAL(&g_mux);
+  // Reports arriving after the press are what tells a remote that STREAMS a held key
+  // from one that says nothing until it sends its release frame. poll() needs that to
+  // decide whether silence means the button came up.
+  if (owedUsage_ != 0 && reportsSincePress_ < 255) reportsSincePress_ = static_cast<uint8_t>(reportsSincePress_ + 1);
+  portEXIT_CRITICAL(&g_mux);
 
 #if FREEINK_BLE_HID_REPORT_DEBUG
   {
@@ -1120,6 +1179,10 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
   // that map: no byte scan, no assumption that byte 0 is the modifier byte.
   HidReportView view;
   if (decodeHidReport(g_hidMap, data, len, view, g_notifyReportId)) {
+    // A usage that owed a release and is no longer in the report has come up. Settle
+    // it BEFORE the presses so a swap of one button for another reads in that order.
+    if (!hidReportHoldsUsage(view.keys, view.keyCount, owedUsage_)) payOwedRelease();
+
     // Emit a press for every usage newly present versus the previous report.
     for (uint8_t i = 0; i < view.keyCount; ++i) {
       const uint8_t k = view.keys[i];
@@ -1131,7 +1194,7 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
           break;
         }
       }
-      if (!wasDown) emitUsage(k, view.mods);
+      if (!wasDown) emitUsage(k, view.mods, true);
     }
 
     // Track the last held key for auto-repeat.
@@ -1185,6 +1248,7 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
 
   bool emittedKb = false;
   if (keyboardShaped) {
+    if (!hidReportHoldsUsage(keys, 6, owedUsage_)) payOwedRelease();
     for (int i = 0; i < 6; ++i) {
       const uint8_t k = keys[i];
       if (k == 0 || k == 0x01 /*ErrorRollOver*/) continue;
@@ -1196,7 +1260,7 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
         }
       }
       if (!wasDown) {
-        emitUsage(k, mod);
+        emitUsage(k, mod, true);
         emittedKb = true;
       }
     }
@@ -1230,6 +1294,9 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
   if (!keyboardShaped) {
     size_t codeIdx = 0;
     const uint8_t code = extractPrimaryCode(p, n, &codeIdx);
+    // A value-coded remote answers its "02 00 00" with an all-zero frame; that frame
+    // is the release. Any other code means this button is no longer the one down.
+    if (owedUsage_ != 0 && code != owedUsage_) payOwedRelease();
     // Gamepad-style modes keep constant bits in the button byte and only clear
     // the pressed bit on release (ino gamebrick mode T: 0x13 pressed -> 0x12
     // released, bit0 is the button). "code changed" alone emits a phantom
@@ -1266,13 +1333,13 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
         };
         const uint8_t zonePair = zone(axis1) * 3 + zone(axis2);
         if (zonePair != 4) {  // 4 = both centered: nothing to bind
-          emitUsage(0x40 + zonePair, 0);
+          emitUsage(0x40 + zonePair, 0, true);
         }
       }
     } else if (pressEdge) {
       // Value-coded remotes (e.g. "01 00 00" press, all-zero release): the code
       // byte IS the identity; emit on the press edge as before.
-      emitUsage(code, 0);
+      emitUsage(code, 0, true);
     }
     g_lastGenericCode = code;
   }
@@ -1449,6 +1516,10 @@ void BleKeyboardHost::onLinkDown() {
   connected_ = false;
   connecting_ = false;
   heldUsage_ = 0;
+  // A release owed across a dropped link is never paid: the app resets its own hold
+  // state on disconnect, and a phantom release would land in the next session.
+  owedUsage_ = 0;
+  reportsSincePress_ = 0;
   portEXIT_CRITICAL(&g_mux);
   // No key is held across a link drop: the next session's first press of the same
   // key must read as a press, not as a continuation of a hold that never ended.
@@ -1470,6 +1541,8 @@ void BleKeyboardHost::onConnectFailed(const char* reason) {
   connectFailed_ = true;
   if (g_selectedReconnectAddr[0]) g_lastReconnectMs = millis();
   heldUsage_ = 0;
+  owedUsage_ = 0;
+  reportsSincePress_ = 0;
   portEXIT_CRITICAL(&g_mux);
 }
 
@@ -1572,6 +1645,7 @@ bool BleKeyboardHost::begin(const char*) { return false; }
 bool BleKeyboardHost::end(uint32_t) { return true; }
 bool BleKeyboardHost::isStopping() const { return false; }
 void BleKeyboardHost::poll() {}
+bool BleKeyboardHost::reportStreamFresh() const { return false; }
 void BleKeyboardHost::startScan(uint32_t) {}
 void BleKeyboardHost::stopScan() {}
 const DiscoveredDevice& BleKeyboardHost::device(uint8_t) const {

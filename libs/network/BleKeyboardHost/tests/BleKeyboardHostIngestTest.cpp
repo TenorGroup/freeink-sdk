@@ -144,15 +144,21 @@ TEST_F(IngestTest, KeyboardMapEmitsOnePressPerEdgeAndNoneWhileHeld) {
   for (int i = 0; i < 5; ++i) fakeble::host().poll();
   expectEmptyRing();
 
-  // Release, then the same key again: a fresh press re-triggers.
+  // Release, then the same key again: the release is one event of its own (the app
+  // times the hold from the two edges), then a fresh press re-triggers.
   deliver(input, bootReport(0, {}));
+  const KeyEvent released = popKey();
+  EXPECT_EQ(released.keycode, 0x04);
+  EXPECT_FALSE(released.pressed);
   expectEmptyRing();
   deliver(input, shiftA);
   EXPECT_EQ(popKey().ch, 'A');
   expectEmptyRing();
 
   // ErrorRollOver (0x01) and a usage repeated inside one report: no phantom press.
+  // The rollover report no longer lists 0x04, so it does end that key's press.
   deliver(input, bootReport(0, {0x01}));
+  EXPECT_FALSE(popKey().pressed);
   expectEmptyRing();
   deliver(input, bootReport(0, {0x04, 0x04}));
   EXPECT_EQ(popKey().keycode, 0x04);
@@ -160,6 +166,7 @@ TEST_F(IngestTest, KeyboardMapEmitsOnePressPerEdgeAndNoneWhileHeld) {
 
   // Special keys keep their identity and leave `ch` empty.
   deliver(input, bootReport(0, {0x50}));
+  EXPECT_FALSE(popKey().pressed);  // 0x04 left the report first
   const KeyEvent special = popKey();
   EXPECT_EQ(special.special, SpecialKey::Left);
   EXPECT_EQ(special.ch, 0);
@@ -173,6 +180,182 @@ TEST_F(IngestTest, KeyboardMapEmitsOnePressPerEdgeAndNoneWhileHeld) {
   deliver(input, bootReport(0, {0x50}));
   EXPECT_EQ(popKey().keycode, 0x50);
   expectEmptyRing();
+}
+
+// --- Key releases: the second half of a press/release pair -------------------
+//
+// A remote that maps a button to "next page" can also mean "next chapter" when the
+// button is HELD. The host cannot decide that, but it can hand the app both edges
+// of the press so the app measures the hold itself. One usage is tracked at a time:
+// a page-turner sends one button, and the app only ever waits on one.
+
+TEST_F(IngestTest, HeldUsageDisappearingEmitsOneReleaseEvent) {
+  serveReportMap(hidtest::kBootKeyboard, sizeof hidtest::kBootKeyboard);
+  serveProtocolMode();
+  const int input = serveInputReport(nullptr, 0);
+  ASSERT_TRUE(beginAndConnect());
+
+  // Press: unchanged - one event, pressed = true.
+  deliver(input, bootReport(0, {0x4E}));
+  const KeyEvent down = popKey();
+  EXPECT_EQ(down.keycode, 0x4E);
+  EXPECT_TRUE(down.pressed);
+  expectEmptyRing();
+
+  // Still down: the repeat report adds nothing, in either direction.
+  deliver(input, bootReport(0, {0x4E}));
+  expectEmptyRing();
+
+  // Gone from the report: exactly one release, same usage, same modifiers.
+  deliver(input, bootReport(0, {}));
+  const KeyEvent up = popKey();
+  EXPECT_EQ(up.keycode, 0x4E);
+  EXPECT_EQ(up.mods, 0);
+  EXPECT_FALSE(up.pressed);
+  expectEmptyRing();
+
+  // A second release frame owes nothing.
+  deliver(input, bootReport(0, {}));
+  expectEmptyRing();
+
+  // The modifiers of the PRESS travel with the release, so an app that ignores
+  // modified keys treats both edges the same way.
+  deliver(input, bootReport(HID_LSHIFT, {0x04}));
+  EXPECT_EQ(popKey().mods, HID_LSHIFT);
+  deliver(input, bootReport(0, {}));
+  const KeyEvent shiftUp = popKey();
+  EXPECT_EQ(shiftUp.keycode, 0x04);
+  EXPECT_EQ(shiftUp.mods, HID_LSHIFT);
+  EXPECT_FALSE(shiftUp.pressed);
+}
+
+TEST_F(IngestTest, BootKeyboardFallbackEmitsTheSameReleasePair) {
+  // No usable map for this characteristic: the last-resort keyboard shape decodes
+  // it, and it owes the same release the mapped path owes.
+  serveReportMap(hidtest::kTwoReports, sizeof hidtest::kTwoReports);
+  const int unmapped = serveInputReport(nullptr, 0);
+  ASSERT_TRUE(beginAndConnect());
+  ASSERT_TRUE(fakeble::isSubscribed(unmapped));
+
+  deliver(unmapped, bootReport(0, {0x04}));
+  EXPECT_TRUE(popKey().pressed);
+  deliver(unmapped, bootReport(0, {0x04}));
+  expectEmptyRing();
+  deliver(unmapped, std::vector<uint8_t>(8, 0));
+  const KeyEvent up = popKey();
+  EXPECT_EQ(up.keycode, 0x04);
+  EXPECT_FALSE(up.pressed);
+  expectEmptyRing();
+}
+
+TEST_F(IngestTest, ValueCodedRemoteEmitsReleaseOnItsZeroFrame) {
+  // The shape a page-turner remote actually sends: three bytes, the code in byte 0,
+  // an all-zero frame on release. No map can place it, and it is too short for the
+  // keyboard shape, so it goes through the generic code path.
+  serveReportMap(hidtest::kNoInput, sizeof hidtest::kNoInput);
+  const int input = serveInputReport(nullptr, 0);
+  ASSERT_TRUE(beginAndConnect());
+
+  const uint8_t press[3] = {0x02, 0x00, 0x00};
+  const uint8_t release[3] = {0x00, 0x00, 0x00};
+  deliver(input, press, sizeof press);
+  const KeyEvent down = popKey();
+  EXPECT_EQ(down.keycode, 0x02);
+  EXPECT_TRUE(down.pressed);
+  expectEmptyRing();
+
+  deliver(input, release, sizeof release);
+  const KeyEvent up = popKey();
+  EXPECT_EQ(up.keycode, 0x02);
+  EXPECT_FALSE(up.pressed);
+  expectEmptyRing();
+
+  // Two taps in a row are two complete pairs, not one long one.
+  deliver(input, press, sizeof press);
+  EXPECT_TRUE(popKey().pressed);
+  deliver(input, release, sizeof release);
+  EXPECT_FALSE(popKey().pressed);
+  expectEmptyRing();
+}
+
+TEST_F(IngestTest, StaleReleaseTimeoutKeepsTheOwedReleaseForASilentRemote) {
+  // A remote that sends one frame per edge and nothing in between: the stale-release
+  // timeout still ages the press-edge state out (so the next press re-triggers), and
+  // it must NOT invent a release - the button can still be down. Inventing one here
+  // would cap every hold at the 150 ms timeout.
+  serveReportMap(hidtest::kNoInput, sizeof hidtest::kNoInput);
+  const int input = serveInputReport(nullptr, 0);
+  ASSERT_TRUE(beginAndConnect());
+
+  const uint8_t press[3] = {0x02, 0x00, 0x00};
+  const uint8_t release[3] = {0x00, 0x00, 0x00};
+  deliver(input, press, sizeof press);
+  EXPECT_TRUE(popKey().pressed);
+
+  fakeble::advanceMillis(200);
+  for (int i = 0; i < 5; ++i) fakeble::host().poll();
+  expectEmptyRing();  // the timeout itself still emits nothing
+
+  // The real release arrives late; the host still owes it and pays it once.
+  fakeble::advanceMillis(600);
+  deliver(input, release, sizeof release);
+  const KeyEvent up = popKey();
+  EXPECT_EQ(up.keycode, 0x02);
+  EXPECT_FALSE(up.pressed);
+  expectEmptyRing();
+
+  // And the aged-out press edge means the same button presses again cleanly.
+  deliver(input, press, sizeof press);
+  EXPECT_TRUE(popKey().pressed);
+}
+
+TEST_F(IngestTest, StaleReleaseTimeoutPaysTheOwedReleaseForAStreamingRemote) {
+  // The other family: the remote streams the held key and never sends a release
+  // frame. Silence IS the release here, so the timeout pays the owed release once
+  // - otherwise the app would wait forever for an edge that never comes.
+  serveReportMap(hidtest::kBootKeyboard, sizeof hidtest::kBootKeyboard);
+  const int input = serveInputReport(nullptr, 0);
+  ASSERT_TRUE(beginAndConnect());
+
+  const std::vector<uint8_t> held = bootReport(0, {0x4E});
+  deliver(input, held);
+  EXPECT_TRUE(popKey().pressed);
+  for (int i = 0; i < 4; ++i) {
+    fakeble::advanceMillis(40);
+    deliver(input, held);
+    fakeble::host().poll();
+    expectEmptyRing();  // still streaming: nothing is owed yet
+  }
+
+  fakeble::advanceMillis(200);
+  fakeble::host().poll();
+  const KeyEvent up = popKey();
+  EXPECT_EQ(up.keycode, 0x4E);
+  EXPECT_FALSE(up.pressed);
+
+  // Once paid, further polls owe nothing.
+  for (int i = 0; i < 5; ++i) {
+    fakeble::advanceMillis(200);
+    fakeble::host().poll();
+  }
+  expectEmptyRing();
+}
+
+TEST_F(IngestTest, ReportStreamFreshFollowsTheRemoteNotifications) {
+  // What the app needs to tell "the button is still down and the remote keeps
+  // saying so" from "the remote went quiet".
+  serveReportMap(hidtest::kBootKeyboard, sizeof hidtest::kBootKeyboard);
+  const int input = serveInputReport(nullptr, 0);
+  EXPECT_FALSE(fakeble::host().reportStreamFresh());  // not even running
+  ASSERT_TRUE(beginAndConnect());
+  EXPECT_FALSE(fakeble::host().reportStreamFresh());  // connected, nothing said yet
+
+  deliver(input, bootReport(0, {0x4E}));
+  EXPECT_TRUE(fakeble::host().reportStreamFresh());
+  fakeble::advanceMillis(100);
+  EXPECT_TRUE(fakeble::host().reportStreamFresh());
+  fakeble::advanceMillis(100);
+  EXPECT_FALSE(fakeble::host().reportStreamFresh());
 }
 
 // --- Report ids, multiple characteristics, Report Reference ------------------
@@ -210,6 +393,7 @@ TEST_F(IngestTest, MultiReportDeviceResolvesLayoutsByReportReference) {
   EXPECT_EQ(kbEvent.ch, '9');  // usage 0x26 = '9' (HID usage table); Ctrl only sets `mods`
   const uint8_t kbRelease[9] = {1, 0, 0, 0, 0, 0, 0, 0, 0};
   deliver(keyboard, kbRelease, sizeof kbRelease);
+  EXPECT_FALSE(popKey().pressed);
   expectEmptyRing();
 
   // Report id 2 is the 16-bit Consumer array at payload offset 0 - two bytes, not
@@ -222,6 +406,7 @@ TEST_F(IngestTest, MultiReportDeviceResolvesLayoutsByReportReference) {
   EXPECT_EQ(consumerEvent.special, SpecialKey::None);
   const uint8_t consumerRelease[3] = {2, 0x00, 0x00};
   deliver(consumer, consumerRelease, sizeof consumerRelease);
+  EXPECT_FALSE(popKey().pressed);
   expectEmptyRing();
 
   // A remote that omits the id byte its descriptor declares: the Report Reference
@@ -231,6 +416,7 @@ TEST_F(IngestTest, MultiReportDeviceResolvesLayoutsByReportReference) {
   EXPECT_EQ(popKey().keycode, 0xCD);
   const uint8_t consumerNoIdRelease[2] = {0x00, 0x00};
   deliver(consumer, consumerNoIdRelease, sizeof consumerNoIdRelease);
+  EXPECT_FALSE(popKey().pressed);
   expectEmptyRing();
 
   // A second characteristic carrying the same report id decodes identically: the
@@ -277,6 +463,7 @@ TEST_F(IngestTest, UnmappedReportFallsBackToKeyboardShapeOnce) {
   deliver(unmapped, press);
   expectEmptyRing();  // held: one event per press, not per notification
   deliver(unmapped, std::vector<uint8_t>(8, 0));
+  EXPECT_FALSE(popKey().pressed);
   expectEmptyRing();
 }
 
@@ -305,6 +492,7 @@ TEST_F(IngestTest, OversizedReportMapFallsBackWithoutCrashing) {
   std::vector<uint8_t> longReport(256, 0);
   longReport[2] = 0x05;
   deliver(input, longReport);
+  EXPECT_FALSE(popKey().pressed);  // 0x04 is no longer in the report
   EXPECT_EQ(popKey().keycode, 0x05);
   expectEmptyRing();
 }
@@ -329,6 +517,7 @@ TEST_F(IngestTest, TruncatedReportMapKeepsTheFieldsItParsed) {
   // back to the keyboard shape rather than shifting fields.
   const uint8_t shortReport[7] = {HID_LCTRL, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00};
   deliver(input, shortReport, sizeof shortReport);
+  EXPECT_FALSE(popKey().pressed);  // 0x05 came up when the report stopped listing it
   EXPECT_EQ(popKey().keycode, 0x06);
 }
 
@@ -351,16 +540,30 @@ TEST_F(IngestTest, KeyRingBoundaryKeepsFifoAndDropsOnOverflow) {
   deliver(input, third);
 
   // kKeyQueueLen is 16 with one slot left free to tell full from empty: 15 events
-  // survive, in the order they arrived.
+  // survive, in the order they arrived. Each report also ends the press the report
+  // before it left owing, so the order is six presses, that batch's release, and so
+  // on - a released usage is written {usage, pressed=false}.
   EXPECT_EQ(BleKeyboardHost::kKeyQueueLen, 16);
-  for (uint8_t usage = 0x04; usage <= 0x12; ++usage) {
-    EXPECT_EQ(popKey().keycode, usage) << "usage " << static_cast<int>(usage);
+  const std::pair<uint8_t, bool> expected[15] = {
+      {0x04, true},  {0x05, true}, {0x06, true}, {0x07, true}, {0x08, true},
+      {0x09, true},  {0x09, false},
+      {0x0A, true},  {0x0B, true}, {0x0C, true}, {0x0D, true}, {0x0E, true},
+      {0x0F, true},  {0x0F, false},
+      {0x10, true}};
+  for (size_t i = 0; i < 15; ++i) {
+    const KeyEvent event = popKey();
+    EXPECT_EQ(event.keycode, expected[i].first) << "slot " << i;
+    EXPECT_EQ(event.pressed, expected[i].second) << "slot " << i;
   }
   expectEmptyRing();
 
-  // After a full drain the ring indices wrap; ordering still holds.
+  // After a full drain the ring indices wrap; ordering still holds. 0x15 was the last
+  // press recorded before the overflow, so its release leads the next report.
   const std::vector<uint8_t> fourth = bootReport(0, {0x20, 0x21});
   deliver(input, fourth);
+  const KeyEvent stale = popKey();
+  EXPECT_EQ(stale.keycode, 0x15);
+  EXPECT_FALSE(stale.pressed);
   EXPECT_EQ(popKey().keycode, 0x20);
   EXPECT_EQ(popKey().keycode, 0x21);
   expectEmptyRing();
