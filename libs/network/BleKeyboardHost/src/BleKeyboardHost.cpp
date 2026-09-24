@@ -289,6 +289,13 @@ bool setupHid(NimBLEClient* client) {
       Serial.printf("[BleHid] report map: len=%u reports=%u kbd=%d consumer=%d usable=%d truncated=%d\n",
                     (unsigned)v.size(), (unsigned)g_hidMap.reportCount, g_hidMap.hasKeyboardPage ? 1 : 0,
                     g_hidMap.hasConsumerPage ? 1 : 0, g_hidMap.usable ? 1 : 0, g_hidMap.truncated ? 1 : 0);
+      // The whole descriptor, 32 bytes a line, so a new remote's map can be rebuilt
+      // in a host test from the log alone.
+      for (size_t off = 0; off < v.size(); off += 32) {
+        Serial.printf("[BleHid] map hex %03u:", (unsigned)off);
+        for (size_t i = off; i < v.size() && i < off + 32; ++i) Serial.printf(" %02X", v.data()[i]);
+        Serial.print("\n");
+      }
       for (uint8_t r = 0; r < g_hidMap.reportCount; ++r) {
         const HidReportLayout& layout = g_hidMap.reports[r];
         Serial.printf("[BleHid]   report id=%u bits=%u keys=%u fields mods=%u fields\n", (unsigned)layout.id,
@@ -790,10 +797,15 @@ bool BleKeyboardHost::end(uint32_t timeoutMs) {
   deviceCount_ = 0;
   ringHead_ = 0;
   ringTail_ = 0;
+  rawHead_ = 0;
+  rawTail_ = 0;
+  rawCode_ = 0;
+  rawReports_ = 0;
   heldUsage_ = 0;
   owedUsage_ = 0;
   reportsSincePress_ = 0;
   portEXIT_CRITICAL(&g_mux);
+  connAddr_[0] = '\0';
   return true;
 }
 
@@ -847,6 +859,16 @@ void BleKeyboardHost::poll() {
   const bool streamed = owedUsage_ != 0 && reportsSincePress_ > 1;
   portEXIT_CRITICAL(&g_mux);
   if (streamed && (millis() - g_lastReportMs) > kReleaseTimeoutMs) payOwedRelease();
+
+  // Same rule for the raw edge: silence ends a button only on a remote that was
+  // streaming it. The release is dated by the last frame, which is when it came up.
+  portENTER_CRITICAL(&g_mux);
+  if (rawCode_ != 0 && rawReports_ > 1 && (millis() - g_lastReportMs) > kReleaseTimeoutMs) {
+    pushRawLocked(rawCode_, false, g_lastReportMs, 0, 0);
+    rawCode_ = 0;
+    rawReports_ = 0;
+  }
+  portEXIT_CRITICAL(&g_mux);
 
   char reconnectAddr[18] = {};
   portENTER_CRITICAL(&g_mux);
@@ -1087,6 +1109,33 @@ bool BleKeyboardHost::popKey(KeyEvent& out) {
   return got;
 }
 
+bool BleKeyboardHost::popRawButton(RawButtonEvent& out) {
+  bool got = false;
+  portENTER_CRITICAL(&g_mux);
+  if (rawHead_ != rawTail_) {
+    out = rawRing_[rawTail_];
+    rawTail_ = static_cast<uint8_t>((rawTail_ + 1) % kRawQueueLen);
+    got = true;
+  }
+  portEXIT_CRITICAL(&g_mux);
+  return got;
+}
+
+void BleKeyboardHost::pushRawLocked(const uint32_t code, const bool pressed, const uint32_t atMs,
+                                    const uint8_t keycode, const uint8_t mods) {
+  const uint8_t next = static_cast<uint8_t>((rawHead_ + 1) % kRawQueueLen);
+  if (next == rawTail_) return;  // drop on overflow rather than block, like the key ring
+  RawButtonEvent& e = rawRing_[rawHead_];
+  e.value = static_cast<uint8_t>(code);
+  e.byteIndex = static_cast<uint8_t>(code >> 8);
+  e.reportId = static_cast<uint8_t>(code >> 16);
+  e.pressed = pressed;
+  e.keycode = keycode;
+  e.mods = mods;
+  e.atMs = atMs;
+  rawHead_ = next;
+}
+
 bool BleKeyboardHost::reportStreamFresh() const {
   if (!begun_.load(std::memory_order_acquire) || !connected_) return false;
   const uint32_t last = g_lastReportMs;
@@ -1124,6 +1173,10 @@ void BleKeyboardHost::emitUsage(uint8_t usage, uint8_t mods, bool pressed) {
   ev.special = special;
   ev.pressed = pressed;
   if (pressed) {
+    if (framePressUsage_ == 0) {
+      framePressUsage_ = usage;
+      framePressMods_ = mods;
+    }
     // One press owes one release, carrying the modifiers the PRESS was read with so
     // an app that ignores modified keys treats both edges the same way.
     portENTER_CRITICAL(&g_mux);
@@ -1153,6 +1206,39 @@ bool BleKeyboardHost::payOwedRelease() {
 // --- Internal hooks from the BLE backend -------------------------------------
 void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
   if (!data || len == 0 || !callbacksAllowed()) return;
+  // The raw identity is read from the bytes first, so nothing the map decode drops
+  // (a bitmap past its field ceiling, a usage cut to 8 bits) is lost to it.
+  const uint32_t code = hidRawButtonCode(g_hidMap, data, len, g_notifyReportId);
+  const uint32_t now = millis();
+  const uint32_t lastMs = g_lastReportMs;
+  framePressUsage_ = 0;
+  framePressMods_ = 0;
+  decodeReport(data, len);
+
+  if (stopRequested()) return;
+  portENTER_CRITICAL(&g_mux);
+  if (code != rawCode_) {
+    // Release before press, so a swap of one button for another reads in that order.
+    if (rawCode_ != 0) pushRawLocked(rawCode_, false, now, 0, 0);
+    if (code != 0) pushRawLocked(code, true, now, framePressUsage_, framePressMods_);
+    rawCode_ = code;
+    rawReports_ = 1;
+  } else if (code != 0) {
+    if (now - lastMs > kReleaseTimeoutMs) {
+      // The same frame after silence, with no release frame between: a remote that
+      // only reports presses. Each such frame is a new press; the one before it is
+      // settled first so every press keeps exactly one release.
+      pushRawLocked(code, false, lastMs, 0, 0);
+      pushRawLocked(code, true, now, framePressUsage_, framePressMods_);
+      rawReports_ = 1;
+    } else if (rawReports_ < 255) {
+      rawReports_ = static_cast<uint8_t>(rawReports_ + 1);
+    }
+  }
+  portEXIT_CRITICAL(&g_mux);
+}
+
+void BleKeyboardHost::decodeReport(const uint8_t* data, size_t len) {
   g_lastReportMs = millis();  // freshness for the stale-release timeout in poll()
   portENTER_CRITICAL(&g_mux);
   // Reports arriving after the press are what tells a remote that STREAMS a held key
@@ -1169,7 +1255,11 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
     for (size_t i = 0; i < dump && off + 3 < sizeof(buf); ++i) {
       off += snprintf(buf + off, sizeof(buf) - off, "%02X ", data[i]);
     }
-    Serial.printf("[BleHid] report len=%u %s\n", (unsigned)len, buf);
+    // ref = the notifying characteristic's Report Reference id (65535 = none);
+    // raw = the button identity the raw edge ring keys on (reportId:byte=value).
+    const uint32_t raw = hidRawButtonCode(g_hidMap, data, len, g_notifyReportId);
+    Serial.printf("[BleHid] report len=%u ref=%u raw=%u:%u=%02X %s\n", (unsigned)len, (unsigned)g_notifyReportId,
+                  (unsigned)(raw >> 16), (unsigned)((raw >> 8) & 0xFF), (unsigned)(raw & 0xFF), buf);
   }
 #endif
 
@@ -1450,6 +1540,11 @@ void BleKeyboardHost::onLinkUp(const char* addr, const char* name, uint8_t type)
       }
     }
   }
+  connAddr_[0] = '\0';
+  if (addr) {
+    strncpy(connAddr_, addr, sizeof(connAddr_) - 1);
+    connAddr_[sizeof(connAddr_) - 1] = '\0';
+  }
   connName_[0] = '\0';
   if (resolved) {
     strncpy(connName_, resolved, sizeof(connName_) - 1);
@@ -1520,7 +1615,10 @@ void BleKeyboardHost::onLinkDown() {
   // state on disconnect, and a phantom release would land in the next session.
   owedUsage_ = 0;
   reportsSincePress_ = 0;
+  rawCode_ = 0;
+  rawReports_ = 0;
   portEXIT_CRITICAL(&g_mux);
+  connAddr_[0] = '\0';
   // No key is held across a link drop: the next session's first press of the same
   // key must read as a press, not as a continuation of a hold that never ended.
   memset(prevKeys_, 0, sizeof(prevKeys_));
@@ -1662,6 +1760,7 @@ const PairedHidDevice& BleKeyboardHost::paired(uint8_t) const {
 }
 void BleKeyboardHost::forget(const char*) {}
 bool BleKeyboardHost::popKey(KeyEvent&) { return false; }
+bool BleKeyboardHost::popRawButton(RawButtonEvent&) { return false; }
 void BleKeyboardHost::onScanResultIngest(const char*, const char*, int, uint8_t, bool, bool) {}
 void BleKeyboardHost::onReportIngest(const uint8_t*, size_t) {}
 void BleKeyboardHost::onLinkUp(const char*, const char*, uint8_t) {}

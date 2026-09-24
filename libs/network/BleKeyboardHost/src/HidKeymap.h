@@ -167,4 +167,15 @@ struct HidReportView {
 bool decodeHidReport(const HidReportMap& map, const uint8_t* data, size_t len, HidReportView& out,
                      uint16_t referenceId = 0xFFFF);
 
+// Identity of the button a report holds, read from its BYTES rather than through
+// the decoded fields: `value | byteIndex << 8 | reportId << 16` of the first
+// non-zero payload byte (payload bytes 0..7, the modifier bytes of a keyboard
+// layout skipped). 0 = no button down, i.e. a release frame. The leading byte is
+// taken as a report id only when the map declares that id AND the frame is
+// exactly one byte longer than its layout; otherwise the id is the Report
+// Reference one (`referenceId`, 0xFFFF = unknown -> 0). A frame such as "02 00 00"
+// on a map that also declares a 7-byte report 2 therefore reads as a button.
+// Pure arithmetic, no allocation: it runs on every notification.
+uint32_t hidRawButtonCode(const HidReportMap& map, const uint8_t* data, size_t len, uint16_t referenceId = 0xFFFF);
+
 }  // namespace freeink

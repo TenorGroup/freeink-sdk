@@ -587,4 +587,34 @@ HidByteLayout hidByteLayout(const HidReportLayout& layout) {
   return b;
 }
 
+uint32_t hidRawButtonCode(const HidReportMap& map, const uint8_t* data, size_t len, uint16_t referenceId) {
+  if (data == nullptr || len == 0) return 0;
+  uint8_t id = referenceId == 0xFFFF ? 0 : static_cast<uint8_t>(referenceId);
+  size_t offset = 0;
+  const HidReportLayout* layout = layoutFor(map, map.hasId ? id : 0);
+  if (map.hasId) {
+    const HidReportLayout* byByte = layoutFor(map, data[0]);
+    if (byByte != nullptr && len == static_cast<size_t>((byByte->bits + 7) / 8) + 1) {
+      id = data[0];
+      offset = 1;
+      layout = byByte;
+    }
+  }
+  // A held Shift is not a button: skip the modifier mask so the key byte decides.
+  uint8_t modFirst = 0xFF;
+  uint8_t modEnd = 0;
+  if (layout != nullptr && layout->modFieldCount > 0) {
+    const HidByteLayout bytes = hidByteLayout(*layout);
+    modFirst = bytes.modByte;
+    modEnd = static_cast<uint8_t>(bytes.modByte + bytes.modBytes);
+  }
+  const size_t n = len - offset < 8 ? len - offset : 8;
+  for (size_t i = 0; i < n; ++i) {
+    if (i >= modFirst && i < modEnd) continue;
+    const uint8_t v = data[offset + i];
+    if (v != 0) return static_cast<uint32_t>(v) | static_cast<uint32_t>(i) << 8 | static_cast<uint32_t>(id) << 16;
+  }
+  return 0;
+}
+
 }  // namespace freeink

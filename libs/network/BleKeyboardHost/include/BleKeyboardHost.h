@@ -62,6 +62,29 @@ struct KeyEvent {
   bool pressed = true;
 };
 
+// One button edge read from the report BYTES, before the Report Map decode. The
+// identity is where the first non-zero byte sits: the report id (the id byte when
+// the frame carries one, else the Report Reference of the characteristic, else 0),
+// the payload byte index and its value. It survives what the decoder cannot see: a
+// bitmap past the parser's field ceiling, a 16-bit usage cut to 8 bits, two pages
+// that share a low byte. `keycode`/`mods` are what the decoder read from the same
+// frame (0 when it read no new key), so an app that routes raw edges can still fall
+// back to its keycode bindings for a button it has not learned.
+struct RawButtonEvent {
+  uint8_t reportId = 0;
+  uint8_t byteIndex = 0;
+  uint8_t value = 0;
+  bool pressed = false;
+  uint8_t keycode = 0;
+  uint8_t mods = 0;
+  uint32_t atMs = 0;  // millis() when the frame arrived, for hold timing
+  // value | byteIndex << 8 | reportId << 16; never 0 for an edge.
+  uint32_t code() const {
+    return static_cast<uint32_t>(value) | static_cast<uint32_t>(byteIndex) << 8 |
+           static_cast<uint32_t>(reportId) << 16;
+  }
+};
+
 // A BLE device seen during a scan.
 struct DiscoveredDevice {
   char addr[18] = {0};  // "AA:BB:CC:DD:EE:FF"
@@ -86,6 +109,7 @@ class BleKeyboardHost {
   static constexpr uint8_t kMaxDiscovered = 24;
   static constexpr uint8_t kMaxBonds = 4;
   static constexpr uint8_t kKeyQueueLen = 16;
+  static constexpr uint8_t kRawQueueLen = 8;
 
   static BleKeyboardHost& getInstance();
 
@@ -140,6 +164,9 @@ class BleKeyboardHost {
   bool isConnected() const { return connected_; }
   bool isConnecting() const { return connecting_; }
   const char* connectedName() const { return connName_; }
+  // Address of the peer on the live link ("" when none). Settings keyed by remote
+  // must use this, not the saved choice: auto-reconnect can bring up another bond.
+  const char* connectedAddr() const { return connAddr_; }
   bool takeConnectFailure(char* out, size_t outLen);
   bool takePairingPasskey(uint32_t& out);
 
@@ -151,6 +178,9 @@ class BleKeyboardHost {
   // --- Translated input ------------------------------------------------------
   // Pop the next key event. Returns false when the queue is empty.
   bool popKey(KeyEvent& out);
+  // Pop the next raw button edge (see RawButtonEvent). Filled from the same frames
+  // as popKey(), in its own ring, so an app that ignores it sees no change.
+  bool popRawButton(RawButtonEvent& out);
 
   // True while the peer is still streaming input reports - one arrived inside the
   // host's own stale-release window. Lets an app tell "the button is still down and
@@ -173,6 +203,9 @@ class BleKeyboardHost {
   void enqueue(const KeyEvent& ev);    // ring push (spinlock-guarded)
   void emitUsage(uint8_t usage, uint8_t mods, bool pressed);  // translate + enqueue
   bool payOwedRelease();               // emit the release a recorded press still owes
+  void decodeReport(const uint8_t* data, size_t len);  // map decode -> key events
+  // Raw edge ring push; the caller holds the ring lock.
+  void pushRawLocked(uint32_t code, bool pressed, uint32_t atMs, uint8_t keycode, uint8_t mods);
   void persistBonds();
   void loadBonds();
   BleKeyboardHost() = default;
@@ -190,6 +223,7 @@ class BleKeyboardHost {
   volatile uint8_t ringHead_ = 0;  // next write
   volatile uint8_t ringTail_ = 0;  // next read
   char connName_[32] = {0};
+  char connAddr_[18] = {0};
   char connectFailure_[48] = {0};
   volatile uint32_t pairingPasskey_ = 0;
   volatile bool connected_ = false;
@@ -217,6 +251,19 @@ class BleKeyboardHost {
   volatile uint8_t owedUsage_ = 0;
   volatile uint8_t owedMods_ = 0;
   volatile uint8_t reportsSincePress_ = 0;  // 1 = press only, >1 = the remote streams
+
+  // Raw button edges (RawButtonEvent), their own ring. rawCode_ is the button the
+  // last frame held (0 = none); rawReports_ counts frames that repeated it, which
+  // is what tells a streaming remote (silence = release) from one that sends one
+  // frame per edge (silence = still held). Both are guarded by the ring lock.
+  RawButtonEvent rawRing_[kRawQueueLen];
+  volatile uint8_t rawHead_ = 0;
+  volatile uint8_t rawTail_ = 0;
+  uint32_t rawCode_ = 0;
+  uint8_t rawReports_ = 0;
+  // First key the decoder pressed in the frame being ingested (backend task only).
+  uint8_t framePressUsage_ = 0;
+  uint8_t framePressMods_ = 0;
 };
 
 }  // namespace freeink

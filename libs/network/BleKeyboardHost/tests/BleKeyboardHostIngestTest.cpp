@@ -1146,3 +1146,250 @@ TEST_F(SelectedReconnectTest, ExistingConnectedPeerRejectsArmWithoutDroppingLink
   EXPECT_FALSE(fakeble::host().armSelectedPeerReconnect(selected));
   EXPECT_TRUE(fakeble::host().isConnected());
 }
+
+// --- Raw button edges (read from the report bytes, before the map decode) ------
+
+namespace {
+
+// Raw edges the host queued so far, in order.
+std::vector<RawButtonEvent> drainRaw() {
+  std::vector<RawButtonEvent> edges;
+  RawButtonEvent ev;
+  while (fakeble::host().popRawButton(ev)) edges.push_back(ev);
+  return edges;
+}
+
+void drainKeys() {
+  KeyEvent ev;
+  while (fakeble::host().popKey(ev)) {
+  }
+}
+
+}  // namespace
+
+class RawButtonTest : public IngestTest {
+ protected:
+  // The three-button remote: its map, and one Input characteristic per report id,
+  // each declaring its id through a Report Reference.
+  void connectThreeButtonRemote() {
+    serveReportMap(hidtest::kThreeButtonRemote, sizeof hidtest::kThreeButtonRemote);
+    serveProtocolMode();
+    const uint8_t ref1[2] = {1, 1};
+    const uint8_t ref3[2] = {3, 1};
+    const uint8_t ref2[2] = {2, 1};
+    const uint8_t ref6[2] = {6, 1};
+    keyboard_ = serveInputReport(ref1, sizeof ref1);
+    media_ = serveInputReport(ref3, sizeof ref3);
+    vendor_ = serveInputReport(ref2, sizeof ref2);
+    small_ = serveInputReport(ref6, sizeof ref6);
+    ASSERT_TRUE(beginAndConnect());
+  }
+
+  void frame(int characteristic, std::initializer_list<uint8_t> bytes) {
+    const std::vector<uint8_t> data(bytes);
+    deliver(characteristic, data);
+  }
+
+  int keyboard_ = -1;
+  int media_ = -1;
+  int vendor_ = -1;
+  int small_ = -1;
+};
+
+TEST_F(RawButtonTest, RebuiltMapParsesLikeTheDeviceLogged) {
+  // The device logged: reports=4 kbd=1 consumer=1 usable=1 truncated=1, and per id
+  // 1: 64 bits 1 key field 1 mod field, 3: 24 bits 8 key fields, 2: 56 bits no
+  // field, 6: 8 bits 8 key fields. The fixture is only a stand-in if it matches.
+  HidReportMap map;
+  ASSERT_TRUE(parseHidReportMap(hidtest::kThreeButtonRemote, sizeof hidtest::kThreeButtonRemote, map));
+  EXPECT_TRUE(map.hasKeyboardPage);
+  EXPECT_TRUE(map.hasConsumerPage);
+  EXPECT_TRUE(map.truncated);
+  ASSERT_EQ(map.reportCount, 4);
+  const uint8_t ids[4] = {1, 3, 2, 6};
+  const uint16_t bits[4] = {64, 24, 56, 8};
+  const uint8_t keys[4] = {1, 8, 0, 8};
+  const uint8_t mods[4] = {1, 0, 0, 0};
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_EQ(map.reports[i].id, ids[i]) << i;
+    EXPECT_EQ(map.reports[i].bits, bits[i]) << i;
+    EXPECT_EQ(map.reports[i].keyFieldCount, keys[i]) << i;
+    EXPECT_EQ(map.reports[i].modFieldCount, mods[i]) << i;
+  }
+}
+
+TEST_F(RawButtonTest, ThirdButtonTapReachesTheRawRingThoughTheDecoderSeesNothing) {
+  connectThreeButtonRemote();
+  frame(media_, {0x00, 0x02, 0x00});
+  frame(media_, {0x00, 0x00, 0x00});
+
+  // The decoder has no field on byte 1: no key event at all, as on the device.
+  expectEmptyRing();
+
+  const std::vector<RawButtonEvent> edges = drainRaw();
+  ASSERT_EQ(edges.size(), 2u);
+  EXPECT_TRUE(edges[0].pressed);
+  EXPECT_EQ(edges[0].reportId, 3);
+  EXPECT_EQ(edges[0].byteIndex, 1);
+  EXPECT_EQ(edges[0].value, 0x02);
+  EXPECT_EQ(edges[0].keycode, 0);
+  EXPECT_FALSE(edges[1].pressed);
+  EXPECT_EQ(edges[1].code(), edges[0].code()) << "the release names the button that came up";
+}
+
+TEST_F(RawButtonTest, HeldThirdButtonFrameKeepsItsOwnIdentity) {
+  connectThreeButtonRemote();
+  frame(media_, {0x08, 0x00, 0x00});
+  const std::vector<RawButtonEvent> edges = drainRaw();
+  ASSERT_EQ(edges.size(), 1u);
+  EXPECT_TRUE(edges[0].pressed);
+  EXPECT_EQ(edges[0].code(), 0x030008u);
+  // The decoder cut the 16-bit media usage to its low byte: 0x30, which binds to
+  // nothing. The raw identity keeps the byte the remote actually sent.
+  EXPECT_EQ(edges[0].keycode, 0x30);
+}
+
+TEST_F(RawButtonTest, PageButtonKeepsItsKeyEventsAndGainsRawEdges) {
+  connectThreeButtonRemote();
+  frame(media_, {0x02, 0x00, 0x00});
+  const KeyEvent down = popKey();
+  EXPECT_EQ(down.keycode, 0x02);
+  EXPECT_TRUE(down.pressed);
+  expectEmptyRing();
+  frame(media_, {0x00, 0x00, 0x00});
+  const KeyEvent up = popKey();
+  EXPECT_EQ(up.keycode, 0x02);
+  EXPECT_FALSE(up.pressed);
+  expectEmptyRing();
+
+  const std::vector<RawButtonEvent> edges = drainRaw();
+  ASSERT_EQ(edges.size(), 2u);
+  EXPECT_TRUE(edges[0].pressed);
+  EXPECT_EQ(edges[0].code(), 0x030002u);
+  EXPECT_EQ(edges[0].keycode, 0x02) << "the press carries the key the decoder read from the same frame";
+  EXPECT_FALSE(edges[1].pressed);
+  EXPECT_EQ(edges[1].code(), 0x030002u);
+}
+
+TEST_F(RawButtonTest, PressOnlyFramesAfterSilenceAreNewPresses) {
+  // One-byte frames with no release in between, 400 ms apart: every frame is a
+  // new press of the same button.
+  connectThreeButtonRemote();
+  for (int i = 0; i < 3; ++i) {
+    frame(small_, {0x01});
+    fakeble::advanceMillis(400);
+    fakeble::host().poll();
+  }
+  int presses = 0;
+  for (const RawButtonEvent& e : drainRaw()) {
+    EXPECT_EQ(e.code(), 0x060001u);
+    if (e.pressed) ++presses;
+  }
+  EXPECT_EQ(presses, 3);
+}
+
+TEST_F(RawButtonTest, StreamedHoldIsOnePressAndOneReleaseAfterSilence) {
+  connectThreeButtonRemote();
+  for (int i = 0; i < 6; ++i) {
+    frame(media_, {0x00, 0x02, 0x00});
+    fakeble::advanceMillis(40);
+    fakeble::host().poll();
+  }
+  std::vector<RawButtonEvent> edges = drainRaw();
+  ASSERT_EQ(edges.size(), 1u);
+  EXPECT_TRUE(edges[0].pressed);
+  const uint32_t pressedAt = edges[0].atMs;
+
+  fakeble::advanceMillis(200);
+  fakeble::host().poll();
+  edges = drainRaw();
+  ASSERT_EQ(edges.size(), 1u);
+  EXPECT_FALSE(edges[0].pressed);
+  EXPECT_EQ(edges[0].code(), 0x030102u);
+  EXPECT_EQ(edges[0].atMs - pressedAt, 200u) << "the release is dated by the last frame, not by the poll";
+
+  for (int i = 0; i < 3; ++i) {
+    fakeble::advanceMillis(200);
+    fakeble::host().poll();
+  }
+  EXPECT_TRUE(drainRaw().empty());
+}
+
+TEST_F(RawButtonTest, SilentHoldKeepsItsReleaseUntilTheReleaseFrame) {
+  // One frame per edge and nothing between: silence is a held button, so the
+  // hold time is the gap between the two frames.
+  connectThreeButtonRemote();
+  frame(media_, {0x00, 0x02, 0x00});
+  fakeble::advanceMillis(900);
+  for (int i = 0; i < 3; ++i) fakeble::host().poll();
+  frame(media_, {0x00, 0x00, 0x00});
+  const std::vector<RawButtonEvent> edges = drainRaw();
+  ASSERT_EQ(edges.size(), 2u);
+  EXPECT_TRUE(edges[0].pressed);
+  EXPECT_FALSE(edges[1].pressed);
+  EXPECT_EQ(edges[1].atMs - edges[0].atMs, 900u);
+}
+
+TEST_F(RawButtonTest, KeyboardModifierByteIsNotTheButton) {
+  serveReportMap(hidtest::kBootKeyboard, sizeof hidtest::kBootKeyboard);
+  const int input = serveInputReport(nullptr, 0);
+  ASSERT_TRUE(beginAndConnect());
+  deliver(input, bootReport(HID_LSHIFT, {0x04}));
+  const std::vector<RawButtonEvent> edges = drainRaw();
+  ASSERT_EQ(edges.size(), 1u);
+  EXPECT_EQ(edges[0].byteIndex, 2);
+  EXPECT_EQ(edges[0].value, 0x04);
+  EXPECT_EQ(edges[0].keycode, 0x04);
+  EXPECT_EQ(edges[0].mods, HID_LSHIFT);
+  drainKeys();
+}
+
+TEST_F(RawButtonTest, IdByteAndReportReferenceNameTheSameButton) {
+  // A remote that prefixes the id byte its descriptor declares, and one that
+  // leaves it out: the same button reads as the same identity.
+  serveReportMap(hidtest::kTwoReports, sizeof hidtest::kTwoReports);
+  const uint8_t refConsumer[2] = {2, 1};
+  const int consumer = serveInputReport(refConsumer, sizeof refConsumer);
+  ASSERT_TRUE(beginAndConnect());
+  const uint8_t withId[3] = {2, 0xCD, 0x00};
+  const uint8_t withIdUp[3] = {2, 0x00, 0x00};
+  const uint8_t noId[2] = {0xCD, 0x00};
+  const uint8_t noIdUp[2] = {0x00, 0x00};
+  deliver(consumer, withId, sizeof withId);
+  deliver(consumer, withIdUp, sizeof withIdUp);
+  deliver(consumer, noId, sizeof noId);
+  deliver(consumer, noIdUp, sizeof noIdUp);
+  const std::vector<RawButtonEvent> edges = drainRaw();
+  ASSERT_EQ(edges.size(), 4u);
+  EXPECT_EQ(edges[0].code(), 0x0200CDu);
+  EXPECT_EQ(edges[2].code(), 0x0200CDu);
+  EXPECT_TRUE(edges[2].pressed);
+  drainKeys();
+}
+
+TEST_F(RawButtonTest, ConnectedAddressFollowsTheLink) {
+  EXPECT_STREQ(fakeble::host().connectedAddr(), "");
+  connectThreeButtonRemote();
+  EXPECT_STREQ(fakeble::host().connectedAddr(), kAddr);
+  ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  fakeble::host().disconnect();
+  fakeble::advanceMillis(10);
+  fakeble::host().poll();
+  ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  EXPECT_FALSE(fakeble::host().isConnected());
+  EXPECT_STREQ(fakeble::host().connectedAddr(), "");
+}
+
+TEST_F(RawButtonTest, RawRingDropsOnOverflowAndKeepsOrder) {
+  connectThreeButtonRemote();
+  // Eight press/release pairs = sixteen edges into an eight-slot ring.
+  for (uint8_t i = 1; i <= 8; ++i) {
+    frame(media_, {i, 0x00, 0x00});
+    frame(media_, {0x00, 0x00, 0x00});
+  }
+  const std::vector<RawButtonEvent> edges = drainRaw();
+  ASSERT_EQ(edges.size(), static_cast<size_t>(BleKeyboardHost::kRawQueueLen - 1));
+  EXPECT_EQ(edges[0].value, 1);
+  EXPECT_TRUE(edges[0].pressed);
+  drainKeys();
+}
