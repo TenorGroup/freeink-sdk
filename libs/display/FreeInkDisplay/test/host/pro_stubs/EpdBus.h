@@ -2,7 +2,6 @@
 #include <cassert>
 #include <cstdint>
 #include <vector>
-#include <Arduino.h>
 namespace freeink {
 enum class BusyPolarity { ActiveHigh, ActiveLow, X3TwoPhase, UcIdleHigh };
 struct EpdPins { int8_t sclk, mosi, cs, dc, rst, busy, powerEnable=-1; };
@@ -14,9 +13,7 @@ class EpdBus {
   unsigned waits=0;
   void clear() { assert(!transaction); writes.clear(); waits=0; }
   void begin(const EpdPins&, uint32_t, BusyPolarity, int8_t=-1, int8_t=-1) {}
-  unsigned long lastCmd=0;
-  unsigned long lastCommandMs() const { return lastCmd; }
-  void cmd(uint8_t c) { assert(!transaction); writes.push_back({c,{}}); lastCmd=millis(); }
+  void cmd(uint8_t c) { assert(!transaction); writes.push_back({c,{}}); }
   void data(uint8_t b) { data(&b,1); }
   void data(const uint8_t* p, uint16_t n) {
     assert(!transaction); ++writes.back().transactions;

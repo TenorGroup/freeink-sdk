@@ -147,7 +147,6 @@ void EpdBus::reset(uint16_t extraSettleMs) {
 }
 
 void EpdBus::cmd(uint8_t c) {
-  _lastCmdMs = millis();
   SPI.beginTransaction(_spi);
   digitalWrite(_pins.dc, LOW);
   digitalWrite(_pins.cs, LOW);
@@ -175,7 +174,6 @@ void EpdBus::data(const uint8_t* d, uint16_t len) {
 }
 
 void EpdBus::cmdData(uint8_t c, const uint8_t* d, uint16_t len) {
-  _lastCmdMs = millis();
   SPI.beginTransaction(_spi);
   digitalWrite(_pins.cs, LOW);
   digitalWrite(_pins.dc, LOW);

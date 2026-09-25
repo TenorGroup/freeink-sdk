@@ -77,7 +77,6 @@ class Uc8253X3Driver : public PanelDriver {
 
   void requestResync(uint8_t settlePasses) override;
   void skipInitialResync() override;
-  void controllerIdle(EpdBus& bus) override;
 
  private:
   void initController(EpdBus& bus);
@@ -93,7 +92,6 @@ class Uc8253X3Driver : public PanelDriver {
   uint32_t _bufferSize;
 
   bool _isScreenOn = false;
-  bool _railsIdled = false;  // rails down from controllerIdle(), not a turnOff or sleep
   bool _redRamSynced = false;
   bool _inGrayscaleMode = false;
   uint8_t _initialFullSyncsRemaining = 0;

@@ -80,10 +80,6 @@ public:
 #include <iostream>
 #include "driver/Uc8253X3Driver.h"
 #include "lut/Uc8253X3Luts.h"
-static long at(const std::vector<uint8_t>& c, uint8_t v) {
- for (size_t i=0;i<c.size();++i) if (c[i]==v) return long(i);
- return -1;
-}
 int main() {
  freeink::EpdBus bus; freeink::Uc8253X3Driver d;
  const auto caps = d.grayscaleCapabilities();
@@ -98,25 +94,21 @@ int main() {
  d.display(bus,fb.data(),nullptr,freeink::RefreshMode::Fast,false);
  assert(bus.powerOns == 2);
  std::cout << "PASS: UC8253 cold power-on, warm Full, and power-off/wake\\n";
- // A turn after a turnOff POF is a wake: it keeps the stronger Half bank.
+ // Drive rails as CrossPoint runs them: a turn after a turnOff POF is a wake and
+ // takes the stronger Half bank; a standing screen is never powered down by the
+ // idle hook, so no turn ever follows a POF on the Fast bank.
  using freeink::lut_x3_vcom_fast; using freeink::lut_x3_vcom_half;
  const std::vector<uint8_t> fast(lut_x3_vcom_fast, lut_x3_vcom_fast+42), half(lut_x3_vcom_half, lut_x3_vcom_half+42);
  assert(fast != half && bus.vcomLut == half);
- // Rails idled on a standing screen: the next turn powers up and stays Fast.
  freeink::EpdBus b; freeink::Uc8253X3Driver e; e.begin(b);
  for (int i=0;i<3;++i) e.display(b,fb.data(),nullptr,freeink::RefreshMode::Fast,false);
- assert(at(b.cmds,0x02) < 0 && b.vcomLut == fast);  // adjacent turns: no POF between
  b.cmds.clear(); e.controllerIdle(b);
- assert(b.cmds == std::vector<uint8_t>({0x02}));
- e.controllerIdle(b);
- assert(b.cmds == std::vector<uint8_t>({0x02}));
- b.cmds.clear(); e.display(b,fb.data(),nullptr,freeink::RefreshMode::Fast,false);
- assert(at(b.cmds,0x04) >= 0 && at(b.cmds,0x04) < at(b.cmds,0x12) && at(b.cmds,0x02) < 0);
- assert(b.vcomLut == fast);
- // Sleep ends with POF then DSLP.
+ assert(b.cmds.empty());
+ e.display(b,fb.data(),nullptr,freeink::RefreshMode::Fast,false);
+ assert(b.vcomLut == fast && b.powerOns == 1);
  b.cmds.clear(); e.deepSleep(b);
  assert(b.cmds == std::vector<uint8_t>({0x02,0x07}));
- std::cout << "PASS: UC8253 idle rails off, next turn stays Fast, sleep ends POF+DSLP\\n";
+ std::cout << "PASS: UC8253 rails stay up on a standing screen, POF only on turnOff or sleep\\n";
 }
 """)
     exe = root / "test_uc8253_power"

@@ -72,8 +72,6 @@ class Ssd1677Driver : public PanelDriver {
 
   void begin(EpdBus& bus) override;
   void deepSleep(EpdBus& bus) override;
-  // The fast sequence (0xFC) leaves analog on; a standing screen powers it down.
-  void controllerIdle(EpdBus& bus) override { powerOffController(bus); }
 
   void display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) override;
   // Deferred refresh: displayStart() runs the full update (RAM writes,
