@@ -1,5 +1,6 @@
 #include <RecoverableFile.h>
 #include "SDCardManager.h"
+#include "SdVolumeSync.h"
 
 #include <BoardConfig.h>
 #include <driver/gpio.h>
@@ -69,6 +70,8 @@ bool SDCardManager::begin() {
 
 FsBlockDeviceInterface* SDCardManager::detachFilesystemForRawAccess() {
   if (!initialized || !_dev) return nullptr;
+  // The USB host sees the card's sectors from here on, not SdFat's cached ones.
+  syncSdVolume(_vol);
   _vol.end();
   initialized = false;
   cachedTotalBytes = 0;
@@ -79,8 +82,10 @@ FsBlockDeviceInterface* SDCardManager::detachFilesystemForRawAccess() {
 
 void SDCardManager::shutdown() {
   if (!initialized || !_dev) return;
-  // FsVolume::end() flushes SdFat's cached FAT/directory sectors; SDMMC block
-  // writes are synchronous, so the card is consistent once it returns.
+  // FsVolume::end() only forgets the volume: SdFat's cached FAT and directory
+  // sectors are written out first. SDMMC block writes are synchronous, so the card
+  // is consistent once that returns.
+  syncSdVolume(_vol);
   _vol.end();
   _dev->end();  // frees the card and runs sdmmc_host_deinit()
   // sdmmc_host_deinit() leaves the bus pads in their last GPIO-matrix state:
@@ -103,6 +108,11 @@ void SDCardManager::shutdown() {
 }
 #else
 SDCardManager::SDCardManager() : sd() {}
+
+void SDCardManager::shutdown() {
+  // Sleep cuts the card's power (the X3's GPIO13 rail) right after this.
+  if (initialized) syncSdVolume(sd);
+}
 
 bool SDCardManager::begin() {
   // Profiles whose SD CS is not yet known leave it unassigned so the card stays

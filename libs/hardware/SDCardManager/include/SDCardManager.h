@@ -85,15 +85,17 @@ class SDCardManager {
   // raw USB-MSC owner. The caller must reinitialize the manager after the
   // owner releases the card.
   FsBlockDeviceInterface* detachFilesystemForRawAccess();
-  // Stop the card for deep sleep: unmount the volume, stop the SDMMC host, and
-  // float the bus pads so their pull-ups stop back-feeding the card's VDD net
-  // through sleep. Idempotent; call only after all file users have stopped. A
-  // deep-sleep wake resets the MCU and remounts through begin().
+  // Stop the card for deep sleep: write out SdFat's cached sectors, unmount the
+  // volume, stop the SDMMC host, and float the bus pads so their pull-ups stop
+  // back-feeding the card's VDD net through sleep. Idempotent; call only after all
+  // file users have stopped. A deep-sleep wake resets the MCU and remounts through
+  // begin().
   void shutdown();
 #else
   // SPI/SdFat boards: sleep either cuts power entirely (C3 Xteink) or gates the
-  // SD rail in powerDownRailsForSleep(); there is no host to stop.
-  void shutdown() {}
+  // SD rail in powerDownRailsForSleep(); there is no host to stop, but SdFat's
+  // cached FAT and directory sectors are written out first, or the cut loses them.
+  void shutdown();
 #endif
 
  static SDCardManager& getInstance() { return instance; }
