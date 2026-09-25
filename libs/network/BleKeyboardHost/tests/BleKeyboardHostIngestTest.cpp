@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include <cstdint>
 #include <cstring>
 #include <chrono>
@@ -1380,16 +1382,125 @@ TEST_F(RawButtonTest, ConnectedAddressFollowsTheLink) {
   EXPECT_STREQ(fakeble::host().connectedAddr(), "");
 }
 
-TEST_F(RawButtonTest, RawRingDropsOnOverflowAndKeepsOrder) {
+TEST_F(RawButtonTest, RawRingOverflowDropsWholePressesAndNeverARelease) {
   connectThreeButtonRemote();
-  // Eight press/release pairs = sixteen edges into an eight-slot ring.
+  const uint16_t overflowsBefore = fakeble::host().rawOverflows();  // a count since boot
+  // Eight taps (sixteen edges) into a ring with seven usable slots, nobody draining:
+  // a burst while the reader lays out a page. What is dropped must be whole presses;
+  // a press that got in must keep its release, or the button stays down for the app.
   for (uint8_t i = 1; i <= 8; ++i) {
     frame(media_, {i, 0x00, 0x00});
     frame(media_, {0x00, 0x00, 0x00});
   }
-  const std::vector<RawButtonEvent> edges = drainRaw();
-  ASSERT_EQ(edges.size(), static_cast<size_t>(BleKeyboardHost::kRawQueueLen - 1));
+  std::vector<RawButtonEvent> edges = drainRaw();
+  int presses = 0;
+  int releases = 0;
+  for (const RawButtonEvent& e : edges) (e.pressed ? presses : releases)++;
+  EXPECT_EQ(presses, releases) << "a press lost its release";
+  EXPECT_EQ(presses, 3);
   EXPECT_EQ(edges[0].value, 1);
-  EXPECT_TRUE(edges[0].pressed);
+  EXPECT_EQ(fakeble::host().rawOverflows() - overflowsBefore, 5) << "every dropped press is counted";
+
+  // A press accepted with the ring nearly full still gets its release when the
+  // next button replaces it in a single frame.
+  frame(media_, {0x01, 0x00, 0x00});
+  frame(media_, {0x02, 0x00, 0x00});
+  frame(media_, {0x03, 0x00, 0x00});
+  frame(media_, {0x00, 0x00, 0x00});
+  frame(media_, {0x00, 0x00, 0x00});
+  presses = releases = 0;
+  edges = drainRaw();
+  for (const RawButtonEvent& e : edges) (e.pressed ? presses : releases)++;
+  EXPECT_EQ(presses, releases);
+  EXPECT_EQ(presses, 3);
+
+  // Once drained, taps flow again.
+  frame(media_, {0x04, 0x00, 0x00});
+  frame(media_, {0x00, 0x00, 0x00});
+  EXPECT_EQ(drainRaw().size(), 2u);
+  drainKeys();
+}
+
+TEST_F(RawButtonTest, ConstantStatusByteRemoteKeepsOneIdentityPerButton) {
+  // A remote whose frames carry a status byte that is never 0 (0x12 at rest), with
+  // its buttons as bits in later bytes. The first non-zero byte is the status byte
+  // in every frame: read that way, every button, and the rest frame, is one code
+  // and nothing ever comes up. Buttons must be read against the rest frame.
+  serveReportMap(hidtest::kNoInput, sizeof hidtest::kNoInput);
+  const int input = serveInputReport(nullptr, 0);
+  ASSERT_TRUE(beginAndConnect());
+  const uint8_t rest[3] = {0x12, 0x00, 0x00};
+  const uint8_t a[3] = {0x12, 0x04, 0x00};
+  const uint8_t b[3] = {0x12, 0x00, 0x08};
+  deliver(input, rest, sizeof rest);  // the state report many remotes send first
+  std::vector<uint32_t> pressed;
+  int open = 0;
+  for (int round = 0; round < 2; ++round) {
+    deliver(input, a, sizeof a);
+    deliver(input, rest, sizeof rest);
+    deliver(input, b, sizeof b);
+    deliver(input, rest, sizeof rest);
+    for (const RawButtonEvent& e : drainRaw()) {  // the app drains every pass
+      open += e.pressed ? 1 : -1;
+      if (e.pressed) pressed.push_back(e.code());
+    }
+  }
+  EXPECT_EQ(open, 0) << "a press was left without its release";
+  const uint32_t codeA = 0x000104;
+  const uint32_t codeB = 0x000208;
+  EXPECT_EQ(std::count(pressed.begin(), pressed.end(), codeA), 2);
+  EXPECT_EQ(std::count(pressed.begin(), pressed.end(), codeB), 2);
+  drainKeys();
+}
+
+TEST_F(RawButtonTest, GamepadAxisButtonsAreKnownByTheZoneTheDecoderReads) {
+  // Axis-pair gamepad mode: byte 0 is a status byte (0x12 rest, 0x13 pressed) that
+  // every button raises, bytes 1-4 two axes that ramp while held. No byte of such a
+  // frame names a button; the decoder names it on the release frame from the axis
+  // zones. Two directions must give two identities, and no byte identity at all.
+  serveReportMap(hidtest::kNoInput, sizeof hidtest::kNoInput);
+  const int input = serveInputReport(nullptr, 0);
+  ASSERT_TRUE(beginAndConnect());
+  const uint8_t rest[5] = {0x12, 0xD0, 0x07, 0xD0, 0x07};
+  const uint8_t upDown[5] = {0x13, 0xD0, 0x07, 0x84, 0x03};
+  const uint8_t upUp[5] = {0x12, 0xD0, 0x07, 0x84, 0x03};
+  const uint8_t downDown[5] = {0x13, 0xD0, 0x07, 0x10, 0x0E};
+  const uint8_t downUp[5] = {0x12, 0xD0, 0x07, 0x10, 0x0E};
+  deliver(input, rest, sizeof rest);
+  deliver(input, upDown, sizeof upDown);
+  deliver(input, upUp, sizeof upUp);
+  deliver(input, rest, sizeof rest);
+  deliver(input, downDown, sizeof downDown);
+  deliver(input, downUp, sizeof downUp);
+  deliver(input, rest, sizeof rest);
+  std::vector<uint32_t> pressed;
+  int open = 0;
+  for (const RawButtonEvent& e : drainRaw()) {
+    open += e.pressed ? 1 : -1;
+    if (e.pressed) pressed.push_back(e.code());
+  }
+  EXPECT_EQ(open, 0);
+  ASSERT_EQ(pressed.size(), 2u) << "byte identities leaked from an axis frame";
+  EXPECT_NE(pressed[0], pressed[1]);
+  EXPECT_EQ(pressed[0] & 0xFF, 0x43u) << "up = axis 1 centered, axis 2 low";
+  EXPECT_EQ(pressed[1] & 0xFF, 0x45u) << "down = axis 1 centered, axis 2 high";
+  drainKeys();
+}
+
+TEST_F(RawButtonTest, KeyAddedWhileAnotherIsHeldStillReachesTheApp) {
+  // A held, then B: the first differing byte is still A's, so no byte edge names B.
+  // The key the decoder read must still reach the app, or a remote with a table
+  // loses B (its fallback to the usage mapping runs on raw press edges).
+  serveReportMap(hidtest::kBootKeyboard, sizeof hidtest::kBootKeyboard);
+  const int input = serveInputReport(nullptr, 0);
+  ASSERT_TRUE(beginAndConnect());
+  deliver(input, bootReport(0, {0x04}));  // a first tap, so the rest frame is known
+  deliver(input, bootReport(0, {}));
+  drainRaw();
+  deliver(input, bootReport(0, {0x04}));
+  deliver(input, bootReport(0, {0x04, 0x05}));
+  bool sawB = false;
+  for (const RawButtonEvent& e : drainRaw()) sawB = sawB || (e.pressed && e.keycode == 0x05);
+  EXPECT_TRUE(sawB);
   drainKeys();
 }

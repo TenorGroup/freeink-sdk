@@ -587,8 +587,9 @@ HidByteLayout hidByteLayout(const HidReportLayout& layout) {
   return b;
 }
 
-uint32_t hidRawButtonCode(const HidReportMap& map, const uint8_t* data, size_t len, uint16_t referenceId) {
-  if (data == nullptr || len == 0) return 0;
+void hidRawFrame(const HidReportMap& map, const uint8_t* data, size_t len, uint16_t referenceId, HidRawFrame& out) {
+  out = HidRawFrame{};
+  if (data == nullptr || len == 0) return;
   uint8_t id = referenceId == 0xFFFF ? 0 : static_cast<uint8_t>(referenceId);
   size_t offset = 0;
   const HidReportLayout* layout = layoutFor(map, map.hasId ? id : 0);
@@ -608,11 +609,17 @@ uint32_t hidRawButtonCode(const HidReportMap& map, const uint8_t* data, size_t l
     modFirst = bytes.modByte;
     modEnd = static_cast<uint8_t>(bytes.modByte + bytes.modBytes);
   }
+  out.id = id;
   const size_t n = len - offset < 8 ? len - offset : 8;
   for (size_t i = 0; i < n; ++i) {
-    if (i >= modFirst && i < modEnd) continue;
-    const uint8_t v = data[offset + i];
-    if (v != 0) return static_cast<uint32_t>(v) | static_cast<uint32_t>(i) << 8 | static_cast<uint32_t>(id) << 16;
+    if (i < modFirst || i >= modEnd) out.bytes[i] = data[offset + i];
+  }
+}
+
+uint32_t hidRawButtonCode(const HidRawFrame& frame, const uint8_t* rest) {
+  for (uint32_t i = 0; i < 8; ++i) {
+    const uint8_t v = frame.bytes[i];
+    if (v != rest[i]) return v | i << 8 | static_cast<uint32_t>(frame.id) << 16;
   }
   return 0;
 }

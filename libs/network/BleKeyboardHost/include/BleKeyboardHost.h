@@ -181,6 +181,9 @@ class BleKeyboardHost {
   // Pop the next raw button edge (see RawButtonEvent). Filled from the same frames
   // as popKey(), in its own ring, so an app that ignores it sees no change.
   bool popRawButton(RawButtonEvent& out);
+  // Raw presses dropped because the ring was full (a burst nobody drained). A press
+  // is dropped whole: one that got in always keeps a slot for its release.
+  uint16_t rawOverflows() const { return rawOverflow_; }
 
   // True while the peer is still streaming input reports - one arrived inside the
   // host's own stale-release window. Lets an app tell "the button is still down and
@@ -205,7 +208,10 @@ class BleKeyboardHost {
   bool payOwedRelease();               // emit the release a recorded press still owes
   void decodeReport(const uint8_t* data, size_t len);  // map decode -> key events
   // Raw edge ring push; the caller holds the ring lock.
-  void pushRawLocked(uint32_t code, bool pressed, uint32_t atMs, uint8_t keycode, uint8_t mods);
+  // Raw edge ring push; the caller holds the ring lock. Refused (false) unless `keep`
+  // slots stay free after it: a press keeps one for its own release, so no release
+  // of a press that got in is ever dropped.
+  bool pushRawLocked(uint32_t code, bool pressed, uint32_t atMs, uint8_t keycode, uint8_t mods, uint8_t keep);
   void persistBonds();
   void loadBonds();
   BleKeyboardHost() = default;
@@ -261,6 +267,19 @@ class BleKeyboardHost {
   volatile uint8_t rawTail_ = 0;
   uint32_t rawCode_ = 0;
   uint8_t rawReports_ = 0;
+  uint16_t rawOverflow_ = 0;
+  bool rawDropped_ = false;  // rawCode_'s press was dropped: its release is not sent either
+  // The rest frame (nothing pressed) and the last frame of each report id, so a
+  // button is read as what changed against rest. Backend task only.
+  struct RawRest {
+    uint8_t id;
+    uint8_t frames;  // frames seen, capped at 2: the first one may itself be the rest state
+    uint8_t rest[8];
+    uint8_t prev[8];
+  };
+  RawRest rawRest_[4];
+  uint8_t rawRestCount_ = 0;
+  bool frameAxisPad_ = false;  // the decoder read this frame as an axis-pair gamepad
   // First key the decoder pressed in the frame being ingested (backend task only).
   uint8_t framePressUsage_ = 0;
   uint8_t framePressMods_ = 0;
