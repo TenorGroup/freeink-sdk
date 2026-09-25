@@ -43,9 +43,9 @@ enum class BusyPolarity { X3TwoPhase };
 class EpdBus {
   uint8_t command=0;
 public:
-  std::vector<uint8_t> oldPlane, newPlane, lastBank, rawRegisters, lastBwBank;
+  std::vector<uint8_t> oldPlane, newPlane, lastBank, rawRegisters, lastBwBank, cmds;
   unsigned refreshes=0;
-  void cmd(uint8_t c) { command=c; if(c == 0x12) ++refreshes; }
+  void cmd(uint8_t c) { command=c; cmds.push_back(c); if(c == 0x12) ++refreshes; }
   void data(uint8_t) {}
   void data(const uint8_t* p, size_t n) {
     if(command == 0x20 && n == 42) lastBwBank.assign(p,p+n);

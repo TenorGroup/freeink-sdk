@@ -108,6 +108,10 @@ class EpdBus {
   // widthBytes), as one CS-low burst. No framebuffer touched.
   void fillPlane(uint8_t ramCmd, uint8_t fillByte, uint16_t height, uint16_t widthBytes);
 
+  // millis() of the last command sent. Hosts compare it against the clock to
+  // tell how long the panel has stood still (FreeInkDisplay::idleIfQuiet).
+  uint32_t lastCommandMs() const { return _lastCmdMs; }
+
   const EpdPins& pins() const { return _pins; }
   uint32_t spiHz() const { return _spiHz; }
   BusyPolarity busyPolarity() const { return _busy; }
@@ -133,6 +137,7 @@ class EpdBus {
   BusyPolarity _busy = BusyPolarity::ActiveHigh;
   uint32_t _spiHz = 40000000;
   int8_t _coCs = -1;
+  uint32_t _lastCmdMs = 0;
 };
 
 }  // namespace freeink

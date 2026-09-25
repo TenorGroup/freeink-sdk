@@ -46,6 +46,7 @@ class Uc8279Driver : public PanelDriver {
 
   void requestResync(uint8_t settlePasses) override;
   void skipInitialResync() override;
+  void controllerIdle(EpdBus& bus) override;
 
   // --- 4-level grayscale / anti-aliasing (mirrors the UC8253 X3 sibling) ---
   // Two 1bpp planes (LSB -> DTM1/old, MSB -> DTM2/new) encode 4 levels; the

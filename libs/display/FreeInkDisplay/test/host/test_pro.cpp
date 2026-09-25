@@ -141,6 +141,36 @@ static void testAsyncFrame() {
   free(driver._grayBase);
 }
 
+// Drive rails on a standing screen: the facade idles the controller only after
+// quietMs with no command, once per quiet spell, and finishes a refresh still
+// in flight before powering down.
+static void testIdleIfQuiet() {
+  Ssd1677Driver driver;
+  FreeInkDisplay display(1,2,3,4,5,6);
+  display._driver=&driver;
+  display.begin();
+  display.displayBuffer(FreeInkDisplay::FAST_REFRESH);  // boot clean (HALF powers itself off)
+  display.displayBuffer(FreeInkDisplay::FAST_REFRESH);  // 0xFC leaves the rails up
+  hostNowMs+=1000;
+  display.displayBuffer(FreeInkDisplay::FAST_REFRESH);  // adjacent turn
+  assert(driver._isScreenOn);
+  hostNowMs+=2000;
+  display._bus.clear();
+  assert(!display.idleIfQuiet(3000) && display._bus.writes.empty());
+  hostNowMs+=1000;
+  assert(display.idleIfQuiet(3000) && lastRegister(display._bus,0x22)==0x03 && !driver._isScreenOn);
+  display._bus.clear();
+  hostNowMs+=60000;
+  assert(!display.idleIfQuiet(3000) && display._bus.writes.empty());
+  display.displayBuffer(FreeInkDisplay::FAST_REFRESH);
+  assert(lastRegister(display._bus,0x22)==0xfc && driver._isScreenOn);  // no forced HALF after idle
+  display.displayBufferAsync(FreeInkDisplay::FAST_REFRESH);
+  assert(display.isRefreshPending());
+  hostNowMs+=3001;
+  assert(display.idleIfQuiet(3000) && !display.isRefreshPending() && !driver._isScreenOn);
+  display.releaseBuffers();
+}
+
 // A driver with no grayscale implementation must never advertise support.
 class BwOnlyDriver : public PanelDriver {
  public:
@@ -438,5 +468,6 @@ int main(int argc, char**) {
   testSsd();
   testAsyncFrame<Uc8179Driver>();
   testAsyncFrame<Uc8279X4Driver>();
+  testIdleIfQuiet();
   std::puts("Pro plane bytes, transaction counts, clean refreshes, power state and async frame ownership passed");
 }

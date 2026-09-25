@@ -281,6 +281,12 @@ class FreeInkDisplay {
   void runMaintenance();
   bool hasPendingMaintenance() const;
   void controllerIdle();
+  // Idle the controller once no command has reached it for quietMs, at most
+  // once per quiet spell. Hosts call it from their idle loop, never during a
+  // multi-pass paint; a refresh still pending is finished first. True when a
+  // controller command went out (drive rails dropped).
+  bool idleIfQuiet(uint32_t quietMs);
+  uint32_t lastCommandMs() const { return _bus.lastCommandMs(); }
 
   // debug function
   void grayscaleRevert();
@@ -429,6 +435,7 @@ class FreeInkDisplay {
   void cancelGrayscalePass();
   bool acceptGrayscaleRows(unsigned plane, const uint8_t* data, uint16_t y, uint16_t rows);
   bool _refreshPending = false;
+  uint32_t _idledAtCmdMs = 0;  // bus command stamp the last idleIfQuiet() left
   uint8_t* _asyncShadow = nullptr;
   bool _shadowValid = false;
 #ifdef EINK_DISPLAY_SINGLE_BUFFER_MODE

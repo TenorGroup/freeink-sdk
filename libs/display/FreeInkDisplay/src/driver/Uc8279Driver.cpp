@@ -212,6 +212,16 @@ void Uc8279Driver::skipInitialResync() {
   _initialFullsRemaining = 0;  // ...so don't force the boot clears
 }
 
+// Page turns keep the rails up between waveforms (no PON per turn). Once the
+// host sees the panel stand still, drop them: a held image under the DC rail
+// bias fades (the stock firmware powers off after every refresh).
+void Uc8279Driver::controllerIdle(EpdBus& bus) {
+  if (!_isScreenOn) return;
+  bus.cmd(CMD_POWER_OFF);
+  bus.waitBusy(" 8279_idle_POF");
+  _isScreenOn = false;
+}
+
 void Uc8279Driver::deepSleep(EpdBus& bus) {
   if (_isScreenOn) {
     bus.cmd(CMD_POWER_OFF);

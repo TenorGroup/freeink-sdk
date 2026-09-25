@@ -43,12 +43,13 @@ enum class BusyPolarity { X3TwoPhase };
 class EpdBus {
   uint8_t command=0;
 public:
-  std::vector<uint8_t> oldPlane, newPlane, lastBank, rawRegisters;
+  std::vector<uint8_t> oldPlane, newPlane, lastBank, rawRegisters, cmds, vcomLut;
   unsigned powerOns=0;
-  void cmd(uint8_t c) { command=c; if(c == 4) ++powerOns; }
+  void cmd(uint8_t c) { command=c; cmds.push_back(c); if(c == 4) ++powerOns; }
   void cmdData2(uint8_t c, uint8_t a, uint8_t b) { cmd(c); data(a); data(b); }
   void data(uint8_t) {}
   void data(const uint8_t* p, size_t n) {
+    if(command == 0x20 && n == 42) vcomLut.assign(p,p+n);
     if(n == 49) {
       if(command == 0x20) rawRegisters.clear();
       rawRegisters.push_back(command);
@@ -78,6 +79,11 @@ public:
 #include <vector>
 #include <iostream>
 #include "driver/Uc8253X3Driver.h"
+#include "lut/Uc8253X3Luts.h"
+static long at(const std::vector<uint8_t>& c, uint8_t v) {
+ for (size_t i=0;i<c.size();++i) if (c[i]==v) return long(i);
+ return -1;
+}
 int main() {
  freeink::EpdBus bus; freeink::Uc8253X3Driver d;
  const auto caps = d.grayscaleCapabilities();
@@ -92,6 +98,25 @@ int main() {
  d.display(bus,fb.data(),nullptr,freeink::RefreshMode::Fast,false);
  assert(bus.powerOns == 2);
  std::cout << "PASS: UC8253 cold power-on, warm Full, and power-off/wake\\n";
+ // A turn after a turnOff POF is a wake: it keeps the stronger Half bank.
+ using freeink::lut_x3_vcom_fast; using freeink::lut_x3_vcom_half;
+ const std::vector<uint8_t> fast(lut_x3_vcom_fast, lut_x3_vcom_fast+42), half(lut_x3_vcom_half, lut_x3_vcom_half+42);
+ assert(fast != half && bus.vcomLut == half);
+ // Rails idled on a standing screen: the next turn powers up and stays Fast.
+ freeink::EpdBus b; freeink::Uc8253X3Driver e; e.begin(b);
+ for (int i=0;i<3;++i) e.display(b,fb.data(),nullptr,freeink::RefreshMode::Fast,false);
+ assert(at(b.cmds,0x02) < 0 && b.vcomLut == fast);  // adjacent turns: no POF between
+ b.cmds.clear(); e.controllerIdle(b);
+ assert(b.cmds == std::vector<uint8_t>({0x02}));
+ e.controllerIdle(b);
+ assert(b.cmds == std::vector<uint8_t>({0x02}));
+ b.cmds.clear(); e.display(b,fb.data(),nullptr,freeink::RefreshMode::Fast,false);
+ assert(at(b.cmds,0x04) >= 0 && at(b.cmds,0x04) < at(b.cmds,0x12) && at(b.cmds,0x02) < 0);
+ assert(b.vcomLut == fast);
+ // Sleep ends with POF then DSLP.
+ b.cmds.clear(); e.deepSleep(b);
+ assert(b.cmds == std::vector<uint8_t>({0x02,0x07}));
+ std::cout << "PASS: UC8253 idle rails off, next turn stays Fast, sleep ends POF+DSLP\\n";
 }
 """)
     exe = root / "test_uc8253_power"

@@ -1004,6 +1004,14 @@ void FreeInkDisplay::controllerIdle() {
   _driver->controllerIdle(_bus);
 }
 
+bool FreeInkDisplay::idleIfQuiet(uint32_t quietMs) {
+  const uint32_t last = _bus.lastCommandMs();
+  if (!_driver || last == _idledAtCmdMs || millis() - last < quietMs || _driver->hasPendingMaintenance()) return false;
+  controllerIdle();
+  _idledAtCmdMs = _bus.lastCommandMs();
+  return _idledAtCmdMs != last;
+}
+
 void FreeInkDisplay::requestCompleteWaveformNextRefresh() {
   if (_driver) _driver->requestCompleteWaveformNextRefresh();
 }

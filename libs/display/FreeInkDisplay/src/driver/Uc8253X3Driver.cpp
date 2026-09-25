@@ -83,6 +83,7 @@ void Uc8253X3Driver::triggerRefresh(EpdBus& bus, bool turnOff) {
     bus.cmd(CMD_POWER_ON);
     bus.waitBusy(" X3_PON");
     _isScreenOn = true;
+    _railsIdled = false;
   }
   bus.cmd(CMD_DISPLAY_REFRESH);
   bus.waitBusy(" X3_DRF");
@@ -135,6 +136,7 @@ void Uc8253X3Driver::initController(EpdBus& bus) {
   bus.cmd(CMD_DATA_STOP);
 
   _isScreenOn = false;
+  _railsIdled = false;
 }
 
 void Uc8253X3Driver::begin(EpdBus& bus) {
@@ -163,7 +165,7 @@ void Uc8253X3Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev
 
 bool Uc8253X3Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
   (void)prev;
-  if (!_isScreenOn && !turnOff) {
+  if (!_isScreenOn && !turnOff && !_railsIdled) {
     mode = RefreshMode::Half;  // wake transition gets a stronger waveform
   }
   if (_inGrayscaleMode) {
@@ -200,6 +202,7 @@ bool Uc8253X3Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
     bus.cmd(CMD_POWER_ON);
     bus.waitBusy(" X3_PON");
     _isScreenOn = true;
+    _railsIdled = false;
   }
   bus.cmd(CMD_DISPLAY_REFRESH);
   // Confirm the waveform actually started (BUSY dropped LOW) before handing the
@@ -480,6 +483,17 @@ void Uc8253X3Driver::requestResync(uint8_t settlePasses) {
 void Uc8253X3Driver::skipInitialResync() {
   _initialFullSyncsRemaining = 0;
   _redRamSynced = true;
+}
+
+// Same rail policy as the UC8279 sibling: page turns keep the rails up, a
+// standing screen drops them. Marked apart from a turnOff POF so the next turn
+// is not taken for a wake and forced to Half (see displayStart).
+void Uc8253X3Driver::controllerIdle(EpdBus& bus) {
+  if (!_isScreenOn) return;
+  bus.cmd(CMD_POWER_OFF);
+  bus.waitBusy(" X3_idle_POF");
+  _isScreenOn = false;
+  _railsIdled = true;
 }
 
 void Uc8253X3Driver::deepSleep(EpdBus& bus) {
