@@ -1125,7 +1125,8 @@ bool BleKeyboardHost::popRawButton(RawButtonEvent& out) {
 }
 
 bool BleKeyboardHost::pushRawLocked(const uint32_t code, const bool pressed, const uint32_t atMs,
-                                    const uint8_t keycode, const uint8_t mods, const uint8_t keep) {
+                                    const uint8_t keycode, const uint8_t mods, const uint8_t keep,
+                                    const bool wasRest) {
   const uint8_t used = static_cast<uint8_t>((rawHead_ - rawTail_ + kRawQueueLen) % kRawQueueLen);
   if (kRawQueueLen - 1 - used <= keep) {  // drop rather than block, like the key ring
     if (pressed && rawOverflow_ < 0xFFFF) ++rawOverflow_;
@@ -1139,6 +1140,7 @@ bool BleKeyboardHost::pushRawLocked(const uint32_t code, const bool pressed, con
   e.pressed = pressed;
   e.keycode = keycode;
   e.mods = mods;
+  e.wasRest = wasRest;
   e.atMs = atMs;
   rawHead_ = next;
   return true;
@@ -1243,8 +1245,14 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
     adds |= f.bytes[i] & ~r.prev[i];
     clears |= r.prev[i] & ~f.bytes[i];
   }
-  if (clears && !adds) memcpy(r.rest, f.bytes, sizeof r.rest);
-  if (adds && !clears && r.frames == 1) memcpy(r.rest, r.prev, sizeof r.rest);
+  if (clears && !adds) {
+    memcpy(r.rest, f.bytes, sizeof r.rest);
+    r.known = true;
+  }
+  if (adds && !clears && r.frames == 1) {
+    memcpy(r.rest, r.prev, sizeof r.rest);
+    r.known = true;
+  }
   memcpy(r.prev, f.bytes, sizeof r.prev);
   if (r.frames < 2) ++r.frames;
   // An axis-pair gamepad names its button only through the zones the decoder reads;
@@ -1262,10 +1270,20 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
   bool pressTried = false;
   if (code != rawCode_) {
     // Release before press, so a swap of one button for another reads in that order.
-    if (rawCode_ != 0 && !rawDropped_) pushRawLocked(rawCode_, false, now, 0, 0, 0);
+    // The button held until now was read against the zero guess: if the rest known now
+    // carries the same byte, it was the rest frame, not a button.
+    bool heldWasRest = false;
+    for (uint8_t i = 0; rawCode_ != 0 && rawGuessed_ && i < rawRestCount_; ++i) {
+      if (rawRest_[i].id != static_cast<uint8_t>(rawCode_ >> 16)) continue;
+      const uint8_t at = static_cast<uint8_t>(rawCode_ >> 8);
+      heldWasRest = at < 8 && rawRest_[i].known && rawRest_[i].rest[at] == static_cast<uint8_t>(rawCode_);
+      break;
+    }
+    if (rawCode_ != 0 && !rawDropped_) pushRawLocked(rawCode_, false, now, 0, 0, 0, heldWasRest);
     pressTried = code != 0;
     rawDropped_ = pressTried && !(pressSent = pushRawLocked(code, true, now, framePressUsage_, framePressMods_, 1));
     rawCode_ = code;
+    rawGuessed_ = !r.known;
     rawReports_ = 1;
   } else if (code != 0) {
     if (now - lastMs > kReleaseTimeoutMs) {

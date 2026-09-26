@@ -77,6 +77,10 @@ struct RawButtonEvent {
   bool pressed = false;
   uint8_t keycode = 0;
   uint8_t mods = 0;
+  // Release only: the press it ends was read before the report's rest frame was known,
+  // and the rest frame learned since is that press's own byte, so the "press" was the
+  // remote idling on a non-zero status byte, not a button. A learning screen drops it.
+  bool wasRest = false;
   uint32_t atMs = 0;  // millis() when the frame arrived, for hold timing
   // value | byteIndex << 8 | reportId << 16; never 0 for an edge.
   uint32_t code() const {
@@ -109,7 +113,9 @@ class BleKeyboardHost {
   static constexpr uint8_t kMaxDiscovered = 24;
   static constexpr uint8_t kMaxBonds = 4;
   static constexpr uint8_t kKeyQueueLen = 16;
-  static constexpr uint8_t kRawQueueLen = 8;
+  // Eight presses with their releases, plus the slot that tells a full ring from an
+  // empty one: a burst of taps while the reader lays out a page loses none.
+  static constexpr uint8_t kRawQueueLen = 17;
 
   static BleKeyboardHost& getInstance();
 
@@ -207,11 +213,11 @@ class BleKeyboardHost {
   void emitUsage(uint8_t usage, uint8_t mods, bool pressed);  // translate + enqueue
   bool payOwedRelease();               // emit the release a recorded press still owes
   void decodeReport(const uint8_t* data, size_t len);  // map decode -> key events
-  // Raw edge ring push; the caller holds the ring lock.
   // Raw edge ring push; the caller holds the ring lock. Refused (false) unless `keep`
   // slots stay free after it: a press keeps one for its own release, so no release
-  // of a press that got in is ever dropped.
-  bool pushRawLocked(uint32_t code, bool pressed, uint32_t atMs, uint8_t keycode, uint8_t mods, uint8_t keep);
+  // of a press that got in is ever dropped. `wasRest`: see RawButtonEvent.
+  bool pushRawLocked(uint32_t code, bool pressed, uint32_t atMs, uint8_t keycode, uint8_t mods, uint8_t keep,
+                     bool wasRest = false);
   void persistBonds();
   void loadBonds();
   BleKeyboardHost() = default;
@@ -269,11 +275,13 @@ class BleKeyboardHost {
   uint8_t rawReports_ = 0;
   uint16_t rawOverflow_ = 0;
   bool rawDropped_ = false;  // rawCode_'s press was dropped: its release is not sent either
+  bool rawGuessed_ = false;  // rawCode_ was read against the all-zero guess, its rest not yet known
   // The rest frame (nothing pressed) and the last frame of each report id, so a
   // button is read as what changed against rest. Backend task only.
   struct RawRest {
     uint8_t id;
     uint8_t frames;  // frames seen, capped at 2: the first one may itself be the rest state
+    bool known;      // rest is a frame the remote sent, not the all-zero guess
     uint8_t rest[8];
     uint8_t prev[8];
   };
