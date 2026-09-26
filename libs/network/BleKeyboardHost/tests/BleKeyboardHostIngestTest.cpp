@@ -1385,10 +1385,10 @@ TEST_F(RawButtonTest, ConnectedAddressFollowsTheLink) {
 TEST_F(RawButtonTest, RawRingOverflowDropsWholePressesAndNeverARelease) {
   connectThreeButtonRemote();
   const uint16_t overflowsBefore = fakeble::host().rawOverflows();  // a count since boot
-  // Eight taps (sixteen edges) into a ring with seven usable slots, nobody draining:
-  // a burst while the reader lays out a page. What is dropped must be whole presses;
+  // Ten taps (twenty edges) into a ring with room for eight, nobody draining: a
+  // burst while the reader lays out a page. What is dropped must be whole presses;
   // a press that got in must keep its release, or the button stays down for the app.
-  for (uint8_t i = 1; i <= 8; ++i) {
+  for (uint8_t i = 1; i <= 10; ++i) {
     frame(media_, {i, 0x00, 0x00});
     frame(media_, {0x00, 0x00, 0x00});
   }
@@ -1397,9 +1397,9 @@ TEST_F(RawButtonTest, RawRingOverflowDropsWholePressesAndNeverARelease) {
   int releases = 0;
   for (const RawButtonEvent& e : edges) (e.pressed ? presses : releases)++;
   EXPECT_EQ(presses, releases) << "a press lost its release";
-  EXPECT_EQ(presses, 3);
+  EXPECT_EQ(presses, 8);
   EXPECT_EQ(edges[0].value, 1);
-  EXPECT_EQ(fakeble::host().rawOverflows() - overflowsBefore, 5) << "every dropped press is counted";
+  EXPECT_EQ(fakeble::host().rawOverflows() - overflowsBefore, 2) << "every dropped press is counted";
 
   // A press accepted with the ring nearly full still gets its release when the
   // next button replaces it in a single frame.
@@ -1502,5 +1502,97 @@ TEST_F(RawButtonTest, KeyAddedWhileAnotherIsHeldStillReachesTheApp) {
   bool sawB = false;
   for (const RawButtonEvent& e : drainRaw()) sawB = sawB || (e.pressed && e.keycode == 0x05);
   EXPECT_TRUE(sawB);
+  drainKeys();
+}
+
+// Learning binds the first press it sees. Before a report's rest frame is known the
+// host reads a press against all zeros, so on a remote that rests on a non-zero status
+// byte, and sends no state report when it connects, that first press reads as the
+// status byte. The release is where the rest frame shows up: it says whether the press
+// it ends was that rest frame (wasRest), so a learning screen can drop it.
+TEST_F(RawButtonTest, ZeroRestRemoteFirstPressIsAButton) {
+  connectThreeButtonRemote();
+  frame(media_, {0x00, 0x02, 0x00});  // first frame after connecting
+  frame(media_, {0x00, 0x00, 0x00});
+  const std::vector<RawButtonEvent> edges = drainRaw();
+  ASSERT_EQ(edges.size(), 2u);
+  EXPECT_EQ(edges[0].code(), 0x030102u);
+  EXPECT_FALSE(edges[0].wasRest);
+  EXPECT_FALSE(edges[1].pressed);
+  EXPECT_FALSE(edges[1].wasRest) << "a zero rest frame never makes a button the rest";
+  drainKeys();
+}
+
+TEST_F(RawButtonTest, StatusReportAtConnectIsFlaggedAsTheRest) {
+  serveReportMap(hidtest::kNoInput, sizeof hidtest::kNoInput);
+  const int input = serveInputReport(nullptr, 0);
+  ASSERT_TRUE(beginAndConnect());
+  const uint8_t rest[3] = {0x12, 0x00, 0x00};
+  const uint8_t a[3] = {0x12, 0x04, 0x00};
+  deliver(input, rest, sizeof rest);  // the state report sent on connecting
+  deliver(input, a, sizeof a);
+  deliver(input, rest, sizeof rest);
+  const std::vector<RawButtonEvent> edges = drainRaw();
+  ASSERT_EQ(edges.size(), 4u);
+  EXPECT_TRUE(edges[0].pressed);
+  EXPECT_EQ(edges[0].code(), 0x000012u) << "the state report reads as a press before the rest is known";
+  EXPECT_FALSE(edges[1].pressed);
+  EXPECT_EQ(edges[1].code(), 0x000012u);
+  EXPECT_TRUE(edges[1].wasRest) << "its release must say it was the rest frame";
+  EXPECT_TRUE(edges[2].pressed);
+  EXPECT_EQ(edges[2].code(), 0x000104u);
+  EXPECT_FALSE(edges[3].pressed);
+  EXPECT_FALSE(edges[3].wasRest) << "the real button is not the rest";
+  drainKeys();
+}
+
+TEST_F(RawButtonTest, NonZeroRestWithoutStatusReportFlagsTheFirstPress) {
+  serveReportMap(hidtest::kNoInput, sizeof hidtest::kNoInput);
+  const int input = serveInputReport(nullptr, 0);
+  ASSERT_TRUE(beginAndConnect());
+  const uint8_t rest[3] = {0x12, 0x00, 0x00};
+  const uint8_t a[3] = {0x12, 0x04, 0x00};
+  const uint8_t b[3] = {0x13, 0x00, 0x00};  // a button on the status byte itself
+  deliver(input, a, sizeof a);  // no state report: straight into a press
+  deliver(input, rest, sizeof rest);
+  deliver(input, a, sizeof a);
+  deliver(input, rest, sizeof rest);
+  deliver(input, b, sizeof b);
+  deliver(input, rest, sizeof rest);
+  const std::vector<RawButtonEvent> edges = drainRaw();
+  ASSERT_EQ(edges.size(), 6u);
+  EXPECT_EQ(edges[0].code(), 0x000012u) << "read against zeros, the press is the status byte";
+  EXPECT_TRUE(edges[1].wasRest) << "the release shows the rest: that press was no button";
+  EXPECT_EQ(edges[2].code(), 0x000104u);
+  EXPECT_FALSE(edges[3].wasRest);
+  EXPECT_EQ(edges[4].code(), 0x000013u);
+  EXPECT_FALSE(edges[5].wasRest) << "a button that changes the status byte is still a button";
+  for (const RawButtonEvent& e : edges) {
+    if (e.pressed) EXPECT_FALSE(e.wasRest) << "only a release carries the flag";
+  }
+  drainKeys();
+}
+
+TEST_F(RawButtonTest, RawRingHoldsEightTapsQueuedDuringAPaint) {
+  // Five to eight taps while the reader lays out a page and nobody drains the ring:
+  // every press arrives with its release, in order, so the last button pressed is
+  // the last one the app reads.
+  connectThreeButtonRemote();
+  const uint16_t overflowsBefore = fakeble::host().rawOverflows();
+  for (const uint8_t taps : {5, 6, 7, 8}) {
+    for (uint8_t i = 1; i <= taps; ++i) {
+      frame(media_, {static_cast<uint8_t>(i == taps ? 0x01 : 0x02), 0x00, 0x00});
+      frame(media_, {0x00, 0x00, 0x00});
+    }
+    const std::vector<RawButtonEvent> edges = drainRaw();
+    ASSERT_EQ(edges.size(), 2u * taps) << taps << " taps";
+    for (uint8_t i = 0; i < taps; ++i) {
+      EXPECT_TRUE(edges[2 * i].pressed);
+      EXPECT_FALSE(edges[2 * i + 1].pressed);
+      EXPECT_EQ(edges[2 * i + 1].code(), edges[2 * i].code());
+    }
+    EXPECT_EQ(edges[2 * taps - 2].value, 0x01) << "the last tap, the other direction, got through";
+  }
+  EXPECT_EQ(fakeble::host().rawOverflows(), overflowsBefore) << "no press was dropped";
   drainKeys();
 }
