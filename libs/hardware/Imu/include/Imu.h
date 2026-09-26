@@ -38,6 +38,33 @@ class Imu {
   // error; allow for a settling transient before trusting samples.
   bool wake();
 
+  // QMI8658 tap engine (datasheet section 10). Windows count accelerometer
+  // samples, alpha and gamma are in 1/128, thresholds in 0.001 g^2.
+  struct TapConfig {
+    uint8_t priority;
+    uint8_t peakWindow;
+    uint16_t tapWindow;
+    uint16_t doubleTapWindow;
+    uint8_t alpha;
+    uint8_t gamma;
+    uint16_t peakThreshold;
+    uint16_t quietThreshold;
+  };
+
+  // Loads `config` into the tap engine, turns it on with the accelerometer at
+  // 224 Hz (the gyro keeps begin()'s rate) and leaves both sensors sampling.
+  // Returns false when the IMU is absent or not a QMI8658, on I2C error or
+  // when the chip does not finish a command; the begin() setup is then back.
+  bool enableTap(const TapConfig& config);
+
+  // Turns the tap engine off and puts back the begin() setup, both sensors
+  // sampling. Returns false when absent or on I2C error.
+  bool disableTap();
+
+  // `taps` is 0 when the chip reports no tap, else its count (1 single,
+  // 2 double). Returns false when absent or on I2C error.
+  bool readTap(uint8_t& taps);
+
  private:
   bool begun_ = false;
   // The QMI8658 can legally appear at 0x6A or 0x6B depending on its SA0

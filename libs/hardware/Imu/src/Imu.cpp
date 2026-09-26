@@ -35,6 +35,13 @@ constexpr uint8_t QMI8658_REG_CTRL1 = 0x02;
 constexpr uint8_t QMI8658_REG_CTRL2 = 0x03;
 constexpr uint8_t QMI8658_REG_CTRL3 = 0x04;
 constexpr uint8_t QMI8658_REG_CTRL7 = 0x08;
+constexpr uint8_t QMI8658_REG_CTRL8 = 0x09;
+constexpr uint8_t QMI8658_REG_CTRL9 = 0x0A;
+constexpr uint8_t QMI8658_REG_CAL1_L = 0x0B;  // CAL1_L..CAL4_H, eight in a row
+constexpr uint8_t QMI8658_REG_CAL4_H = 0x12;
+constexpr uint8_t QMI8658_REG_STATUSINT = 0x2D;
+constexpr uint8_t QMI8658_REG_STATUS1 = 0x2F;
+constexpr uint8_t QMI8658_REG_TAP_STATUS = 0x59;
 constexpr uint8_t QMI8658_REG_AX_L = 0x35;
 constexpr uint8_t QMI8658_REG_GX_L = 0x3B;
 constexpr uint8_t QMI8658_ADDR_6A = 0x6A;
@@ -49,6 +56,19 @@ constexpr uint8_t QMI8658_CTRL3_FS_512DPS = 0b101U << 4;
 constexpr uint8_t QMI8658_CTRL3_ODR_28HZ = 0x08;
 constexpr uint8_t QMI8658_CTRL7_ACC_GYRO_ENABLE = 0x03;
 constexpr uint8_t QMI8658_CTRL7_DISABLE_ALL = 0x00;
+// Tap engine: accelerometer ODR code 5 (224.2 Hz with the gyro on, above the
+// 200 Hz the datasheet asks for), CTRL9 done flag read from STATUSINT bit 7
+// (CTRL8 bit 7) and the engine switch (CTRL8 bit 0).
+constexpr uint8_t QMI8658_CTRL2_ODR_224HZ = 0x05;
+constexpr uint8_t QMI8658_CTRL8_HANDSHAKE_STATUSINT = 1U << 7;
+constexpr uint8_t QMI8658_CTRL8_TAP_EN = 1U << 0;
+constexpr uint8_t QMI8658_CTRL8_DEFAULT = 0x00;
+constexpr uint8_t QMI8658_CTRL9_ACK = 0x00;
+constexpr uint8_t QMI8658_CTRL9_CONFIGURE_TAP = 0x0C;
+constexpr uint8_t QMI8658_STATUSINT_CMD_DONE = 1U << 7;
+constexpr uint8_t QMI8658_STATUS1_TAP = 1U << 1;
+constexpr uint8_t QMI8658_TAP_NUM_MASK = 0x03;
+constexpr unsigned long QMI8658_CTRL9_TIMEOUT_MS = 20;
 // LSM6DS3: ODR bits [7:4] = 0000b powers the sensor down; full-scale bits are
 // retained, so restoring the configured CTRL value resumes sampling.
 constexpr uint8_t CTRL_ODR_POWER_DOWN = 0x00;
@@ -112,6 +132,41 @@ bool powerDownQmi8658(uint8_t addr) {
   const bool sensorsDisabled = writeReg(addr, QMI8658_REG_CTRL7, QMI8658_CTRL7_DISABLE_ALL);
   const bool oscillatorDisabled = writeReg(addr, QMI8658_REG_CTRL1, QMI8658_CTRL1_BASE | QMI8658_CTRL1_SENSOR_DISABLE);
   return sensorsDisabled && oscillatorDisabled;
+}
+
+// Waits for STATUSINT's CTRL9 done flag to read `done`, polling each millisecond.
+bool qmi8658WaitCmdDone(uint8_t addr, bool done) {
+  const unsigned long start = millis();
+  for (;;) {
+    uint8_t status = 0;
+    if (!readRegs(addr, QMI8658_REG_STATUSINT, &status, 1)) return false;
+    if (((status & QMI8658_STATUSINT_CMD_DONE) != 0) == done) return true;
+    if (millis() - start >= QMI8658_CTRL9_TIMEOUT_MS) return false;
+    delay(1);
+  }
+}
+
+// The CTRL9 protocol: command, wait for done, acknowledge, wait for the flag to drop.
+bool qmi8658Ctrl9(uint8_t addr, uint8_t command) {
+  return writeReg(addr, QMI8658_REG_CTRL9, command) && qmi8658WaitCmdDone(addr, true) &&
+         writeReg(addr, QMI8658_REG_CTRL9, QMI8658_CTRL9_ACK) && qmi8658WaitCmdDone(addr, false);
+}
+
+// One of the two tap parameter sets (datasheet table 36): six bytes into
+// CAL1_L..CAL3_H, the set number into CAL4_H, then CTRL9 CONFIGURE_TAP.
+bool qmi8658TapSet(uint8_t addr, const uint8_t (&cal)[6], uint8_t set) {
+  for (uint8_t i = 0; i < 6; ++i) {
+    if (!writeReg(addr, QMI8658_REG_CAL1_L + i, cal[i])) return false;
+  }
+  return writeReg(addr, QMI8658_REG_CAL4_H, set) && qmi8658Ctrl9(addr, QMI8658_CTRL9_CONFIGURE_TAP);
+}
+
+// The begin() setup with the tap engine off, both sensors sampling.
+bool qmi8658TapOff(uint8_t addr) {
+  return writeReg(addr, QMI8658_REG_CTRL7, QMI8658_CTRL7_DISABLE_ALL) &&
+         writeReg(addr, QMI8658_REG_CTRL8, QMI8658_CTRL8_DEFAULT) &&
+         writeReg(addr, QMI8658_REG_CTRL2, QMI8658_CTRL2_FS_2G | QMI8658_CTRL2_ODR_28HZ) &&
+         writeReg(addr, QMI8658_REG_CTRL7, QMI8658_CTRL7_ACC_GYRO_ENABLE);
 }
 
 }  // namespace
@@ -234,6 +289,52 @@ bool Imu::wake() {
   return false;
 }
 
+bool Imu::enableTap(const TapConfig& config) {
+  const uint8_t addr = addr_;
+  if (!begun_ || addr == 0 || BoardConfig::ACTIVE.sensors.imuType != BoardConfig::ImuType::Qmi8658) return false;
+  // The parameters go in with both sensors off (datasheet 10.3), the CTRL9
+  // done flag read from STATUSINT since no interrupt line is wired.
+  const uint8_t first[6] = {config.peakWindow,
+                            config.priority,
+                            static_cast<uint8_t>(config.tapWindow & 0xFF),
+                            static_cast<uint8_t>(config.tapWindow >> 8),
+                            static_cast<uint8_t>(config.doubleTapWindow & 0xFF),
+                            static_cast<uint8_t>(config.doubleTapWindow >> 8)};
+  const uint8_t second[6] = {config.alpha,
+                             config.gamma,
+                             static_cast<uint8_t>(config.peakThreshold & 0xFF),
+                             static_cast<uint8_t>(config.peakThreshold >> 8),
+                             static_cast<uint8_t>(config.quietThreshold & 0xFF),
+                             static_cast<uint8_t>(config.quietThreshold >> 8)};
+  const bool enabled = writeReg(addr, QMI8658_REG_CTRL7, QMI8658_CTRL7_DISABLE_ALL) &&
+                       writeReg(addr, QMI8658_REG_CTRL8, QMI8658_CTRL8_HANDSHAKE_STATUSINT) &&
+                       qmi8658TapSet(addr, first, 0x01) && qmi8658TapSet(addr, second, 0x02) &&
+                       writeReg(addr, QMI8658_REG_CTRL2, QMI8658_CTRL2_FS_2G | QMI8658_CTRL2_ODR_224HZ) &&
+                       writeReg(addr, QMI8658_REG_CTRL8, QMI8658_CTRL8_HANDSHAKE_STATUSINT | QMI8658_CTRL8_TAP_EN) &&
+                       writeReg(addr, QMI8658_REG_CTRL7, QMI8658_CTRL7_ACC_GYRO_ENABLE);
+  if (!enabled) qmi8658TapOff(addr);
+  return enabled;
+}
+
+bool Imu::disableTap() {
+  const uint8_t addr = addr_;
+  if (!begun_ || addr == 0 || BoardConfig::ACTIVE.sensors.imuType != BoardConfig::ImuType::Qmi8658) return false;
+  return qmi8658TapOff(addr);
+}
+
+bool Imu::readTap(uint8_t& taps) {
+  taps = 0;
+  const uint8_t addr = addr_;
+  if (!begun_ || addr == 0 || BoardConfig::ACTIVE.sensors.imuType != BoardConfig::ImuType::Qmi8658) return false;
+  uint8_t status = 0;
+  if (!readRegs(addr, QMI8658_REG_STATUS1, &status, 1)) return false;
+  if ((status & QMI8658_STATUS1_TAP) == 0) return true;
+  uint8_t tap = 0;
+  if (!readRegs(addr, QMI8658_REG_TAP_STATUS, &tap, 1)) return false;
+  taps = tap & QMI8658_TAP_NUM_MASK;
+  return true;
+}
+
 }  // namespace freeink
 
 #else  // FREEINK_CAP_IMU - IMU absent.
@@ -243,6 +344,12 @@ bool Imu::begin() { return false; }
 bool Imu::read(Sample&) { return false; }
 bool Imu::sleep() { return false; }
 bool Imu::wake() { return false; }
+bool Imu::enableTap(const TapConfig&) { return false; }
+bool Imu::disableTap() { return false; }
+bool Imu::readTap(uint8_t& taps) {
+  taps = 0;
+  return false;
+}
 }  // namespace freeink
 
 #endif  // FREEINK_CAP_IMU
