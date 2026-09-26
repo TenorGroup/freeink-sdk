@@ -38,32 +38,35 @@ class Imu {
   // error; allow for a settling transient before trusting samples.
   bool wake();
 
-  // QMI8658 tap engine (datasheet section 10). Windows count accelerometer
-  // samples, alpha and gamma are in 1/128, thresholds in 0.001 g^2.
-  struct TapConfig {
-    uint8_t priority;
-    uint8_t peakWindow;
-    uint16_t tapWindow;
-    uint16_t doubleTapWindow;
-    uint8_t alpha;
-    uint8_t gamma;
-    uint16_t peakThreshold;
-    uint16_t quietThreshold;
+  // QMI8658 FIFO (datasheet section 8): both sensors at 224 Hz, since the FIFO
+  // takes two sensors only at one rate, streamed into its 128 frames (571 ms),
+  // the oldest dropped when it is full. A frame holds raw counts, acceleration
+  // at QMI8658_COUNTS_PER_G and rotation at QMI8658_COUNTS_PER_DPS.
+  struct RawFrame {
+    int16_t ax, ay, az;
+    int16_t gx, gy, gz;
   };
+  static constexpr int32_t QMI8658_COUNTS_PER_G = 16384;   // ±2 g
+  static constexpr int32_t QMI8658_COUNTS_PER_DPS = 64;    // ±512 dps
+  static constexpr uint8_t FIFO_CHUNK = 8;                 // Frames per I2C read
 
-  // Loads `config` into the tap engine, turns it on with the accelerometer at
-  // 224 Hz (the gyro keeps begin()'s rate) and leaves both sensors sampling.
-  // Returns false when the IMU is absent or not a QMI8658, on I2C error or
-  // when the chip does not finish a command; the begin() setup is then back.
-  bool enableTap(const TapConfig& config);
+  // Turns the FIFO on as above and leaves both sensors sampling. Returns false
+  // when the IMU is absent or not a QMI8658, on I2C error or when the chip does
+  // not finish a command; the begin() setup is then back.
+  bool enableFifo();
 
-  // Turns the tap engine off and puts back the begin() setup, both sensors
-  // sampling. Returns false when absent or on I2C error.
-  bool disableTap();
+  // Turns the FIFO off and puts back the begin() setup, both sensors sampling.
+  // Returns false when absent or on I2C error.
+  bool disableFifo();
 
-  // `taps` is 0 when the chip reports no tap, else its count (1 single,
-  // 2 double). Returns false when absent or on I2C error.
-  bool readTap(uint8_t& taps);
+  // Reads every frame the FIFO holds, oldest first, FIFO_CHUNK at a time, and
+  // hands each chunk to `sink`; `gapBefore` is set on the first chunk when the
+  // FIFO filled up and dropped frames since the last read. `frames` counts the
+  // frames handed. Returns false when absent, on I2C error, or when the count
+  // is not whole frames (the FIFO is then emptied); either way the FIFO takes
+  // samples again.
+  using FifoSink = void (*)(const RawFrame* frames, uint8_t count, bool gapBefore, void* context);
+  bool readFifo(FifoSink sink, void* context, uint16_t& frames);
 
  private:
   bool begun_ = false;
