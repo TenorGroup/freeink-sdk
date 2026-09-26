@@ -501,6 +501,10 @@ struct BatteryGaugeConfig {
   // multi-bus SoCs (SOC_I2C_NUM > 1); single-bus parts (ESP32-C3) ignore it.
   uint8_t i2cBus = 0;
   GaugeType gaugeType = GaugeType::Bq27220;  // register map / init to use
+  // Capacity of the battery fitted, in mAh, for a BQ27220 that boots with TI's 3000 mAh default
+  // (the gauge holds its configuration in RAM, so every power-on reset brings 3000 back). The
+  // consumer loads it while the gauge still reads that default. 0 = leave the gauge as it is.
+  uint16_t designCapacityMah = 0;
 };
 
 struct InputPins {
@@ -833,6 +837,8 @@ constexpr DisplayOrientation MIRROR_Y = {false, true};   // vertical mirror
 constexpr SdmmcPins NO_SDMMC = {
     PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, 0};
 constexpr BatteryGaugeConfig NO_GAUGE = {PIN_UNASSIGNED, PIN_UNASSIGNED, 0, 0, 0};  // ADC battery
+// X3: BQ27220 fuel gauge (0x55) on SDA20/SCL0, no charger IC, 650 mAh battery.
+constexpr BatteryGaugeConfig XTEINK_X3_GAUGE = {20, 0, 400000, 0x55, 0, 0, GaugeType::Bq27220, 650};
 
 // Shared display SPI default for every Xteink board and controller variant.
 constexpr uint32_t XTEINK_DISPLAY_SPI_HZ = 10000000u;
@@ -910,7 +916,7 @@ constexpr BoardProfile XTEINK_X3 = {
     NO_LEDS,
     NO_FLIP,
     NO_SDMMC,
-    {20, 0, 400000, 0x55, 0},  // BQ27220 fuel gauge (0x55) on SDA20/SCL0; no charger IC
+    XTEINK_X3_GAUGE,
     NO_MIC,
     {20, 0, 400000, 0x68, 0, 0x6B, 0, RtcType::Ds3231, ImuType::Qmi8658}};
 
@@ -942,7 +948,7 @@ constexpr BoardProfile XTEINK_X3_UC8279 = {
     NO_LEDS,
     NO_FLIP,
     NO_SDMMC,
-    {20, 0, 400000, 0x55, 0},
+    XTEINK_X3_GAUGE,
     NO_MIC,
     {20, 0, 400000, 0x68, 0, 0x6B, 0, RtcType::Ds3231, ImuType::Qmi8658}};
 
