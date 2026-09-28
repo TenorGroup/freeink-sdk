@@ -2016,8 +2016,10 @@ inline bool isPaperMono() { return ACTIVE.board == Board::PaperMono; }
 inline bool isEegoA4() { return ACTIVE.board == Board::EegoA4; }
 inline bool isOnePage() { return ACTIVE.board == Board::OnePage; }
 inline bool isWsEpaper397() { return ACTIVE.board == Board::WsEpaper397; }
-inline bool hasTouch() { return ACTIVE.touch.controller != TouchController::None; }
-inline bool hasHomeKey() { return ACTIVE.touch.hasHomeKey; }
+// A build without a touch board compiles no touch backend (FREEINK_CAP_TOUCH), so both answer
+// false at compile time there and every touch-only branch drops out of the image.
+inline bool hasTouch() { return FREEINK_CAP_TOUCH && ACTIVE.touch.controller != TouchController::None; }
+inline bool hasHomeKey() { return FREEINK_CAP_TOUCH && ACTIVE.touch.hasHomeKey; }
 inline bool hasPwmFrontlight() { return ACTIVE.frontlight.gpio != PIN_UNASSIGNED || ACTIVE.frontlight.viaPm1Pwm; }
 inline bool hasI2cFrontlight() { return ACTIVE.i2cFrontlight.controller != I2cFrontlightController::None; }
 inline bool hasColorTemperatureFrontlight() {
