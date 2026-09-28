@@ -467,7 +467,13 @@ class SecureHttpClient {
   }
 
   // Reuse the kept-alive connection when it matches, else (re)connect.
-  bool ensureConnected(const AbortCallback& shouldAbort) {
+  //
+  // shouldAbort is handed to the TLS client so a cancel is honoured during
+  // DNS/TCP/handshake too. Without it the read loops are cancellable but the
+  // connect ahead of them is not, and a caller that shows a cancel affordance
+  // is promising something it cannot deliver for the longest part of a failing
+  // request.
+  bool ensureConnected(const AbortCallback& shouldAbort = nullptr) {
     if (connectionMatches()) return true;
     closeConnection();
     if (_scheme == "https") {
@@ -480,6 +486,8 @@ class SecureHttpClient {
       _secure.setConnectionTimeout(std::min(_timeoutMs, uint32_t{3000}));
       // The callback reference belongs to this synchronous request. Clear the
       // stored wrapper before returning, including failed handshakes.
+      // isAborted() latches _aborted, so aborted() tells a cancelled connect
+      // from a failed one.
       _secure.setAbortCallback([this, &shouldAbort] { return isAborted(shouldAbort); });
       const bool connected = _secure.connect(_host.c_str(), _port);
       _secure.setAbortCallback(nullptr);

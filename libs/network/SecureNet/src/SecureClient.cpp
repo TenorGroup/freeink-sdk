@@ -107,7 +107,7 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, bool tls12O
   _lastFailureError = 0;
   _lastFailureAlert = -1;
   _lastFailureAlertLevel = -1;
-  if (_shouldAbort && _shouldAbort()) return 0;
+  if (abortRequested()) return 0;
   if (!_insecure && (!_rootCA || !*_rootCA)) return 0;
   const uint32_t timeoutMs = getTimeout();
   _transport.setConnectionTimeout(_connectTimeoutMs < timeoutMs ? _connectTimeoutMs : timeoutMs);
@@ -116,7 +116,7 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, bool tls12O
     if (Serial) Serial.printf("[SecureClient] TCP connect failed (%s): %s:%u\n", label, host, port);
     return 0;
   }
-  if (_shouldAbort && _shouldAbort()) {
+  if (abortRequested()) {
     stop();
     return 0;
   }
@@ -197,7 +197,9 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, bool tls12O
   const uint32_t deadline = millis() + timeoutMs;
   int ret;
   for (;;) {
-    if (_shouldAbort && _shouldAbort()) {
+    // Polled before every handshake round-trip, the first one included.
+    if (abortRequested()) {
+      if (Serial) Serial.printf("[SecureClient] handshake aborted by caller (%s)\n", label);
       stop();
       return 0;
     }
@@ -238,11 +240,18 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, bool tls12O
   return 1;
 }
 
+bool SecureClient::abortRequested() {
+  if (!_shouldAbort || !_shouldAbort()) return false;
+  _aborted = true;
+  return true;
+}
+
 int SecureClient::connect(const char* host, uint16_t port) {
+  _aborted = false;
   // Negotiate the highest mutually supported version.
   // Retry TLS 1.2 only for allowlisted protocol or transport failures.
   if (connectWithMethod(host, port, false, "auto")) return 1;
-  if (_shouldAbort && _shouldAbort()) return 0;
+  if (_aborted || abortRequested()) return 0;
   if (!isRetryableTls12Fallback(_lastFailureError, _lastFailureAlert, _lastFailureAlertLevel)) return 0;
   if (Serial) Serial.println("[SecureClient] retrying with TLS 1.2-only handshake");
   return connectWithMethod(host, port, true, "tls1.2");

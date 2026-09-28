@@ -61,6 +61,10 @@ class DisplayTarget final : public DrawTarget {
   // the app assigns; they index these slots. All default to the bundled font.
   static constexpr FontId FONT_SLOTS = 8;
 
+  Rect clipRect() const override { return clip_; }
+  bool setClipRect(Rect rect) override { clip_ = rect; return true; }
+
+
   // Panel-native dimensions + explicit logical orientation.
   DisplayTarget(uint8_t* framebuffer, int16_t panelWidth, int16_t panelHeight, int16_t panelWidthBytes,
                 Orientation orientation)
@@ -213,6 +217,16 @@ class DisplayTarget final : public DrawTarget {
                                ? invertedColor(style.color)
                                : style.color;
     const bool ink = inkColor == Color::Black;
+    if (style.align == TextAlign::Center && style.rotation == Rotation::None &&
+        text[0] >= '0' && text[0] <= '9' && text[1] == '\0') {
+      const FontGlyph* glyph = glyphFor(f, static_cast<uint32_t>(text[0]));
+      if (glyph && glyph->width > 0 && glyph->height > 0 && glyph->width <= rect.width && glyph->height <= rect.height) {
+        const int16_t x = static_cast<int16_t>(rect.x + (rect.width - glyph->width) / 2 - glyph->xOffset);
+        const int16_t baseline = static_cast<int16_t>(rect.y + (rect.height - glyph->height) / 2 - glyph->yOffset);
+        drawGlyph(f, *glyph, x, baseline, ink, inkColor);
+        return;
+      }
+    }
     layoutText(*this, rect, text, style, [&](const char* line, const Rect lineRect) {
       drawRun(f, line, lineRect.x, static_cast<int16_t>(lineRect.y + f.ascent), ink, inkColor);
     });
@@ -232,6 +246,7 @@ class DisplayTarget final : public DrawTarget {
   }
 
  private:
+  Rect clip_{0, 0, 32767, 32767};
   uint8_t* fb_;
   int16_t pw_;   // panel-native width (px)
   int16_t ph_;   // panel-native height (px)
@@ -272,7 +287,7 @@ class DisplayTarget final : public DrawTarget {
   }
 
   void plot(const int16_t x, const int16_t y, const Color color) {
-    if (!fb_) return;
+    if (!fb_ || !clip_.contains(x, y)) return;
     if (x < 0 || y < 0 || x >= w_ || y >= h_ || color == Color::Transparent) return;
     // Rotate the logical pixel into panel-native space. Transforms match
     // CrossPoint's GfxRenderer::rotateCoordinates so "up" agrees across stacks.

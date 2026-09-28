@@ -41,7 +41,10 @@ it retains the factory LUT bytes and the C7 activation/power-down sequence.
 SSD1677 absolute mode uses a single activation: the typed base call selects the
 input mode without displaying a B/W intermediate image (`base = Combined`).
 UltraChip modes retain their controller-specific B/W conditioning, so callers
-still prepare the actual B/W image and call the same typed entry point.
+still prepare the actual B/W image and call the same typed entry point. The
+UC8279 X3 is the exception: its absolute mode also reports `base = Combined`
+and activates once, with no B/W conditioning pass. The UC8253 X3 advertises
+`Direct` only; its `Absolute` query stays unsupported.
 
 ```cpp
 if (display.displayGrayscaleBase(freeink::GrayscaleMode::Absolute)) {

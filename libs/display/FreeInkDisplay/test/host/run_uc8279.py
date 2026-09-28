@@ -56,6 +56,11 @@ public:
     }
   }
   void cmdData(uint8_t c, const uint8_t* p, size_t n) { cmd(c); data(p,n); }
+  void sendPlaneFlippedInverted(uint8_t c, const uint8_t* p, uint16_t h, uint16_t wb) {
+    auto& dst = c == 0x10 ? oldPlane : newPlane;
+    dst.assign(p,p+size_t(h)*wb);
+    for(auto& b : dst) b = ~b;
+  }
   void sendPlaneFlipped(uint8_t c, const uint8_t* p, uint16_t h, uint16_t wb) {
     (c == 0x10 ? oldPlane : newPlane).assign(p,p+size_t(h)*wb);
   }

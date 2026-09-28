@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile the real UC8279 driver with a recording bus and host Arduino shims."""
+"""Compile the real UC8253 X3 driver with a recording bus and host Arduino shims."""
 from pathlib import Path
 import os
 import shutil
@@ -15,6 +15,7 @@ with tempfile.TemporaryDirectory(prefix="uc8253_power-test-") as directory:
     for name in ("Uc8253X3Driver.cpp", "Uc8253X3Driver.h", "PanelDriver.h"):
         shutil.copy2(SOURCE / "driver" / name, root / "driver" / name)
     shutil.copy2(SOURCE / "lut/Uc8253X3Luts.h", root / "lut/Uc8253X3Luts.h")
+    shutil.copy2(SOURCE / "lut/UltraChipDirectGrayLuts.h", root / "lut/UltraChipDirectGrayLuts.h")
     shutil.copy2(SOURCE.parent / "include/GrayscaleCapabilities.h", root / "GrayscaleCapabilities.h")
     panel = root / "driver/PanelDriver.h"
     panel.write_text(panel.read_text().replace("../../include/GrayscaleCapabilities.h", "../GrayscaleCapabilities.h"))
@@ -44,13 +45,13 @@ class EpdBus {
   uint8_t command=0;
 public:
   std::vector<uint8_t> oldPlane, newPlane, lastBank, rawRegisters, cmds, vcomLut;
-  unsigned powerOns=0;
-  void cmd(uint8_t c) { command=c; cmds.push_back(c); if(c == 4) ++powerOns; }
+  unsigned powerOns=0, refreshes=0;
+  void cmd(uint8_t c) { command=c; cmds.push_back(c); if(c == 4) ++powerOns; if(c == 0x12) ++refreshes; }
   void cmdData2(uint8_t c, uint8_t a, uint8_t b) { cmd(c); data(a); data(b); }
   void data(uint8_t) {}
   void data(const uint8_t* p, size_t n) {
     if(command == 0x20 && n == 42) vcomLut.assign(p,p+n);
-    if(n == 49) {
+    if(n == 42 || n == 49) {
       if(command == 0x20) rawRegisters.clear();
       rawRegisters.push_back(command);
       if(command == 0x20) lastBank.assign(p,p+n);
@@ -85,6 +86,7 @@ int main() {
  const auto caps = d.grayscaleCapabilities();
  assert(caps.supported() && caps.stripUploads && !caps.asyncBase && !caps.stagingWhileBusy);
  assert(!d.grayscaleCapabilities(freeink::GrayscaleMode::Absolute).supported());
+ assert(d.grayscaleCapabilities(freeink::GrayscaleMode::Direct).base == freeink::GrayscaleBase::Combined);
  std::vector<uint8_t> fb(792/8*528, 0xAA); d.begin(bus);
  d.display(bus,fb.data(),nullptr,freeink::RefreshMode::Full,false);
  assert(bus.powerOns == 1);
@@ -93,13 +95,27 @@ int main() {
  d.display(bus,fb.data(),nullptr,freeink::RefreshMode::Half,true);
  d.display(bus,fb.data(),nullptr,freeink::RefreshMode::Fast,false);
  assert(bus.powerOns == 2);
- std::cout << "PASS: UC8253 cold power-on, warm Full, and power-off/wake\\n";
- // Drive rails as CrossPoint runs them: a turn after a turnOff POF is a wake and
- // takes the stronger Half bank; a standing screen is never powered down by the
- // idle hook, so no turn ever follows a POF on the Fast bank.
+ // A turn after a turnOff POF is a wake and takes the stronger Half bank.
  using freeink::lut_x3_vcom_fast; using freeink::lut_x3_vcom_half;
  const std::vector<uint8_t> fast(lut_x3_vcom_fast, lut_x3_vcom_fast+42), half(lut_x3_vcom_half, lut_x3_vcom_half+42);
  assert(fast != half && bus.vcomLut == half);
+ for (auto fallback : {freeink::RefreshMode::Half, freeink::RefreshMode::Fast}) {
+   const auto before = bus.refreshes;
+   d.beginGrayscale(bus, fb.data(), freeink::GrayscaleMode::Direct, fallback, false);
+   d.copyGrayscaleLsb(bus, fb.data());
+   d.copyGrayscaleMsb(bus, fb.data());
+   assert(bus.refreshes == before);
+   d.displayGray(bus, fb.data(), false, nullptr, true);
+   assert(bus.refreshes == before + 1);
+   const auto vcom = freeink::uc8253X3DefaultConfig().directGray->vcom;
+   assert(bus.lastBank == std::vector<uint8_t>(vcom, vcom + 42));
+   d.cleanupGrayscaleBuffers(bus, fb.data());
+   d.display(bus,fb.data(),nullptr,freeink::RefreshMode::Full,false);
+   assert(bus.newPlane == fb && bus.oldPlane == fb);
+ }
+ std::cout << "PASS: UC8253 cold power-on, warm Full, and power-off/wake\\n";
+ // Drive rails as CrossPoint runs them: a standing screen is never powered down
+ // by the idle hook, so no turn ever follows a POF on the Fast bank.
  freeink::EpdBus b; freeink::Uc8253X3Driver e; e.begin(b);
  for (int i=0;i<3;++i) e.display(b,fb.data(),nullptr,freeink::RefreshMode::Fast,false);
  b.cmds.clear(); e.controllerIdle(b);
