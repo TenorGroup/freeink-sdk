@@ -594,7 +594,10 @@ void hidRawFrame(const HidReportMap& map, const uint8_t* data, size_t len, uint1
   size_t offset = 0;
   const HidReportLayout* layout = layoutFor(map, map.hasId ? id : 0);
   if (map.hasId) {
-    const HidReportLayout* byByte = layoutFor(map, data[0]);
+    // A characteristic that declared its id keeps it: byte 0 is an id byte only when it
+    // repeats that id ("02 00 00" on report 3 is a button, not report 2 behind its id).
+    const bool declared = referenceId != 0xFFFF && layout != nullptr;
+    const HidReportLayout* byByte = declared && data[0] != id ? nullptr : layoutFor(map, data[0]);
     if (byByte != nullptr && len == static_cast<size_t>((byByte->bits + 7) / 8) + 1) {
       id = data[0];
       offset = 1;

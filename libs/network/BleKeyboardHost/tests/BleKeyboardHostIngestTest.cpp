@@ -1273,6 +1273,35 @@ TEST_F(RawButtonTest, PageButtonKeepsItsKeyEventsAndGainsRawEdges) {
   EXPECT_EQ(edges[1].code(), 0x030002u);
 }
 
+TEST_F(RawButtonTest, KeypageButtonsKeepTheIdTheirCharacteristicDeclares) {
+  serveReportMap(hidtest::kBooxKeypage, sizeof hidtest::kBooxKeypage);
+  serveProtocolMode();
+  const uint8_t ref2[2] = {2, 1};
+  const uint8_t ref1[2] = {1, 1};
+  const uint8_t ref3[2] = {3, 1};
+  serveInputReport(ref2, sizeof ref2);
+  serveInputReport(ref1, sizeof ref1);
+  const int buttons = serveInputReport(ref3, sizeof ref3);
+  ASSERT_TRUE(beginAndConnect());
+
+  // As logged on the device: lower button, then upper button.
+  frame(buttons, {0x01, 0x00, 0x00});
+  frame(buttons, {0x00, 0x00, 0x00});
+  frame(buttons, {0x02, 0x00, 0x00});
+  frame(buttons, {0x00, 0x00, 0x00});
+  drainKeys();
+
+  const std::vector<RawButtonEvent> edges = drainRaw();
+  ASSERT_EQ(edges.size(), 4u);
+  EXPECT_TRUE(edges[0].pressed);
+  EXPECT_EQ(edges[0].code(), 0x030001u);
+  EXPECT_FALSE(edges[1].pressed);
+  EXPECT_TRUE(edges[2].pressed);
+  EXPECT_EQ(edges[2].code(), 0x030002u) << "\"02 00 00\" is report 3, not report 2 with an id byte";
+  EXPECT_FALSE(edges[3].pressed);
+  EXPECT_EQ(edges[3].code(), 0x030002u);
+}
+
 TEST_F(RawButtonTest, PressOnlyFramesAfterSilenceAreNewPresses) {
   // One-byte frames with no release in between, 400 ms apart: every frame is a
   // new press of the same button.
