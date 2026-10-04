@@ -119,6 +119,10 @@ bool waitForWorkerIdle(uint32_t timeoutMs = 500);
 // end() retry to complete.
 void setBlockingStage(BlockingStage stage, bool ignoreCancellation = false);
 bool waitForBlockingStage(BlockingStage stage, uint32_t timeoutMs = 1000);
+// Force the security worker to finish cancellation inside disconnect(), so
+// lifecycle tests cover the worker winning the wakeup race deterministically.
+void waitForSecurityCancellationOnDisconnect();
+bool securityCancellationCompleted();
 void releaseBlockingCall();
 BlockingStage blockingStage();
 

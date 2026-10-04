@@ -96,6 +96,8 @@ struct BlockingControl {
   bool ignoreCancellation = false;
   bool cancelRequested = false;
   bool releaseRequested = false;
+  bool waitForSecurityCancellation = false;
+  bool securityCancellationCompleted = false;
 };
 
 BlockingControl& blockingControl() {
@@ -212,6 +214,8 @@ void setBlockingStage(BlockingStage stage, bool ignoreCancellation) {
     control.active = BlockingStage::None;
     control.ignoreCancellation = ignoreCancellation;
     control.cancelRequested = false;
+    control.waitForSecurityCancellation = false;
+    control.securityCancellationCompleted = false;
     control.releaseRequested = stage == BlockingStage::None;
   }
   control.cv.notify_all();
@@ -223,6 +227,18 @@ bool waitForBlockingStage(BlockingStage stage, uint32_t timeoutMs) {
   return control.cv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [&control, stage] {
     return control.active == stage;
   });
+}
+
+void waitForSecurityCancellationOnDisconnect() {
+  BlockingControl& control = blockingControl();
+  std::lock_guard<std::mutex> guard(control.mutex);
+  control.waitForSecurityCancellation = true;
+}
+
+bool securityCancellationCompleted() {
+  BlockingControl& control = blockingControl();
+  std::lock_guard<std::mutex> guard(control.mutex);
+  return control.securityCancellationCompleted;
 }
 
 void releaseBlockingCall() {
@@ -447,6 +463,12 @@ void requestBlockingCancellation() {
     }
   }
   control.cv.notify_all();
+  std::unique_lock<std::mutex> lock(control.mutex);
+  if (control.waitForSecurityCancellation) {
+    control.cv.wait_for(lock, std::chrono::milliseconds(1000), [&control] {
+      return control.securityCancellationCompleted;
+    });
+  }
 }
 
 bool NimBLERemoteCharacteristic::writeValue(const uint8_t* data, size_t length, bool response) {
@@ -505,11 +527,13 @@ bool NimBLEClient::connect(const NimBLEAddress& address) {
 bool NimBLEClient::disconnect() {
   fakeble::FakeState& s = fakeble::state();
   s.disconnectCalls++;
+  // Publish GAP teardown before waking a blocked security/GATT worker. The
+  // worker can clear connected_ on cancellation and must not erase this link's
+  // pending disconnect state or suppress its callback.
+  const bool wasConnected = connected_.exchange(false);
+  if (wasConnected) disconnecting_ = s.holdDisconnectAtDisconnecting;
   requestBlockingCancellation();
-  const bool wasConnected = connected_;
-  connected_ = false;
   if (wasConnected) {
-    disconnecting_ = s.holdDisconnectAtDisconnecting;
     if (callbacks_ != nullptr) {
       s.disconnectCallbackCalls++;
       callbacks_->onDisconnect(this, 0);
@@ -524,6 +548,12 @@ bool NimBLEClient::secureConnection() {
   if (cancelled) {
     fakeble::state().lastError = BLE_HS_ETIMEOUT;
     connected_ = false;
+    BlockingControl& control = blockingControl();
+    {
+      std::lock_guard<std::mutex> guard(control.mutex);
+      control.securityCancellationCompleted = true;
+    }
+    control.cv.notify_all();
     return false;
   }
   return true;

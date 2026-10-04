@@ -861,11 +861,14 @@ TEST_F(IngestTest, DeadlineRetryWaitsForTheClientToFinishDisconnecting) {
   ASSERT_TRUE(fakeble::beginHost());
   fakeble::setBlockingStage(fakeble::BlockingStage::Security);
   fakeble::setDisconnectAtDisconnecting(true);
+  fakeble::waitForSecurityCancellationOnDisconnect();
   ASSERT_TRUE(fakeble::host().connect(kAddr));
   ASSERT_TRUE(fakeble::waitForBlockingStage(fakeble::BlockingStage::Security));
   fakeble::advanceMillis(15000);
   fakeble::host().poll();
   ASSERT_TRUE(fakeble::waitForWorkerIdle());
+  ASSERT_TRUE(fakeble::securityCancellationCompleted());
+  EXPECT_EQ(fakeble::state().disconnectCallbackCalls, 1u);
   EXPECT_EQ(NimBLEDevice::getDisconnectedClient(), nullptr);
   EXPECT_FALSE(fakeble::host().connect(kAddr));
   ASSERT_TRUE(fakeble::waitForWorkerIdle());

@@ -18,6 +18,7 @@
 // The fake peripheral is the GATT table in fakeble::FakeState (FakeBle.h): tests
 // add characteristics, connect, then fire notifications through it.
 
+#include <atomic>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -144,8 +145,8 @@ class NimBLEClient {
 
  private:
   uint32_t connectTimeoutMs_ = 0;
-  bool connected_ = false;
-  bool disconnecting_ = false;
+  std::atomic<bool> connected_{false};
+  std::atomic<bool> disconnecting_{false};
   NimBLEClientCallbacks* callbacks_ = nullptr;
   friend struct fakeble::FakeState;
   // getDisconnectedClient() models NimBLE's own status check, so the fake device
