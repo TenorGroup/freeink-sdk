@@ -945,6 +945,15 @@ public:
     return lastEvent_;
   }
 
+  // The hit rect last published for an action and value (a row a menu is
+  // anchored to); an empty rect when none.
+  Rect publishedRect(const ActionId action, const int16_t value) const {
+    const Interaction *data = interactions_.publishedData();
+    for (size_t i = 0; i < interactions_.publishedCount(); ++i)
+      if (data[i].action == action && data[i].value == value) return data[i].rect;
+    return Rect{};
+  }
+
   // True while a held touch sits on an interactive element (the routing marks
   // it active and it renders with its StateActive style).
   bool touchActive() const { return interactions_.activeIndex() >= 0; }

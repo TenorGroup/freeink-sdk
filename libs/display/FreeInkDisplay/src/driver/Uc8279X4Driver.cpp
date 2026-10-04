@@ -391,6 +391,10 @@ void Uc8279X4Driver::powerOnIfNeeded(EpdBus& bus, const char* tag) {
 }
 
 bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
+#if defined(FREEINK_EPD_STAGE_TRACE) && FREEINK_EPD_STAGE_TRACE
+  // Where the time before the refresh goes: the base copy, each plane, the trigger.
+  const unsigned long tS0 = millis();
+#endif
   const bool paintDestination = _directGrayOnPanel;
   _directGrayOnPanel = false;
   _grayImagePass = false;
@@ -406,6 +410,9 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
     memcpy(_grayBase, fb, _bufferSize);
     _grayBaseValid = true;
   }
+#if defined(FREEINK_EPD_STAGE_TRACE) && FREEINK_EPD_STAGE_TRACE
+  const unsigned long tS1 = millis();
+#endif
   // Same differential model as the UC8179 sibling: only an EXPLICIT Fast request
   // uses the PTIN/PTOUT DU partial (OLD plane = previous displayed frame). Full
   // AND Half both run the clearing OTP GC waveform - but they seed the OLD plane
@@ -430,6 +437,9 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
   }
 
   streamPlane(bus, CMD_DTM2, fb);
+#if defined(FREEINK_EPD_STAGE_TRACE) && FREEINK_EPD_STAGE_TRACE
+  const unsigned long tS2 = millis();
+#endif
   if (!fast) {
     if (scrub) {
       // Half scrub: OLD = ~target -> every pixel transitions, purging idle charge.
@@ -447,8 +457,15 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
   // Consumed: the white-seed (!fast) or the re-drive above already scrubbed any
   // post-AA gray residue for this frame.
   _redriveAfterGray = false;
+#if defined(FREEINK_EPD_STAGE_TRACE) && FREEINK_EPD_STAGE_TRACE
+  const unsigned long tS3 = millis();
+#endif
 
   startBwRefresh(bus, fast);
+#if defined(FREEINK_EPD_STAGE_TRACE) && FREEINK_EPD_STAGE_TRACE
+  Serial.printf("[%lu] [EPD] X4_START mode=%s copy=%lu dtm2=%lu dtm1=%lu arm=%lu\n", millis(),
+                fast ? "fast" : (scrub ? "half" : "full"), tS1 - tS0, tS2 - tS1, tS3 - tS2, millis() - tS3);
+#endif
   _pendingPartial = fast;
   _pendingTurnOff = turnOff;
   _pendingRefresh = true;
@@ -513,11 +530,17 @@ void Uc8279X4Driver::displayFinish(EpdBus& bus, const uint8_t* fb) {
   _pendingRefresh = false;
 
   bus.waitRefreshComplete(" 8279x4_DRF");
+#if defined(FREEINK_EPD_STAGE_TRACE) && FREEINK_EPD_STAGE_TRACE
+  const unsigned long tF0 = millis();
+#endif
   if (_pendingPartial) bus.cmd(CMD_PARTIAL_OUT);
 
   // Sync the OLD plane (0x10) with the just-displayed frame so the NEXT partial
   // diffs against it (same ghosting management as the UC8179 sibling).
   streamPlane(bus, CMD_DTM1, fb);
+#if defined(FREEINK_EPD_STAGE_TRACE) && FREEINK_EPD_STAGE_TRACE
+  Serial.printf("[%lu] [EPD] X4_FINISH resync=%lu\n", millis(), millis() - tF0);
+#endif
   _oldPlaneValid = true;
   _needFullClear = false;
 

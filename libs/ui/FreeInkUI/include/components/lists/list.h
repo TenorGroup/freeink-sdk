@@ -26,6 +26,9 @@ struct ListItem {
   // Optional section heading drawn immediately before this selectable row.
   // It shares the row's logical index and interaction value.
   const char *sectionHeading = nullptr;
+  // The value in use in a list of choices: its label is bold and, with
+  // ListProps::chosenMark, the mark stands at the row's end.
+  bool chosen = false;
   // Optional trailing navigation cue; legacy aggregate initializers keep it off.
   bool opensNext = false;
 };
@@ -136,6 +139,8 @@ struct ListProps {
   // Draws a thin position indicator along the right edge when the list
   // overflows the rect.
   bool scrollIndicator = true;
+  // Drawn at the end of a chosen row (ListItem::chosen), in its ink.
+  BitmapRef chosenMark{};
   // Draw a non-interactive preview of the next row when there is
   // leftover space after the fully visible rows. Uses normal row layout and
   // pixel clipping; omitted on targets without clipping. Only full rows count
@@ -503,6 +508,8 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   if (item.toggle || item.value)
     result.labelWidth = static_cast<int16_t>(result.labelWidth - result.valueWidth -
                                             props.valueInset - props.textGap);
+  if (item.chosen && props.chosenMark)
+    result.labelWidth = static_cast<int16_t>(result.labelWidth - props.chosenMark.width - props.textGap);
   if (props.balanceWrappedLabelWithValue && props.labelText.maxLines > 1 &&
       (item.toggle || item.value) && item.label &&
       target.measureText(props.labelText.font, item.label, props.labelText).width > result.labelWidth) {
@@ -776,6 +783,17 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     // under the band so it never collides with the value.
     TextStyle labelStyle =
         textStyleWithForeground(props.labelText, style.foreground);
+    if (item.chosen) {
+      labelStyle.bold = true;
+      if (props.chosenMark) {
+        const BitmapRef mark = props.chosenMark;
+        frame.target().bitmap(
+            Rect{static_cast<int16_t>(content.x + content.width - mark.width),
+                 static_cast<int16_t>(content.y + (content.height - mark.height) / 2),
+                 static_cast<int16_t>(mark.width), static_cast<int16_t>(mark.height)},
+            mark, BitmapMode::Contain, style.foreground);
+      }
+    }
     // The band holds every label line the height pre-pass measured (usually
     // one); the subtitle and the row's growth both follow it.
     const int16_t labelBlockH = layout.labelHeight;

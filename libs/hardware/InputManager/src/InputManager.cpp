@@ -219,6 +219,9 @@ uint8_t InputManager::getState() {
 }
 
 InputManager::ButtonHook InputManager::s_buttonHook = nullptr;
+#ifdef TENOR_PRESS_PROBE
+InputManager::TouchProbeHook InputManager::s_touchProbeHook = nullptr;
+#endif
 
 void InputManager::beginAsync(const uint8_t taskPriority, const uint32_t pollMs, const uint8_t queueLen) {
   if (_asyncTask) return;  // already running
@@ -748,11 +751,12 @@ bool InputManager::wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float&
   // A flick: travelled past a distance threshold within a time window. Distance
   // is measured in native px; the dominant axis is left to the app (after
   // mapping to its logical frame).
-  if (lastTouchHeldDurationMs > TOUCH_SWIPE_MAX_MS) return false;
   const int dx = static_cast<int>(touchUpPoint.x) - static_cast<int>(touchDownPoint.x);
   const int dy = static_cast<int>(touchUpPoint.y) - static_cast<int>(touchDownPoint.y);
   const int adx = absInt(dx);
   const int ady = absInt(dy);
+  if (lastTouchHeldDurationMs > TOUCH_SWIPE_MAX_MS && adx < TOUCH_SLOW_DRAG_PX && ady < TOUCH_SLOW_DRAG_PX)
+    return false;
   if (adx < TOUCH_SWIPE_MIN_PX && ady < TOUCH_SWIPE_MIN_PX) return false;
   normalizeTouchPoint(touchDownPoint.x, touchDownPoint.y, nxStart, nyStart);
   normalizeTouchPoint(touchUpPoint.x, touchUpPoint.y, nxEnd, nyEnd);
@@ -2121,7 +2125,15 @@ void InputManager::pollGt911(const unsigned long now) {
     return;
   }
   uint8_t status = 0;
-  if (!gt911ReadReg(0x814E, &status, 1)) {
+#ifdef TENOR_PRESS_PROBE
+  uint16_t probeX = 0, probeY = 0;
+  const int8_t probe = s_touchProbeHook ? s_touchProbeHook(probeX, probeY) : -1;
+  if (probe >= 0) status = static_cast<uint8_t>(0x80 | probe);
+  const bool probeFrame = probe >= 0;
+#else
+  constexpr bool probeFrame = false;
+#endif
+  if (!probeFrame && !gt911ReadReg(0x814E, &status, 1)) {
     // Keep the last complete frame while the single-touch state remains
     // latched. Clearing only this snapshot makes a transient I2C failure look
     // like a multi-contact release to multi-touch consumers, which can split one
@@ -2163,7 +2175,7 @@ void InputManager::pollGt911(const unsigned long now) {
     // from one coherent controller frame.
     const uint8_t storedCount = std::min<uint8_t>(count, MAX_TOUCH_CONTACTS);
     uint8_t points[MAX_TOUCH_CONTACTS * 8] = {};
-    if (gt911ReadReg(0x8150, points, storedCount * 8)) {
+    if (probeFrame || gt911ReadReg(0x8150, points, storedCount * 8)) {
       const auto& t = BoardConfig::ACTIVE.touch;
       touchSnapshot.reportedCount = count;
       touchSnapshot.idsStable = !t.gt911CoordsAtByte0;
@@ -2191,6 +2203,9 @@ void InputManager::pollGt911(const unsigned long now) {
         point.timestamp = now;
       }
 
+#ifdef TENOR_PRESS_PROBE
+      if (probeFrame) touchSnapshot.points[0].point = TouchPoint{true, probeX, probeY, now};
+#endif
       // Gesture state consumes only completed controller frames. A failed
       // status/point read above deliberately does not arrive here, preserving
       // the active sequence through transient I2C failures.

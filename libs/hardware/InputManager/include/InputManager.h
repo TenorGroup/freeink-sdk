@@ -200,6 +200,14 @@ class InputManager {
   using ButtonHook = uint8_t (*)();
   static void setButtonHook(ButtonHook hook) { s_buttonHook = hook; }
 
+#ifdef TENOR_PRESS_PROBE
+  // Measurement builds only: stands in for the GT911 read, so a scripted finger goes through the same
+  // gesture code as a real one. Returns -1 to read the controller, 0 for a frame with no contact, 1 for
+  // one contact at (x, y) in the touch frame (the frame of getTouchPoint, before normalizing).
+  using TouchProbeHook = int8_t (*)(uint16_t& x, uint16_t& y);
+  static void setTouchProbeHook(TouchProbeHook hook) { s_touchProbeHook = hook; }
+#endif
+
   // Boards such as Sticky wire OK/confirm and power/wake to the same GPIO. By
   // default a short click emits CONFIRM and a hold emits POWER. Apps that
   // expose a "short power click sleeps" option can flip short clicks to POWER.
@@ -272,6 +280,9 @@ class InputManager {
 
  private:
   static ButtonHook s_buttonHook;
+#ifdef TENOR_PRESS_PROBE
+  static TouchProbeHook s_touchProbeHook;
+#endif
 
   QueueHandle_t _asyncQueue = nullptr;
   QueueHandle_t _asyncTapQueue = nullptr;
@@ -451,6 +462,9 @@ class InputManager {
   static constexpr int TOUCH_SWIPE_MIN_PX = 60;
   static constexpr int TOUCH_TAP_RELEASE_SLOP_PX = TOUCH_SWIPE_MIN_PX - 1;
   static constexpr unsigned long TOUCH_SWIPE_MAX_MS = 700;
+  // A drag at least this far is a swipe whatever its duration, the same distance as a flick: a thumb
+  // pulling a list slowly moves it by the rows it travelled (the app decides how far).
+  static constexpr int TOUCH_SLOW_DRAG_PX = 60;
   static constexpr unsigned long TOUCH_MULTI_SWIPE_MAX_MS = 2000;
   static constexpr int TOUCH_MULTI_CONTACT_SEPARATION_SLOP_PX = 45;
   static constexpr int64_t TOUCH_CONTACT_ASSIGNMENT_AMBIGUITY_PX_SQ = 64;
