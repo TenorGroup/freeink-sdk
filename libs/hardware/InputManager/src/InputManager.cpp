@@ -300,7 +300,13 @@ bool InputManager::popSwipe(float& nxStart, float& nyStart, float& nxEnd, float&
 
 bool InputManager::popMultiTouchSwipe(uint8_t& contactCount, float& nxStart, float& nyStart, float& nxEnd, float& nyEnd,
                                       unsigned long& durationMs) {
-  if (!_asyncMultiTouchSwipeQueue) return false;
+  if (!_asyncMultiTouchSwipeQueue) {
+    // Synchronous boards sample on the application task. Keep the same
+    // consume-once API without creating another polling task or queue.
+    if (!wasMultiTouchSwipe(contactCount, nxStart, nyStart, nxEnd, nyEnd, durationMs)) return false;
+    multiTouchSwipeEvent = false;
+    return true;
+  }
   QueuedMultiTouchSwipe swipe{};
   if (xQueueReceive(_asyncMultiTouchSwipeQueue, &swipe, 0) != pdTRUE) return false;
   contactCount = swipe.contactCount;

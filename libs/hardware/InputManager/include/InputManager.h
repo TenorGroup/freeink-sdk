@@ -247,6 +247,7 @@ class InputManager {
   // existing popSwipe() consumers never receive multi-touch gestures. The
   // returned count is captured with the queued event and cannot be confused
   // with a later controller frame.
+  // Async mode drains the FIFO; synchronous mode consumes the current event once.
   bool popMultiTouchSwipe(uint8_t& contactCount, float& nxStart, float& nyStart, float& nxEnd, float& nyEnd,
                           unsigned long& durationMs);
 

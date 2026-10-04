@@ -6,3 +6,5 @@ BUILD_DIR="${TMPDIR:-/tmp}/freeink-input-tests"
 mkdir -p "$BUILD_DIR"
 c++ -std=c++17 -Wall -Wextra -Werror test_multitouch_gesture_math.cpp -o "$BUILD_DIR/test_multitouch_gesture_math"
 "$BUILD_DIR/test_multitouch_gesture_math"
+
+python3 test_queue_accessors.py

@@ -1143,6 +1143,12 @@ public:
   // index into a specific generation's array - same for focusedIndex() and
   // the flash state below.
   int16_t activeIndex() const { return active_; }
+  // A global gesture took the contact. Retain focus and published hit geometry.
+  void cancelTouchContact() {
+    active_ = -1;
+    contactHeld_ = false;
+    lastDragX_ = -1;
+  }
 
   // Tap flash: mark one action/value for the frame(s) that follow a
   // dispatched tap, so the tapped element paints a gray acknowledgment (the

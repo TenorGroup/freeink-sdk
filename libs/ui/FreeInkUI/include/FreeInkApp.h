@@ -957,6 +957,11 @@ public:
   // True while a held touch sits on an interactive element (the routing marks
   // it active and it renders with its StateActive style).
   bool touchActive() const { return interactions_.activeIndex() >= 0; }
+  void cancelTouchContact() {
+    interactions_.cancelTouchContact();
+    lastEvent_ = {};
+    clearTapFlash();
+  }
 
   // Drop a pending tap flash. Call from handlers that navigate to a different
   // screen: the tapped element no longer exists there, and an element on the
