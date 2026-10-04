@@ -24,9 +24,10 @@ struct ListItem {
   bool toggle = false;
   bool toggleChecked = false;
   // Optional section heading drawn immediately before this selectable row.
-  // It shares the row's logical index and interaction value. Kept last so
-  // existing aggregate initializers remain source-compatible.
+  // It shares the row's logical index and interaction value.
   const char *sectionHeading = nullptr;
+  // Optional trailing navigation cue; legacy aggregate initializers keep it off.
+  bool opensNext = false;
 };
 
 struct ListNav;
@@ -438,6 +439,48 @@ struct ListRowLayout {
   uint8_t labelLines = 1;
 };
 
+constexpr int16_t LIST_CHEVRON_STROKE = 3; // Matches the menu chrome stroke.
+constexpr int16_t LIST_CHEVRON_DEPTH_NUMERATOR = 8; // Menu chrome arm slope.
+constexpr int16_t LIST_CHEVRON_DEPTH_DENOMINATOR = 11; // Menu chrome arm slope.
+constexpr int16_t LIST_CHEVRON_CAP_NUMERATOR = 3; // Approximate capital ink height.
+constexpr int16_t LIST_CHEVRON_CAP_DENOMINATOR = 5; // Capital height relative to line height.
+
+inline int16_t listChevronSpan(const int16_t lineHeight) {
+  const int16_t span = static_cast<int16_t>(
+      (lineHeight * LIST_CHEVRON_CAP_NUMERATOR / LIST_CHEVRON_CAP_DENOMINATOR -
+       LIST_CHEVRON_STROKE) / 2);
+  return span > 0 ? span : 1;
+}
+
+inline int16_t listChevronWidth(const int16_t span) {
+  return static_cast<int16_t>(
+      (span * LIST_CHEVRON_DEPTH_NUMERATOR + LIST_CHEVRON_DEPTH_DENOMINATOR / 2) /
+          LIST_CHEVRON_DEPTH_DENOMINATOR + LIST_CHEVRON_STROKE);
+}
+
+inline void drawListChevron(DrawTarget &target, const Rect slot,
+                            const int16_t span, const bool rtl, const Paint ink) {
+  const int16_t radius = LIST_CHEVRON_STROKE / 2;
+  const int16_t depth = static_cast<int16_t>(slot.width - LIST_CHEVRON_STROKE);
+  const int16_t top = static_cast<int16_t>(slot.y + (slot.height - 2 * span - LIST_CHEVRON_STROKE) / 2);
+  for (int16_t offset = -span; offset <= span; ++offset) {
+    const int16_t distance = offset < 0 ? -offset : offset;
+    const int16_t along = static_cast<int16_t>(depth - (distance * depth * 2 + span) / (2 * span));
+    const int16_t centerX = static_cast<int16_t>(slot.x + radius + (rtl ? depth - along : along));
+    const int16_t centerY = static_cast<int16_t>(top + radius + span + offset);
+    // Integer round caps and joins, with the tab icons' half-ink checker.
+    for (int16_t dy = -radius; dy <= radius; ++dy) {
+      for (int16_t dx = -radius; dx <= radius; ++dx) {
+        if (dx * dx + dy * dy > radius * radius) continue;
+        const int16_t pixelX = static_cast<int16_t>(centerX + dx);
+        const int16_t pixelY = static_cast<int16_t>(centerY + dy);
+        if (((pixelX - slot.x + pixelY - top) & 1) == 0)
+          target.fill(Rect{pixelX, pixelY, 1, 1}, ink);
+      }
+    }
+  }
+}
+
 inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *assets,
                                     const int16_t width, const ListProps &props,
                                     const ListItem &item) {
@@ -448,7 +491,9 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   const BitmapRef icon = item.icon ? item.icon : resolveBitmap(assets, item.iconAsset);
   const int16_t iconSize = icon ? (props.iconSize > 0 ? props.iconSize : icon.width) : 0;
   const int16_t contentWidth = static_cast<int16_t>(width - sidePad * 2 -
-                                                   (icon ? iconSize + props.textGap : 0));
+                                                   (icon ? iconSize + props.textGap : 0) -
+                                                   (item.opensNext ? listChevronWidth(listChevronSpan(labelLh)) +
+                                                                         props.textGap : 0));
   result.labelWidth = contentWidth;
   if (item.toggle) {
     result.valueWidth = props.toggleWidth < 18 ? 18 : props.toggleWidth;
@@ -714,6 +759,17 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     }
 
     Rect content = row.inset(Insets{0, sidePad, 0, sidePad});
+    if (item.opensNext) {
+      const int16_t span = listChevronSpan(frame.target().lineHeight(props.labelText.font));
+      const int16_t chevronWidth = listChevronWidth(span);
+      const int16_t chevronX = props.rtl ? content.x
+          : static_cast<int16_t>(content.right() - chevronWidth);
+      drawListChevron(frame.target(), Rect{chevronX, content.y, chevronWidth, content.height},
+                      span, props.rtl, style.foreground);
+      const int16_t reserved = static_cast<int16_t>(chevronWidth + props.textGap);
+      if (props.rtl) content.x = static_cast<int16_t>(content.x + reserved);
+      content.width = static_cast<int16_t>(content.width - reserved);
+    }
 
     // Slot layout (mirrors settingRow): the label owns a "title band" and the
     // icon and value align to it; the subtitle spans the full content width
