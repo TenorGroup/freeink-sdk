@@ -498,7 +498,9 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   const int16_t contentWidth = static_cast<int16_t>(width - sidePad * 2 -
                                                    (icon ? iconSize + props.textGap : 0) -
                                                    (item.opensNext ? listChevronWidth(listChevronSpan(labelLh)) +
-                                                                         props.textGap : 0));
+                                                                         props.textGap : 0) -
+                                                   (item.chosen && props.chosenMark
+                                                        ? props.chosenMark.width + props.textGap : 0));
   result.labelWidth = contentWidth;
   if (item.toggle) {
     result.valueWidth = props.toggleWidth < 18 ? 18 : props.toggleWidth;
@@ -508,8 +510,6 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   if (item.toggle || item.value)
     result.labelWidth = static_cast<int16_t>(result.labelWidth - result.valueWidth -
                                             props.valueInset - props.textGap);
-  if (item.chosen && props.chosenMark)
-    result.labelWidth = static_cast<int16_t>(result.labelWidth - props.chosenMark.width - props.textGap);
   if (props.balanceWrappedLabelWithValue && props.labelText.maxLines > 1 &&
       (item.toggle || item.value) && item.label &&
       target.measureText(props.labelText.font, item.label, props.labelText).width > result.labelWidth) {
@@ -788,10 +788,13 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       if (props.chosenMark) {
         const BitmapRef mark = props.chosenMark;
         frame.target().bitmap(
-            Rect{static_cast<int16_t>(content.x + content.width - mark.width),
+            Rect{props.rtl ? content.x : static_cast<int16_t>(content.right() - mark.width),
                  static_cast<int16_t>(content.y + (content.height - mark.height) / 2),
                  static_cast<int16_t>(mark.width), static_cast<int16_t>(mark.height)},
             mark, BitmapMode::Contain, style.foreground);
+        const int16_t reserved = static_cast<int16_t>(mark.width + props.textGap);
+        if (props.rtl) content.x = static_cast<int16_t>(content.x + reserved);
+        content.width = static_cast<int16_t>(content.width - reserved);
       }
     }
     // The band holds every label line the height pre-pass measured (usually

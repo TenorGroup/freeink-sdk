@@ -1806,6 +1806,59 @@ void testListCanUseFullTitleWidthWithShortValue() {
   CHECK_EQ(fullWidthDraw.ops[2].rect.width, 424);
 }
 
+// A chosen mark owns a trailing slot beside the value and the whole subtitle.
+void testListChosenMarkReservesTrailingSlot() {
+  struct Slots : FakeDrawTarget {
+    Rect label{}, value{}, subtitle{}, mark{};
+    bool bold = false;
+    void text(Rect rect, const char* text, TextStyle style) override {
+      if (std::strcmp(text, "Label") == 0) { label = rect; bold = style.bold; }
+      if (std::strcmp(text, "Value") == 0) value = rect;
+      if (std::strcmp(text, "Subtitle Subtitle Subtitle Subtitle") == 0) subtitle = rect;
+      FakeDrawTarget::text(rect, text, style);
+    }
+    void bitmap(Rect rect, BitmapRef bits, BitmapMode mode, Paint paint, Rotation rotation) override {
+      mark = rect;
+      FakeDrawTarget::bitmap(rect, bits, mode, paint, rotation);
+    }
+  };
+  static const uint8_t bits[72] = {};
+  for (const bool rtl : {false, true}) {
+    for (const bool opensNext : {false, true}) {
+      Slots draw;
+      auto device = makeDevice();
+      InputSnapshot input;
+      InteractionBuffer<4> hits;
+      Frame<4> frame(draw, device, input, hits);
+      ListItem item;
+      item.label = "Label"; item.value = "Value";
+      item.subtitle = "Subtitle Subtitle Subtitle Subtitle";
+      item.chosen = true; item.opensNext = opensNext;
+      ListProps props;
+      props.items = &item; props.count = 1; props.rtl = rtl;
+      props.rowHeight = 64; props.scrollIndicator = false;
+      props.subtitleText.maxLines = 3;
+      props.chosenMark = {bits, 24, 24, BitmapFormat::Mask1};
+      const int16_t chevronSlot = opensNext
+          ? listChevronWidth(listChevronSpan(draw.lineH)) + props.textGap : 0;
+      const int16_t contentWidth = 240 - 16 - chevronSlot - 24 - props.textGap;
+      const ListRowLayout measured = measureListRow(draw, nullptr, 240, props, item);
+      CHECK_EQ(measured.labelWidth, contentWidth - 30 - props.valueInset - props.textGap);
+      CHECK_EQ(measured.subtitleHeight,
+               measureWrappedText(draw, item.subtitle, props.subtitleText, contentWidth).height);
+      list(frame, Rect{0, 0, 240, 100}, props);
+      CHECK(draw.bold);
+      CHECK_EQ(draw.mark.x, rtl ? 8 + chevronSlot : 240 - 8 - chevronSlot - 24);
+      CHECK_EQ(draw.subtitle.width, contentWidth);
+      CHECK_EQ(draw.label.width, measured.labelWidth);
+      for (const Rect text : {draw.label, draw.value, draw.subtitle}) {
+        CHECK(rtl ? draw.mark.right() + props.textGap <= text.x
+                  : text.right() + props.textGap <= draw.mark.x);
+      }
+    }
+  }
+}
+
 // RTL mirrors list()'s row layout: icon and label move to the trailing
 // (right) edge, value/toggle move to the leading (left) edge. Verifies both
 // halves of the swap against the same single-row fixture in one pass.
@@ -5399,6 +5452,7 @@ int main() {
   testListNavScrollsClippedListWithinRowEstimate();
   testListNavFittingListKeepsFullWidthTouchRects();
   testListCanUseFullTitleWidthWithShortValue();
+  testListChosenMarkReservesTrailingSlot();
   testListRtlMirrorsIconAndValueSides();
   testListRtlMirrorsToggleSide();
   testButtonRegistersExpandedHit();
