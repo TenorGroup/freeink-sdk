@@ -328,13 +328,15 @@ struct ListNav {
 
   // Scroll the viewport by deltaRows, clamped to the valid range; the
   // selection stays put. Returns true when the viewport actually moved.
-  // The clamp uses the measured page size when it is smaller than the
-  // fixed-height estimate: with variable-height rows the true last page
-  // holds fewer rows, and clamping to count - visibleRows would make the
-  // tail rows unreachable (and fight onListRendered's follow correction).
+  // The clamp uses the measured page size whenever it describes this list:
+  // with variable-height rows the true last page holds fewer rows than the
+  // estimate (clamping to count - visibleRows would leave the tail
+  // unreachable), and with rows shorter than the estimate it holds more
+  // (clamping to the estimate scrolls the last row up into a blank band).
+  // A shorter last page is re-measured where it lands, so the next scroll
+  // still reaches every row.
   bool scrollBy(const int deltaRows, const int count) {
-    const int pageSize =
-        trusts(count) && drawnRows < visibleRows ? drawnRows : visibleRows;
+    const int pageSize = trusts(count) ? drawnRows : visibleRows;
     int maxTop = count - pageSize;
     if (maxTop < 0)
       maxTop = 0;
