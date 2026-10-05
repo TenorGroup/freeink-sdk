@@ -46,6 +46,9 @@ class GfxRendererTarget final : public DrawTarget {
     for (size_t i = 0; i < FONT_SLOTS; ++i) fonts[i] = 0;
   }
 
+  void setPaintingEnabled(bool enabled) { paintEnabled_ = enabled; }
+  bool paintingEnabled() const { return paintEnabled_; }
+
   Rect clipRect() const override { return clip_; }
   bool setClipRect(Rect rect) override {
     if (!trySetClip(renderer, rect, 0)) return false;
@@ -101,6 +104,7 @@ class GfxRendererTarget final : public DrawTarget {
 
   void fill(const Rect rect, const Paint paint, const uint8_t radius = 0,
             const uint8_t corners = CornersAll) override {
+    if (!paintEnabled_) return;
     if (rect.empty()) return;
     switch (paint.kind) {
       case PaintKind::Solid:
@@ -132,6 +136,7 @@ class GfxRendererTarget final : public DrawTarget {
 
   void stroke(const Rect rect, const Paint paint, const uint8_t width, const uint8_t radius = 0,
               const uint8_t corners = CornersAll) override {
+    if (!paintEnabled_) return;
     if (rect.empty() || width == 0 || paint.kind == PaintKind::None) return;
     if (paint.kind == PaintKind::Dither && radius == 0) {
       // Square dithered border as four edge bands; drawRect() is 1-bit only.
@@ -159,11 +164,13 @@ class GfxRendererTarget final : public DrawTarget {
   }
 
   void line(const Point from, const Point to, const uint8_t width, const Paint paint) override {
+    if (!paintEnabled_) return;
     if (paint.kind == PaintKind::None) return;
     renderer.drawLine(from.x, from.y, to.x, to.y, width, paint.color != Color::White);
   }
 
   void triangle(const Point a, const Point b, const Point c, const Paint paint) override {
+    if (!paintEnabled_) return;
     if (paint.kind == PaintKind::None) return;
     const int xs[3] = {a.x, b.x, c.x};
     const int ys[3] = {a.y, b.y, c.y};
@@ -202,6 +209,7 @@ class GfxRendererTarget final : public DrawTarget {
   }
 
   void text(const Rect rect, const char* text, const TextStyle style) override {
+    if (!paintEnabled_) return;
     if (!text || rect.empty()) return;
     const int fontId = gfxFont(style.font);
     const EpdFontFamily::Style epdStyle = fontStyle(style);
@@ -304,6 +312,7 @@ class GfxRendererTarget final : public DrawTarget {
   void bitmap(const Rect rect, const BitmapRef bitmap, const BitmapMode mode,
               const Paint foreground = Paint::solid(Color::Black),
               const Rotation rotation = Rotation::None) override {
+    if (!paintEnabled_) return;
     if (!bitmap || rect.empty()) return;
 
     // BW1 (set bit = ink) and Mask1 (Icon convention: bit 0 = ink), both
@@ -325,6 +334,7 @@ class GfxRendererTarget final : public DrawTarget {
   Rect clip_{0, 0, 32767, 32767};
   const GfxRenderer& renderer;
   bool hasTouch_ = false;
+  bool paintEnabled_ = true;
   int fonts[FONT_SLOTS];
 
   int gfxFont(const FontId slot) const {
