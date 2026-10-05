@@ -157,6 +157,18 @@ void xTaskNotifyGive(TaskHandle_t task) {
     target->notified = true;
   }
   target->cv.notify_all();
+  // NimBLE blocks the caller of every client wait on this same task notification
+  // (NimBLEUtils::taskWait -> xTaskNotifyWait), and any notify ends that wait as if
+  // the stack had answered. Only the worker enters a blocking stage, so a notify
+  // that lands while one is active releases it as a success, like the real stack.
+  BlockingControl& control = blockingControl();
+  {
+    std::lock_guard<std::mutex> guard(control.mutex);
+    if (target != g_task || control.active == fakeble::BlockingStage::None) return;
+    fakeble::state().notifiesDuringStackWait++;
+    control.releaseRequested = true;
+  }
+  control.cv.notify_all();
 }
 
 uint32_t ulTaskNotifyTake(BaseType_t clearOnExit, uint32_t ticksToWait) {
@@ -287,6 +299,7 @@ void FakeState::reset() {
   initCalls = 0;
   deinitCalls = 0;
   deleteClientCalls = 0;
+  notifiesDuringStackWait = 0;
   cancelConnectCalls = 0;
   disconnectCalls = 0;
   disconnectCallbackCalls = 0;

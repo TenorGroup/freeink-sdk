@@ -659,6 +659,32 @@ TEST_F(IngestTest, EndCancelsDiscoveryWaitBeforeDeletingClient) {
   EXPECT_FALSE(NimBLEDevice::isInitialized());
 }
 
+TEST_F(IngestTest, EndNeverNotifiesWorkerInsideStackWait) {
+  ASSERT_TRUE(fakeble::beginHost());
+  // The stack answers the cancelled discovery only later, as on the device where the
+  // disconnect completes some connection intervals after end() asked for it.
+  fakeble::setBlockingStage(fakeble::BlockingStage::Discovery, /*ignoreCancellation=*/true);
+  ASSERT_TRUE(fakeble::host().connect(kAddr));
+  ASSERT_TRUE(fakeble::waitForBlockingStage(fakeble::BlockingStage::Discovery));
+
+  // A notify here would end NimBLE's wait as a success while its GATT procedure still
+  // points at the worker's stack; end() would then delete that stack under it.
+  EXPECT_FALSE(fakeble::host().end(0));
+  EXPECT_FALSE(fakeble::host().end(50));
+  EXPECT_EQ(fakeble::state().notifiesDuringStackWait, 0u);
+  EXPECT_EQ(fakeble::blockingStage(), fakeble::BlockingStage::Discovery);
+  EXPECT_EQ(fakeble::state().deleteClientCalls, 0u);
+  EXPECT_TRUE(fakeble::host().isStopping());
+
+  // The stack's answer arrives: the worker leaves NimBLE on its own and parks.
+  fakeble::releaseBlockingCall();
+  EXPECT_TRUE(fakeble::host().end(1000));
+  EXPECT_EQ(fakeble::state().notifiesDuringStackWait, 0u);
+  EXPECT_EQ(fakeble::state().deleteClientCalls, 1u);
+  EXPECT_FALSE(fakeble::host().isStopping());
+  EXPECT_FALSE(NimBLEDevice::isInitialized());
+}
+
 TEST_F(IngestTest, EndWaitsForFullyDisconnectedClientAfterDisconnectCallback) {
   serveReportMap(hidtest::kBootKeyboard, sizeof hidtest::kBootKeyboard);
   serveInputReport(nullptr, 0);

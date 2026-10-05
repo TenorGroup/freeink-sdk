@@ -134,8 +134,15 @@ bool callbacksAllowed() {
   return !operationCancelled();
 }
 
-void notifyConnectionWorker() {
-  if (g_connTask != nullptr) xTaskNotifyGive(g_connTask);
+// Wake the worker only while it waits idle in connTaskFn. During connect,
+// security and GATT waits NimBLE blocks the same task on its notification, and
+// any foreign notify ends that wait as a success while the GATT procedure still
+// points at the worker's stack. A busy worker is released by cancelActiveClient().
+void notifyIdleConnectionWorker() {
+  portENTER_CRITICAL(&g_mux);
+  TaskHandle_t task = g_connecting.load(std::memory_order_acquire) ? nullptr : g_connTask;
+  portEXIT_CRITICAL(&g_mux);
+  if (task != nullptr) xTaskNotifyGive(task);
 }
 
 bool workerSafeToDelete() {
@@ -168,6 +175,8 @@ bool waitForWorkerSafe(uint32_t timeoutMs) {
     // Repeat the cancellation while waiting. This closes the small race where the
     // worker passes its stop check just as end() sends the first GAP cancel.
     cancelActiveClient();
+    // A worker that finished its attempt after the first wake went idle unwoken.
+    notifyIdleConnectionWorker();
     const uint32_t remaining = remainingBudget(startMs, timeoutMs);
     if (remaining == 0) break;
     vTaskDelay(pdMS_TO_TICKS(remaining < kTeardownPollMs ? remaining : kTeardownPollMs));
@@ -733,7 +742,7 @@ bool BleKeyboardHost::end(uint32_t timeoutMs) {
   // Both calls are intentional. cancelConnect() wakes GAP connect(), while
   // disconnect() wakes secureConnection()/GATT discovery once a link exists.
   cancelActiveClient();
-  notifyConnectionWorker();
+  notifyIdleConnectionWorker();
 
   if (!waitForWorkerSafe(remainingBudget(startMs, budgetMs))) {
     if (budgetMs != 0) {

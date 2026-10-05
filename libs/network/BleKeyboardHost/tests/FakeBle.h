@@ -60,6 +60,9 @@ struct FakeState {
   size_t disconnectCalls = 0;
   size_t disconnectCallbackCalls = 0;
   size_t connectCalls = 0;
+  // Task notifications that reached the worker inside a NimBLE wait. On the device
+  // each one ends that wait early while the stack still holds the waiter's frame.
+  size_t notifiesDuringStackWait = 0;
   std::vector<std::string> connectAddresses;
   // NimBLE invokes onDisconnect while the client can still report DISCONNECTING.
   // The test driver can hold that state until completeDisconnect() is called.
