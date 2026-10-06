@@ -151,6 +151,9 @@ struct ListProps {
   // towards navigation and interaction.
   bool partialTrailingRow = false;
   int16_t partialTrailingMinHeight = 18;
+  // A glimpse must show at least this share (%) of the next row's real height, or the last row that fits
+  // becomes the glimpse instead (a faded preview reads only near its top). 0 = any room over the minimum.
+  uint8_t partialTrailingMinPercent = 0;
   // Additional marker drawn on the selected row (the v1 theme Underline and
   // Triangle selection styles).
   SelectionMarker selectionMarker = SelectionMarker::None;
@@ -643,6 +646,27 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
   const int16_t headerH = props.headerRowHeight > 0
                               ? props.headerRowHeight
                               : static_cast<int16_t>(headerLh + 4);
+  // The row at index i, from the provider or the caller's window (null outside the window), and the height
+  // it takes with its section block, for the look-ahead rule below.
+  ListItem probe;
+  const auto rowAt = [&](const uint16_t i) -> const ListItem * {
+    if (props.rowProvider) {
+      probe = ListItem{};
+      props.rowProvider(props.rowProviderCtx, i, probe);
+      return &probe;
+    }
+    if (i < props.itemsWindowFirst ||
+        (props.itemsWindowCount > 0 && i - props.itemsWindowFirst >= props.itemsWindowCount))
+      return nullptr;
+    return &props.items[i - props.itemsWindowFirst];
+  };
+  const auto heightOf = [&](const ListItem &item) -> int32_t {
+    if (item.isHeader)
+      return props.sectionGap + headerH;
+    const bool heading = item.sectionHeading != nullptr && item.sectionHeading[0] != '\0';
+    return measureListRow(frame.target(), frame.assets(), rowArea.width, props, item).height +
+           (heading ? props.sectionGap + headerH + rowGap : 0);
+  };
   int16_t cursorY = rowArea.y;
   uint16_t consumedIndexes = 0; // item AND header indexes laid out from top
   bool selectedDrawn = false;
@@ -690,7 +714,18 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     const int16_t sectionPad = hasSectionHeading && i != top ? props.sectionGap : 0;
     const int16_t sectionH =
         hasSectionHeading ? static_cast<int16_t>(sectionPad + headerH + rowGap) : 0;
-    const bool partial = cursorY + sectionH + itemH > rowArea.bottom();
+    bool partial = cursorY + sectionH + itemH > rowArea.bottom();
+    if (!partial && props.partialTrailingRow && props.partialTrailingMinPercent > 0 && i > top &&
+        i + 1 < props.count) {
+      // The next row's real height decides: too little of it would show, so this row is the glimpse.
+      const int32_t room = rowArea.bottom() - (cursorY + sectionH + itemH + rowGap);
+      if (room < 2 * itemH) {
+        const ListItem *next = rowAt(static_cast<uint16_t>(i + 1));
+        const int32_t nextH = next ? heightOf(*next) : 0;
+        if (room < nextH && room * 100 < nextH * props.partialTrailingMinPercent)
+          partial = true;
+      }
+    }
     const Rect previousClip = frame.target().clipRect();
     if (partial) {
       // Clip the entire next section block, including its heading. Requiring
