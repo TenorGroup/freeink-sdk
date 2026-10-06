@@ -510,16 +510,19 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   if (item.toggle || item.value)
     result.labelWidth = static_cast<int16_t>(result.labelWidth - result.valueWidth -
                                             props.valueInset - props.textGap);
-  if (props.balanceWrappedLabelWithValue && props.labelText.maxLines > 1 &&
+  // A chosen label is drawn bold (list()), so it is measured bold.
+  TextStyle labelText = props.labelText;
+  if (item.chosen) labelText.bold = true;
+  if (props.balanceWrappedLabelWithValue && labelText.maxLines > 1 &&
       (item.toggle || item.value) && item.label &&
-      target.measureText(props.labelText.font, item.label, props.labelText).width > result.labelWidth) {
+      target.measureText(labelText.font, item.label, labelText).width > result.labelWidth) {
     const int16_t cap = static_cast<int16_t>(contentWidth * 3 / 5);
     if (result.labelWidth > cap) result.labelWidth = cap;
   }
   if (result.labelWidth < 0) result.labelWidth = 0;
-  if (item.label && props.labelText.maxLines > 1 && labelLh > 0 && result.labelWidth > 0) {
+  if (item.label && labelText.maxLines > 1 && labelLh > 0 && result.labelWidth > 0) {
     const int16_t lines = static_cast<int16_t>(measureWrappedText(
-        target, item.label, props.labelText, result.labelWidth).height / labelLh);
+        target, item.label, labelText, result.labelWidth).height / labelLh);
     if (lines > 1) result.labelLines = static_cast<uint8_t>(lines);
   }
   const int16_t subLh = item.subtitle ? target.lineHeight(props.subtitleText.font) : 0;
