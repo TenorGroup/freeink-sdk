@@ -1378,11 +1378,33 @@ void testListExactFitAndPreviewGeometry() {
   ListItem item;
   item.label = "12345678901234567890123456789012345678901";
   item.value = "x";
-  // The balanced cap is 110px; without it the 168px slot would use two lines.
+  // The label goes first: the 168px beside the value hold it in two lines (the old 3/5 cap, 110px, made three).
   const ListRowLayout measured = measureListRow(draw, nullptr, 200, props, item);
-  CHECK_EQ(measured.labelWidth, 110);
-  CHECK_EQ(measured.labelLines, 3);
-  CHECK_EQ(measured.height, 44);
+  CHECK_EQ(measured.labelWidth, 168);
+  CHECK_EQ(measured.labelLines, 2);
+  CHECK_EQ(measured.height, 32);
+}
+
+// A long label beside a long value: both stay whole, the value on up to 2 lines, the label wider than the value.
+// The old cap left the label 3 lines in a 2-line row, cut with an ellipsis.
+void testListRowKeepsLongLabelAndValueWhole() {
+  ListPreviewDrawTarget draw;
+  ListProps props;
+  props.rowHeight = 20;
+  props.rowPaddingY = 4;
+  props.labelText.maxLines = 2;
+  ListItem item;
+  item.label = "Quick press the power button while reading to";
+  item.value = "Refresh the whole screen now";
+  const ListRowLayout measured = measureListRow(draw, nullptr, 300, props, item);
+  TextStyle all = props.labelText;
+  all.maxLines = 8;
+  const int labelLines = measureWrappedText(draw, item.label, all, measured.labelWidth).height / draw.lineHeight(all.font);
+  const int valueLines = measureWrappedText(draw, item.value, all, measured.valueWidth).height / draw.lineHeight(all.font);
+  CHECK(labelLines <= 2);
+  CHECK(valueLines <= 2);
+  CHECK_EQ(static_cast<int>(measured.valueLines), valueLines);
+  CHECK(measured.labelWidth >= measured.valueWidth);
 }
 
 // A preview must be a pixel-for-pixel crop of the full row, in either text
@@ -1791,9 +1813,9 @@ void testListCanUseFullTitleWidthWithShortValue() {
   Frame<4> balancedFrame(balancedDraw, device, input, balancedInteractions);
   list(balancedFrame, Rect{0, 0, 480, 48}, props);
 
-  // Fill, value, then label. The default balanced layout limits a wrapping
-  // title to 60% of the row's text band.
-  CHECK_EQ(balancedDraw.ops[2].rect.width, 278);
+  // Fill, value, then label. The default layout gives a wrapping title all
+  // the width beside a short value: two lines either way, the widest wins.
+  CHECK_EQ(balancedDraw.ops[2].rect.width, 424);
 
   props.balanceWrappedLabelWithValue = false;
   FakeDrawTarget fullWidthDraw;
@@ -5452,6 +5474,7 @@ int main() {
   testListNavScrollsClippedListWithinRowEstimate();
   testListNavFittingListKeepsFullWidthTouchRects();
   testListCanUseFullTitleWidthWithShortValue();
+  testListRowKeepsLongLabelAndValueWhole();
   testListChosenMarkReservesTrailingSlot();
   testListRtlMirrorsIconAndValueSides();
   testListRtlMirrorsToggleSide();

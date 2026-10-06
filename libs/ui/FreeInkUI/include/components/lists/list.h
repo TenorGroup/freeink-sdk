@@ -442,6 +442,7 @@ struct ListRowLayout {
   int16_t subtitleHeight = 0;
   int16_t valueWidth = 0;
   uint8_t labelLines = 1;
+  uint8_t valueLines = 1;
 };
 
 constexpr int16_t LIST_CHEVRON_STROKE = 3; // Matches the menu chrome stroke.
@@ -513,8 +514,46 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   if (props.balanceWrappedLabelWithValue && props.labelText.maxLines > 1 &&
       (item.toggle || item.value) && item.label &&
       target.measureText(props.labelText.font, item.label, props.labelText).width > result.labelWidth) {
-    const int16_t cap = static_cast<int16_t>(contentWidth * 3 / 5);
-    if (result.labelWidth > cap) result.labelWidth = cap;
+    if (item.value && !item.toggle) {
+      // Label and value do not share one line. The label goes first: of the splits from the widest label down to
+      // an even one, the one whose label and value both fit whole (the value on up to 2 lines) in the fewest lines,
+      // then with the fewest value lines, then with the widest label. A row never cuts its words while a split
+      // shows them whole; with none, the label keeps 3/5 as before.
+      const int16_t space = static_cast<int16_t>(contentWidth - props.valueInset - props.textGap);
+      TextStyle labelAll = props.labelText, valueAll = props.valueText;
+      labelAll.maxLines = valueAll.maxLines = 8;
+      const int16_t labelLhAll = labelLh > 0 ? labelLh : 1;
+      const int16_t valueLh = target.lineHeight(props.valueText.font) > 0 ? target.lineHeight(props.valueText.font) : 1;
+      int bestRows = 0, bestValueLines = 0, bestLabel = 0;
+      // The label beside its value on one line, then the label from 4/5 of the row down to half of it.
+      for (int k = -1; k <= 6; ++k) {
+        const int labelW = k < 0 ? space - result.valueWidth : space * (80 - 5 * k) / 100;
+        const int valueW = space - labelW;
+        if (labelW <= 0 || valueW <= 0) continue;
+        const int labelLines = measureWrappedText(target, item.label, labelAll, static_cast<int16_t>(labelW)).height / labelLhAll;
+        const int valueLines = valueW >= result.valueWidth ? 1
+            : measureWrappedText(target, item.value, valueAll, static_cast<int16_t>(valueW)).height / valueLh;
+        if (labelLines > props.labelText.maxLines || valueLines > 2) continue;
+        const int rows = labelLines > valueLines ? labelLines : valueLines;
+        if (!bestRows || rows < bestRows || (rows == bestRows && valueLines < bestValueLines) ||
+            (rows == bestRows && valueLines == bestValueLines && labelW > bestLabel)) {
+          bestRows = rows;
+          bestValueLines = valueLines;
+          bestLabel = labelW;
+        }
+      }
+      if (bestRows) {
+        result.labelWidth = static_cast<int16_t>(bestLabel);
+        if (space - bestLabel < result.valueWidth) result.valueWidth = static_cast<int16_t>(space - bestLabel);
+        result.valueLines = static_cast<uint8_t>(bestValueLines);
+      } else {
+        const int16_t cap = static_cast<int16_t>(contentWidth * 3 / 5);
+        if (result.labelWidth > cap) result.labelWidth = cap;
+      }
+    } else {
+      const int16_t cap = static_cast<int16_t>(contentWidth * 3 / 5);
+      if (result.labelWidth > cap) result.labelWidth = cap;
+    }
   }
   if (result.labelWidth < 0) result.labelWidth = 0;
   if (item.label && props.labelText.maxLines > 1 && labelLh > 0 && result.labelWidth > 0) {
@@ -528,7 +567,7 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
         ? measureWrappedText(target, item.subtitle, props.subtitleText, contentWidth).height : subLh;
   }
   const int16_t valueHeight = item.toggle ? (props.toggleHeight < 12 ? 12 : props.toggleHeight)
-      : (item.value ? target.lineHeight(props.valueText.font) : 0);
+      : (item.value ? static_cast<int16_t>(target.lineHeight(props.valueText.font) * result.valueLines) : 0);
   const int16_t labelHeight = static_cast<int16_t>(labelLh * result.labelLines);
   result.labelHeight = labelHeight > valueHeight ? labelHeight : valueHeight;
   int16_t needed = rowH;
@@ -890,6 +929,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       TextStyle valueStyle =
           textStyleWithForeground(props.valueText, style.foreground);
       valueStyle.align = props.rtl ? TextAlign::Left : TextAlign::Right;
+      valueStyle.maxLines = layout.valueLines;
       const int16_t valueW = layout.valueWidth;
       const int16_t valueX = props.rtl
           ? static_cast<int16_t>(band.x + props.valueInset)
