@@ -1837,6 +1837,44 @@ void testListGlimpseAndFullLastPage() {
   CHECK_EQ(build(200, 75, true, 2, 4).first, 2);  // a page that is not the last keeps its top
 }
 
+void testListGlimpseLookAheadKeepsProviderRows() {
+  // A provider may hand every row the same label buffer. Looking at the next row must not leave the row being
+  // laid out with the next one's name.
+  struct Texts : FakeDrawTarget {
+    std::vector<std::string> drawn;
+    void text(Rect rect, const char* t, TextStyle style) override {
+      drawn.emplace_back(t ? t : "");
+      FakeDrawTarget::text(rect, t, style);
+    }
+  } draw;
+  static std::string shared;
+  DeviceContext device = makeDevice();
+  InputSnapshot input;
+  InteractionBuffer<16> hits;
+  Frame<16> frame(draw, device, input, hits);
+  ListProps props;
+  props.rowProvider = [](void*, const uint16_t i, ListItem& out) {
+    shared = "row" + std::to_string(i);
+    out.label = shared.c_str();
+    out.actionValue = static_cast<int16_t>(i);
+  };
+  props.count = 8;
+  props.action = 3;
+  props.rowHeight = 40;
+  props.rowGap = 0;
+  props.scrollIndicator = false;
+  props.partialTrailingRow = true;
+  props.partialTrailingMinPercent = 75;
+  ListNav nav;
+  nav.reset(0);
+  const Rect body{0, 0, 480, 200};
+  nav.syncToProps(body, props.rowHeight, props.rowGap, props.count, props);
+  list(frame, body, props);
+  CHECK_EQ(nav.drawnRows, 4);
+  for (int i = 0; i < 4; ++i)
+    CHECK(std::count(draw.drawn.begin(), draw.drawn.end(), "row" + std::to_string(i)) == 1);
+}
+
 void testListCanUseFullTitleWidthWithShortValue() {
   ListItem item{};
   item.label = "This filename is deliberately long enough to require a two-line wrapped title";
@@ -5501,6 +5539,7 @@ int main() {
   testScrollClampUsesMeasuredPage();
   testScrollBarHasRoundEndsWithoutFrame();
   testListGlimpseAndFullLastPage();
+  testListGlimpseLookAheadKeepsProviderRows();
   testRect();
   testDisplayTarget();
   testDisplayTargetAlphaFont();

@@ -743,6 +743,11 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       if (room < 2 * itemH) {
         const ListItem *next = rowAt(static_cast<uint16_t>(i + 1));
         const int32_t nextH = next ? heightOf(*next) : 0;
+        // A provider may give every row one label buffer: ask for this row again before drawing it.
+        if (props.rowProvider) {
+          scratch = ListItem{};
+          props.rowProvider(props.rowProviderCtx, i, scratch);
+        }
         if (room < nextH && room * 100 < nextH * props.partialTrailingMinPercent)
           partial = true;
       }
