@@ -1795,6 +1795,108 @@ void testListNavFittingListKeepsFullWidthTouchRects() {
   CHECK(drewNarrowRow);
 }
 
+void testScrollBarHasRoundEndsWithoutFrame() {
+  // Every scroll bar is a pill: a list with no round frame (button boards) still gets round ends, the
+  // track running the rect's full height.
+  FakeDrawTarget draw;
+  drawListScrollIndicator(draw, Rect{0, 0, 480, 200}, 20, 5, 0, 6);
+  CHECK_EQ(draw.opCount, 2u);
+  CHECK_EQ(draw.ops[0].rect.y, 0);
+  CHECK_EQ(draw.ops[0].rect.height, 200);
+  CHECK_EQ(draw.ops[0].radius, 3);  // track
+  CHECK_EQ(draw.ops[1].radius, 3);  // thumb
+}
+
+void testListGlimpseAndFullLastPage() {
+  // Buttons: the row past the last full one must show enough of itself to read (partialTrailingMinPercent),
+  // else the last row that fits becomes that glimpse. The last page starts early enough to fill the rect
+  // (fillLastPage), so its last row sits at the foot.
+  ListItem items[8]{};
+  for (int i = 0; i < 8; ++i) {
+    items[i].label = "row";
+    items[i].actionValue = static_cast<int16_t>(i);
+  }
+  // measured: the rows the page before drew (a glimpse page holds one row less than fits).
+  const auto build = [&](const int16_t height, const uint8_t percent, const bool fill, const int top,
+                         const int measured = 0) {
+    FakeDrawTarget draw;
+    DeviceContext device = makeDevice();
+    InputSnapshot input;
+    InteractionBuffer<16> hits;
+    Frame<16> frame(draw, device, input, hits);
+    ListProps props;
+    props.items = items;
+    props.count = 8;
+    props.action = 3;
+    props.rowHeight = 40;
+    props.rowGap = 0;
+    props.scrollIndicator = false;
+    props.partialTrailingRow = true;
+    props.partialTrailingMinPercent = percent;
+    props.fillLastPage = fill;
+    ListNav nav;
+    nav.reset(0);
+    nav.followOnBuild = false;
+    nav.top = top;
+    if (measured > 0) {
+      nav.drawnRows = measured;
+      nav.drawnCount = 8;
+    }
+    const Rect body{0, 0, 480, height};
+    nav.syncToProps(body, props.rowHeight, props.rowGap, props.count, props);
+    list(frame, body, props);
+    return std::make_pair(nav.top, nav.drawnRows);
+  };
+  CHECK_EQ(build(200, 0, false, 0).second, 5);   // off: 5 rows fill the rect, the next shows nothing
+  CHECK_EQ(build(200, 75, false, 0).second, 4);  // nothing of row 5 shows: row 4 becomes the glimpse
+  CHECK_EQ(build(225, 75, false, 0).second, 4);  // 25 px of a 40 px row is under 3/4
+  CHECK_EQ(build(230, 75, false, 0).second, 5);  // 30 px is 3/4
+  CHECK_EQ(build(200, 75, false, 3).second, 5);  // the last page has no row after it: all full
+  // A page step of 4 (the glimpse page) lands the last page on row 4: 4 rows and a row of room under them.
+  CHECK_EQ(build(200, 75, false, 4, 4).first, 4);
+  CHECK_EQ(build(200, 75, true, 4, 4).first, 3);  // fill: it starts at row 3, 5 rows to the foot
+  CHECK_EQ(build(200, 75, true, 4, 4).second, 5);
+  CHECK_EQ(build(200, 75, true, 2, 4).first, 2);  // a page that is not the last keeps its top
+}
+
+void testListGlimpseLookAheadKeepsProviderRows() {
+  // A provider may hand every row the same label buffer. Looking at the next row must not leave the row being
+  // laid out with the next one's name.
+  struct Texts : FakeDrawTarget {
+    std::vector<std::string> drawn;
+    void text(Rect rect, const char* t, TextStyle style) override {
+      drawn.emplace_back(t ? t : "");
+      FakeDrawTarget::text(rect, t, style);
+    }
+  } draw;
+  static std::string shared;
+  DeviceContext device = makeDevice();
+  InputSnapshot input;
+  InteractionBuffer<16> hits;
+  Frame<16> frame(draw, device, input, hits);
+  ListProps props;
+  props.rowProvider = [](void*, const uint16_t i, ListItem& out) {
+    shared = "row" + std::to_string(i);
+    out.label = shared.c_str();
+    out.actionValue = static_cast<int16_t>(i);
+  };
+  props.count = 8;
+  props.action = 3;
+  props.rowHeight = 40;
+  props.rowGap = 0;
+  props.scrollIndicator = false;
+  props.partialTrailingRow = true;
+  props.partialTrailingMinPercent = 75;
+  ListNav nav;
+  nav.reset(0);
+  const Rect body{0, 0, 480, 200};
+  nav.syncToProps(body, props.rowHeight, props.rowGap, props.count, props);
+  list(frame, body, props);
+  CHECK_EQ(nav.drawnRows, 4);
+  for (int i = 0; i < 4; ++i)
+    CHECK(std::count(draw.drawn.begin(), draw.drawn.end(), "row" + std::to_string(i)) == 1);
+}
+
 void testListCanUseFullTitleWidthWithShortValue() {
   ListItem item{};
   item.label = "This filename is deliberately long enough to require a two-line wrapped title";
@@ -5457,6 +5559,9 @@ void testScrollClampUsesMeasuredPage() {
 
 int main() {
   testScrollClampUsesMeasuredPage();
+  testScrollBarHasRoundEndsWithoutFrame();
+  testListGlimpseAndFullLastPage();
+  testListGlimpseLookAheadKeepsProviderRows();
   testRect();
   testDisplayTarget();
   testDisplayTargetAlphaFont();

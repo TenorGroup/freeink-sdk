@@ -126,8 +126,8 @@ struct ListProps {
   // behind a bezel). -1 = inherit the theme's listScrollInset.
   int16_t scrollIndicatorInset = -1;
   // Corner radius of a round frame whose ends the list's rect shares (a sheet drawn with that radius): the
-  // track stops where the frame's corner curve would cut it, and track and thumb get round ends. 0 = square
-  // ends that run the rect's full height.
+  // track stops where the frame's corner curve would cut it. 0 = the track runs the rect's full height.
+  // Track and thumb always have round ends.
   int16_t scrollIndicatorFrameRadius = 0;
   bool centerSingleLine = false;
   // Mirrors row layout for RTL languages: icon and label move to the
@@ -151,6 +151,12 @@ struct ListProps {
   // towards navigation and interaction.
   bool partialTrailingRow = false;
   int16_t partialTrailingMinHeight = 18;
+  // A glimpse must show at least this share (%) of the next row's real height, or the last row that fits
+  // becomes the glimpse instead (a faded preview reads only near its top). 0 = any room over the minimum.
+  uint8_t partialTrailingMinPercent = 0;
+  // Nav lists: the last page starts early enough that its rows fill the rect to the foot, rather than
+  // leaving the room of the rows a page step skipped.
+  bool fillLastPage = false;
   // Additional marker drawn on the selected row (the v1 theme Underline and
   // Triangle selection styles).
   SelectionMarker selectionMarker = SelectionMarker::None;
@@ -431,7 +437,7 @@ inline void drawListScrollIndicator(DrawTarget &target, const Rect rect,
     while ((root + 1) * (root + 1) <= static_cast<int32_t>(frameRadius) * frameRadius - dx * dx) ++root;
     clear = static_cast<int16_t>(frameRadius - root + 4);
   }
-  const uint8_t cap = frameRadius > 0 ? static_cast<uint8_t>(width / 2) : 0;
+  const uint8_t cap = static_cast<uint8_t>(width / 2);
   const bool left = side == 1;
   const Rect track{left ? static_cast<int16_t>(rect.x + inset)
                         : static_cast<int16_t>(rect.right() - width - inset),
@@ -682,6 +688,45 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
   const int16_t headerH = props.headerRowHeight > 0
                               ? props.headerRowHeight
                               : static_cast<int16_t>(headerLh + 4);
+  // The row at index i, from the provider or the caller's window (null outside the window), and the height
+  // it takes with its section block, for the two look-ahead rules below.
+  ListItem probe;
+  const auto rowAt = [&](const uint16_t i) -> const ListItem * {
+    if (props.rowProvider) {
+      probe = ListItem{};
+      props.rowProvider(props.rowProviderCtx, i, probe);
+      return &probe;
+    }
+    if (i < props.itemsWindowFirst ||
+        (props.itemsWindowCount > 0 && i - props.itemsWindowFirst >= props.itemsWindowCount))
+      return nullptr;
+    return &props.items[i - props.itemsWindowFirst];
+  };
+  const auto heightOf = [&](const ListItem &item) -> int32_t {
+    if (item.isHeader)
+      return props.sectionGap + headerH;
+    const bool heading = item.sectionHeading != nullptr && item.sectionHeading[0] != '\0';
+    return measureListRow(frame.target(), frame.assets(), rowArea.width, props, item).height +
+           (heading ? props.sectionGap + headerH + rowGap : 0);
+  };
+  // The last page fills the rect: when every row from top to the end fits, start at the first row from which
+  // the rest still fits (rows measured from the last one up; a section block counts its full gap).
+  if (props.fillLastPage && props.nav && top > 0 && props.count - top <= visible) {
+    int32_t used = 0;
+    uint16_t start = props.count;
+    while (start > 0) {
+      const ListItem *item = rowAt(static_cast<uint16_t>(start - 1));
+      if (!item)
+        break;
+      const int32_t need = used + (used > 0 ? rowGap : 0) + heightOf(*item);
+      if (need > rowArea.height)
+        break;
+      used = need;
+      --start;
+    }
+    if (start < top)
+      top = start;
+  }
   int16_t cursorY = rowArea.y;
   uint16_t consumedIndexes = 0; // item AND header indexes laid out from top
   bool selectedDrawn = false;
@@ -729,7 +774,23 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     const int16_t sectionPad = hasSectionHeading && i != top ? props.sectionGap : 0;
     const int16_t sectionH =
         hasSectionHeading ? static_cast<int16_t>(sectionPad + headerH + rowGap) : 0;
-    const bool partial = cursorY + sectionH + itemH > rowArea.bottom();
+    bool partial = cursorY + sectionH + itemH > rowArea.bottom();
+    if (!partial && props.partialTrailingRow && props.partialTrailingMinPercent > 0 && i > top &&
+        i + 1 < props.count) {
+      // The next row's real height decides: too little of it would show, so this row is the glimpse.
+      const int32_t room = rowArea.bottom() - (cursorY + sectionH + itemH + rowGap);
+      if (room < 2 * itemH) {
+        const ListItem *next = rowAt(static_cast<uint16_t>(i + 1));
+        const int32_t nextH = next ? heightOf(*next) : 0;
+        // A provider may give every row one label buffer: ask for this row again before drawing it.
+        if (props.rowProvider) {
+          scratch = ListItem{};
+          props.rowProvider(props.rowProviderCtx, i, scratch);
+        }
+        if (room < nextH && room * 100 < nextH * props.partialTrailingMinPercent)
+          partial = true;
+      }
+    }
     const Rect previousClip = frame.target().clipRect();
     if (partial) {
       // Clip the entire next section block, including its heading. Requiring
