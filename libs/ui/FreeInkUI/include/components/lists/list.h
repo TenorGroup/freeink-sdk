@@ -126,8 +126,8 @@ struct ListProps {
   // behind a bezel). -1 = inherit the theme's listScrollInset.
   int16_t scrollIndicatorInset = -1;
   // Corner radius of a round frame whose ends the list's rect shares (a sheet drawn with that radius): the
-  // track stops where the frame's corner curve would cut it, and track and thumb get round ends. 0 = square
-  // ends that run the rect's full height.
+  // track stops where the frame's corner curve would cut it. 0 = the track runs the rect's full height.
+  // Track and thumb always have round ends.
   int16_t scrollIndicatorFrameRadius = 0;
   bool centerSingleLine = false;
   // Mirrors row layout for RTL languages: icon and label move to the
@@ -431,7 +431,7 @@ inline void drawListScrollIndicator(DrawTarget &target, const Rect rect,
     while ((root + 1) * (root + 1) <= static_cast<int32_t>(frameRadius) * frameRadius - dx * dx) ++root;
     clear = static_cast<int16_t>(frameRadius - root + 4);
   }
-  const uint8_t cap = frameRadius > 0 ? static_cast<uint8_t>(width / 2) : 0;
+  const uint8_t cap = static_cast<uint8_t>(width / 2);
   const bool left = side == 1;
   const Rect track{left ? static_cast<int16_t>(rect.x + inset)
                         : static_cast<int16_t>(rect.right() - width - inset),

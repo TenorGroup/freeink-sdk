@@ -1773,6 +1773,18 @@ void testListNavFittingListKeepsFullWidthTouchRects() {
   CHECK(drewNarrowRow);
 }
 
+void testScrollBarHasRoundEndsWithoutFrame() {
+  // Every scroll bar is a pill: a list with no round frame (button boards) still gets round ends, the
+  // track running the rect's full height.
+  FakeDrawTarget draw;
+  drawListScrollIndicator(draw, Rect{0, 0, 480, 200}, 20, 5, 0, 6);
+  CHECK_EQ(draw.opCount, 2u);
+  CHECK_EQ(draw.ops[0].rect.y, 0);
+  CHECK_EQ(draw.ops[0].rect.height, 200);
+  CHECK_EQ(draw.ops[0].radius, 3);  // track
+  CHECK_EQ(draw.ops[1].radius, 3);  // thumb
+}
+
 void testListCanUseFullTitleWidthWithShortValue() {
   ListItem item{};
   item.label = "This filename is deliberately long enough to require a two-line wrapped title";
@@ -5435,6 +5447,7 @@ void testScrollClampUsesMeasuredPage() {
 
 int main() {
   testScrollClampUsesMeasuredPage();
+  testScrollBarHasRoundEndsWithoutFrame();
   testRect();
   testDisplayTarget();
   testDisplayTargetAlphaFont();
