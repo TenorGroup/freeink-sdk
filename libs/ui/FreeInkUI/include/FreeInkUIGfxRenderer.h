@@ -48,6 +48,13 @@ class GfxRendererTarget final : public DrawTarget {
 
   void setPaintingEnabled(bool enabled) { paintEnabled_ = enabled; }
   bool paintingEnabled() const { return paintEnabled_; }
+  // Hands every text run to `sink` instead of drawing it, painting on or off: a skin that writes the words
+  // itself, in its own hand, where the layout put them. nullptr draws text again.
+  using TextSink = void (*)(void* ctx, Rect rect, const char* text, const TextStyle& style);
+  void setTextSink(TextSink sink, void* ctx) {
+    textSink_ = sink;
+    textSinkCtx_ = ctx;
+  }
 
   Rect clipRect() const override { return clip_; }
   bool setClipRect(Rect rect) override {
@@ -209,6 +216,10 @@ class GfxRendererTarget final : public DrawTarget {
   }
 
   void text(const Rect rect, const char* text, const TextStyle style) override {
+    if (textSink_) {
+      if (text && *text && !rect.empty()) textSink_(textSinkCtx_, rect, text, style);
+      return;
+    }
     if (!paintEnabled_) return;
     if (!text || rect.empty()) return;
     const int fontId = gfxFont(style.font);
@@ -335,6 +346,8 @@ class GfxRendererTarget final : public DrawTarget {
   const GfxRenderer& renderer;
   bool hasTouch_ = false;
   bool paintEnabled_ = true;
+  TextSink textSink_ = nullptr;
+  void* textSinkCtx_ = nullptr;
   int fonts[FONT_SLOTS];
 
   int gfxFont(const FontId slot) const {
