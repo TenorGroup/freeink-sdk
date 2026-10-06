@@ -154,6 +154,9 @@ struct ListProps {
   // A glimpse must show at least this share (%) of the next row's real height, or the last row that fits
   // becomes the glimpse instead (a faded preview reads only near its top). 0 = any room over the minimum.
   uint8_t partialTrailingMinPercent = 0;
+  // Nav lists: the last page starts early enough that its rows fill the rect to the foot, rather than
+  // leaving the room of the rows a page step skipped.
+  bool fillLastPage = false;
   // Additional marker drawn on the selected row (the v1 theme Underline and
   // Triangle selection styles).
   SelectionMarker selectionMarker = SelectionMarker::None;
@@ -647,7 +650,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
                               ? props.headerRowHeight
                               : static_cast<int16_t>(headerLh + 4);
   // The row at index i, from the provider or the caller's window (null outside the window), and the height
-  // it takes with its section block, for the look-ahead rule below.
+  // it takes with its section block, for the two look-ahead rules below.
   ListItem probe;
   const auto rowAt = [&](const uint16_t i) -> const ListItem * {
     if (props.rowProvider) {
@@ -667,6 +670,24 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     return measureListRow(frame.target(), frame.assets(), rowArea.width, props, item).height +
            (heading ? props.sectionGap + headerH + rowGap : 0);
   };
+  // The last page fills the rect: when every row from top to the end fits, start at the first row from which
+  // the rest still fits (rows measured from the last one up; a section block counts its full gap).
+  if (props.fillLastPage && props.nav && top > 0 && props.count - top <= visible) {
+    int32_t used = 0;
+    uint16_t start = props.count;
+    while (start > 0) {
+      const ListItem *item = rowAt(static_cast<uint16_t>(start - 1));
+      if (!item)
+        break;
+      const int32_t need = used + (used > 0 ? rowGap : 0) + heightOf(*item);
+      if (need > rowArea.height)
+        break;
+      used = need;
+      --start;
+    }
+    if (start < top)
+      top = start;
+  }
   int16_t cursorY = rowArea.y;
   uint16_t consumedIndexes = 0; // item AND header indexes laid out from top
   bool selectedDrawn = false;

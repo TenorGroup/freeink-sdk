@@ -1785,16 +1785,17 @@ void testScrollBarHasRoundEndsWithoutFrame() {
   CHECK_EQ(draw.ops[1].radius, 3);  // thumb
 }
 
-void testListGlimpseShowsEnoughOfTheNextRow() {
+void testListGlimpseAndFullLastPage() {
   // Buttons: the row past the last full one must show enough of itself to read (partialTrailingMinPercent),
-  // else the last row that fits becomes that glimpse.
+  // else the last row that fits becomes that glimpse. The last page starts early enough to fill the rect
+  // (fillLastPage), so its last row sits at the foot.
   ListItem items[8]{};
   for (int i = 0; i < 8; ++i) {
     items[i].label = "row";
     items[i].actionValue = static_cast<int16_t>(i);
   }
   // measured: the rows the page before drew (a glimpse page holds one row less than fits).
-  const auto build = [&](const int16_t height, const uint8_t percent, const int top,
+  const auto build = [&](const int16_t height, const uint8_t percent, const bool fill, const int top,
                          const int measured = 0) {
     FakeDrawTarget draw;
     DeviceContext device = makeDevice();
@@ -1810,6 +1811,7 @@ void testListGlimpseShowsEnoughOfTheNextRow() {
     props.scrollIndicator = false;
     props.partialTrailingRow = true;
     props.partialTrailingMinPercent = percent;
+    props.fillLastPage = fill;
     ListNav nav;
     nav.reset(0);
     nav.followOnBuild = false;
@@ -1823,11 +1825,16 @@ void testListGlimpseShowsEnoughOfTheNextRow() {
     list(frame, body, props);
     return std::make_pair(nav.top, nav.drawnRows);
   };
-  CHECK_EQ(build(200, 0, 0).second, 5);   // off: 5 rows fill the rect, the next shows nothing
-  CHECK_EQ(build(200, 75, 0).second, 4);  // nothing of row 5 shows: row 4 becomes the glimpse
-  CHECK_EQ(build(225, 75, 0).second, 4);  // 25 px of a 40 px row is under 3/4
-  CHECK_EQ(build(230, 75, 0).second, 5);  // 30 px is 3/4
-  CHECK_EQ(build(200, 75, 3).second, 5);  // the last page has no row after it: all full
+  CHECK_EQ(build(200, 0, false, 0).second, 5);   // off: 5 rows fill the rect, the next shows nothing
+  CHECK_EQ(build(200, 75, false, 0).second, 4);  // nothing of row 5 shows: row 4 becomes the glimpse
+  CHECK_EQ(build(225, 75, false, 0).second, 4);  // 25 px of a 40 px row is under 3/4
+  CHECK_EQ(build(230, 75, false, 0).second, 5);  // 30 px is 3/4
+  CHECK_EQ(build(200, 75, false, 3).second, 5);  // the last page has no row after it: all full
+  // A page step of 4 (the glimpse page) lands the last page on row 4: 4 rows and a row of room under them.
+  CHECK_EQ(build(200, 75, false, 4, 4).first, 4);
+  CHECK_EQ(build(200, 75, true, 4, 4).first, 3);  // fill: it starts at row 3, 5 rows to the foot
+  CHECK_EQ(build(200, 75, true, 4, 4).second, 5);
+  CHECK_EQ(build(200, 75, true, 2, 4).first, 2);  // a page that is not the last keeps its top
 }
 
 void testListCanUseFullTitleWidthWithShortValue() {
@@ -5493,7 +5500,7 @@ void testScrollClampUsesMeasuredPage() {
 int main() {
   testScrollClampUsesMeasuredPage();
   testScrollBarHasRoundEndsWithoutFrame();
-  testListGlimpseShowsEnoughOfTheNextRow();
+  testListGlimpseAndFullLastPage();
   testRect();
   testDisplayTarget();
   testDisplayTargetAlphaFont();
