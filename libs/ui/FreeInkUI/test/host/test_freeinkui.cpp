@@ -5432,7 +5432,31 @@ void testPublicationPage() {
   }
 }
 
+// Touch lists whose rows draw shorter than the fixed-height estimate: the scroll clamp follows the rows a
+// page really holds, so a swipe past the end keeps the last row at the foot (no blank band under it).
+void testScrollClampUsesMeasuredPage() {
+  ListNav nav;
+  nav.reset();
+  nav.visibleRows = 2;  // estimate from a 94 px touch row
+  nav.drawnRows = 5;    // 62 px rows really drawn from the top
+  nav.drawnCount = 6;
+  CHECK(nav.scrollBy(4, 6));
+  CHECK_EQ(nav.top, 1);  // 6 - 5: rows 1..5, the last at the foot
+  CHECK(!nav.scrollBy(4, 6));  // already at the end: nothing moves
+  CHECK_EQ(nav.top, 1);
+  // A shorter last page re-measured from there still reaches every row.
+  nav.drawnRows = 4;
+  CHECK(nav.scrollBy(4, 6));
+  CHECK_EQ(nav.top, 2);
+  // An untrusted measurement (another row set) still pages by the estimate.
+  nav.top = 0;
+  nav.drawnCount = 9;
+  CHECK(nav.scrollBy(4, 6));
+  CHECK_EQ(nav.top, 4);
+}
+
 int main() {
+  testScrollClampUsesMeasuredPage();
   testRect();
   testDisplayTarget();
   testDisplayTargetAlphaFont();
