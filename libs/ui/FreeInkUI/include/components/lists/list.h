@@ -125,6 +125,10 @@ struct ListProps {
   // Inward offset of the scroll track from the band edge (for panels recessed
   // behind a bezel). -1 = inherit the theme's listScrollInset.
   int16_t scrollIndicatorInset = -1;
+  // Corner radius of a round frame whose ends the list's rect shares (a sheet drawn with that radius): the
+  // track stops where the frame's corner curve would cut it, and track and thumb get round ends. 0 = square
+  // ends that run the rect's full height.
+  int16_t scrollIndicatorFrameRadius = 0;
   bool centerSingleLine = false;
   // Mirrors row layout for RTL languages: icon and label move to the
   // trailing (right) edge, value/toggle move to the leading (left) edge --
@@ -413,17 +417,31 @@ inline void drawListScrollIndicator(DrawTarget &target, const Rect rect,
                                     const uint32_t top,
                                     const int16_t width = 3,
                                     const uint8_t side = 0,
-                                    const int16_t inset = 0) {
+                                    const int16_t inset = 0,
+                                    const int16_t frameRadius = 0) {
   if (count <= visible || visible == 0 || width <= 0)
     return;
 
+  // Inside a round frame: the column nearest the frame's side (inset px in) meets the corner curve this
+  // far from the frame's end, plus the frame's 2 px ring and 2 px of air.
+  int16_t clear = 0;
+  if (frameRadius > inset) {
+    const int32_t dx = frameRadius - inset;
+    int32_t root = 0;
+    while ((root + 1) * (root + 1) <= static_cast<int32_t>(frameRadius) * frameRadius - dx * dx) ++root;
+    clear = static_cast<int16_t>(frameRadius - root + 4);
+  }
+  const uint8_t cap = frameRadius > 0 ? static_cast<uint8_t>(width / 2) : 0;
   const bool left = side == 1;
   const Rect track{left ? static_cast<int16_t>(rect.x + inset)
                         : static_cast<int16_t>(rect.right() - width - inset),
-                   rect.y, width, rect.height};
-  target.fill(track, Paint::dither(Color::LightGray));
+                   static_cast<int16_t>(rect.y + clear), width,
+                   static_cast<int16_t>(rect.height - 2 * clear)};
+  if (track.height <= 0)
+    return;
+  target.fill(track, Paint::dither(Color::LightGray), cap);
   int16_t thumbH = static_cast<int16_t>(
-      (static_cast<int32_t>(rect.height) * visible) / count);
+      (static_cast<int32_t>(track.height) * visible) / count);
   if (thumbH < 12)
     thumbH = 12;
   const uint32_t scrollRange = count - visible;
@@ -432,7 +450,7 @@ inline void drawListScrollIndicator(DrawTarget &target, const Rect rect,
       track.y + (static_cast<int32_t>(track.height - thumbH) * clampedTop) /
                     scrollRange);
   target.fill(Rect{track.x, thumbY, track.width, thumbH},
-              Paint::solid(Color::Black));
+              Paint::solid(Color::Black), cap);
 }
 
 // Geometry shared by full rows and previews. Widths are resolved before
@@ -975,7 +993,8 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
   if (props.scrollIndicator && consumedIndexes > 0 &&
       (top > 0 || consumedIndexes < props.count)) {
     drawListScrollIndicator(frame.target(), rect, props.count, consumedIndexes, top,
-                            scrollW, scrollLeft ? 1 : 0, scrollInset);
+                            scrollW, scrollLeft ? 1 : 0, scrollInset,
+                            props.scrollIndicatorFrameRadius);
   }
 
   if (props.nav) {
