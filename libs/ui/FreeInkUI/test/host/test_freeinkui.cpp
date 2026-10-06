@@ -1983,6 +1983,27 @@ void testListChosenMarkReservesTrailingSlot() {
   }
 }
 
+// A chosen row draws its label bold, so its lines are counted at the bold width.
+void testListChosenLabelMeasuresBold() {
+  struct BoldWide : FakeDrawTarget {
+    Size measureText(FontId font, const char* text, TextStyle style) const override {
+      return Size{static_cast<int16_t>((style.bold ? 8 : 6) * static_cast<int16_t>(std::strlen(text))), lineHeight(font)};
+    }
+  };
+  BoldWide draw;
+  for (const bool chosen : {false, true}) {
+    ListItem item;
+    item.label = "aaaa bbbb cccc";  // 84 px regular, 112 px bold, in a 100 px label slot
+    item.chosen = chosen;
+    ListProps props;
+    props.items = &item; props.count = 1;
+    props.labelText.maxLines = 2;
+    const ListRowLayout measured = measureListRow(draw, nullptr, 116, props, item);
+    CHECK_EQ(measured.labelWidth, 100);
+    CHECK_EQ(measured.labelLines, (chosen ? 2 : 1));
+  }
+}
+
 // RTL mirrors list()'s row layout: icon and label move to the trailing
 // (right) edge, value/toggle move to the leading (left) edge. Verifies both
 // halves of the swap against the same single-row fixture in one pass.
@@ -5605,6 +5626,7 @@ int main() {
   testListCanUseFullTitleWidthWithShortValue();
   testListRowKeepsLongLabelAndValueWhole();
   testListChosenMarkReservesTrailingSlot();
+  testListChosenLabelMeasuresBold();
   testListRtlMirrorsIconAndValueSides();
   testListRtlMirrorsToggleSide();
   testButtonRegistersExpandedHit();

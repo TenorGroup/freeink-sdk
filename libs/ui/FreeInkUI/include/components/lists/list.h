@@ -537,16 +537,19 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   if (item.toggle || item.value)
     result.labelWidth = static_cast<int16_t>(result.labelWidth - result.valueWidth -
                                             props.valueInset - props.textGap);
-  if (props.balanceWrappedLabelWithValue && props.labelText.maxLines > 1 &&
+  // A chosen label is drawn bold (list()), so it is measured bold.
+  TextStyle labelText = props.labelText;
+  if (item.chosen) labelText.bold = true;
+  if (props.balanceWrappedLabelWithValue && labelText.maxLines > 1 &&
       (item.toggle || item.value) && item.label &&
-      target.measureText(props.labelText.font, item.label, props.labelText).width > result.labelWidth) {
+      target.measureText(labelText.font, item.label, labelText).width > result.labelWidth) {
     if (item.value && !item.toggle) {
       // Label and value do not share one line. The label goes first: of the splits from the widest label down to
       // an even one, the one whose label and value both fit whole (the value on up to 2 lines) in the fewest lines,
       // then with the fewest value lines, then with the widest label. A row never cuts its words while a split
       // shows them whole; with none, the label keeps 3/5 as before.
       const int16_t space = static_cast<int16_t>(contentWidth - props.valueInset - props.textGap);
-      TextStyle labelAll = props.labelText, valueAll = props.valueText;
+      TextStyle labelAll = labelText, valueAll = props.valueText;
       labelAll.maxLines = valueAll.maxLines = 8;
       const int16_t labelLhAll = labelLh > 0 ? labelLh : 1;
       const int16_t valueLh = target.lineHeight(props.valueText.font) > 0 ? target.lineHeight(props.valueText.font) : 1;
@@ -582,9 +585,9 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
     }
   }
   if (result.labelWidth < 0) result.labelWidth = 0;
-  if (item.label && props.labelText.maxLines > 1 && labelLh > 0 && result.labelWidth > 0) {
+  if (item.label && labelText.maxLines > 1 && labelLh > 0 && result.labelWidth > 0) {
     const int16_t lines = static_cast<int16_t>(measureWrappedText(
-        target, item.label, props.labelText, result.labelWidth).height / labelLh);
+        target, item.label, labelText, result.labelWidth).height / labelLh);
     if (lines > 1) result.labelLines = static_cast<uint8_t>(lines);
   }
   const int16_t subLh = item.subtitle ? target.lineHeight(props.subtitleText.font) : 0;
