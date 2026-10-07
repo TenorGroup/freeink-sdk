@@ -660,6 +660,8 @@ struct ThemeTokens {
   int16_t listRowGap = 0;
   uint8_t listRowRadius = 0;
   int16_t listSidePadding = 8; // text inset within a row
+  // Every value of a list ends on the column before the chevron slot (ListProps::chevronColumn).
+  bool listChevronColumn = false;
   int16_t listInset = 0; // horizontal inset of the rows (scroll indicator stays
                          // at the band edge)
   SelectionStyle listSelectionStyle = SelectionStyle::InvertFill;

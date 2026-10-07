@@ -331,6 +331,8 @@ public:
     // the band's true edge.
     if (themed.rowInset < 0)
       themed.rowInset = theme_.listInset;
+    if (theme_.listChevronColumn)
+      themed.chevronColumn = true;
     return themed;
   }
 

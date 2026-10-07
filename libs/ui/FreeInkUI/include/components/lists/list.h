@@ -100,6 +100,9 @@ struct ListProps {
   // trailing chevron/value keeps air from the row edge on themes with tight
   // row padding.
   int16_t valueInset = 0;
+  // A row with a value keeps the room of the chevron slot whether it opens anything or not, so every value of the
+  // list ends on one column, the one before a chevron (the theme's listChevronColumn sets it).
+  bool chevronColumn = false;
   // When a multi-line label would otherwise overlap its trailing value, keep
   // the wrapped title band visually balanced with that value. Callers with a
   // short, secondary value (such as a file extension) can disable this to
@@ -513,6 +516,11 @@ inline void drawListChevron(DrawTarget &target, const Rect slot,
   }
 }
 
+// The row ends in the chevron slot: its own chevron, or the slot kept for a value (ListProps::chevronColumn).
+inline bool listRowKeepsChevron(const ListProps &props, const ListItem &item) {
+  return item.opensNext || (props.chevronColumn && (item.value || item.toggle));
+}
+
 inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *assets,
                                     const int16_t width, const ListProps &props,
                                     const ListItem &item) {
@@ -524,7 +532,7 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   const int16_t iconSize = icon ? (props.iconSize > 0 ? props.iconSize : icon.width) : 0;
   const int16_t contentWidth = static_cast<int16_t>(width - sidePad * 2 -
                                                    (icon ? iconSize + props.textGap : 0) -
-                                                   (item.opensNext ? listChevronWidth(listChevronSpan(labelLh)) +
+                                                   (listRowKeepsChevron(props, item) ? listChevronWidth(listChevronSpan(labelLh)) +
                                                                          props.textGap : 0) -
                                                    (item.chosen && props.chosenMark
                                                         ? props.chosenMark.width + props.textGap : 0));
@@ -889,13 +897,14 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     }
 
     Rect content = row.inset(Insets{0, sidePad, 0, sidePad});
-    if (item.opensNext) {
+    if (listRowKeepsChevron(props, item)) {
       const int16_t span = listChevronSpan(frame.target().lineHeight(props.labelText.font));
       const int16_t chevronWidth = listChevronWidth(span);
       const int16_t chevronX = props.rtl ? content.x
           : static_cast<int16_t>(content.right() - chevronWidth);
-      drawListChevron(frame.target(), Rect{chevronX, content.y, chevronWidth, content.height},
-                      span, props.rtl, style.foreground);
+      if (item.opensNext)
+        drawListChevron(frame.target(), Rect{chevronX, content.y, chevronWidth, content.height},
+                        span, props.rtl, style.foreground);
       const int16_t reserved = static_cast<int16_t>(chevronWidth + props.textGap);
       if (props.rtl) content.x = static_cast<int16_t>(content.x + reserved);
       content.width = static_cast<int16_t>(content.width - reserved);
