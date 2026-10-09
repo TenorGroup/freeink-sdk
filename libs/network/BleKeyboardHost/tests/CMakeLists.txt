@@ -52,3 +52,21 @@ target_link_libraries(BleKeyboardHostIngestTest PRIVATE
 )
 
 gtest_discover_tests(BleKeyboardHostIngestTest)
+
+add_executable(BleIdleRuntimeTest
+  RuntimeIdleTest.cpp
+  FakeBle.cpp
+  ${BLE_HID_DIR}/src/HidKeymap.cpp
+  ${BLE_HID_DIR}/src/BleKeyboardHost.cpp
+  ${REPO_ROOT}/lib/BlePageTurner/src/Runtime.cpp
+)
+target_compile_definitions(BleIdleRuntimeTest PRIVATE BLETURNER_TESTING)
+target_include_directories(BleIdleRuntimeTest PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+  ${BLE_HID_DIR}/include
+  ${BLE_HID_DIR}/src
+  ${REPO_ROOT}/lib/BlePageTurner/include
+  ${REPO_ROOT}/lib/BlePageTurner/src
+)
+target_link_libraries(BleIdleRuntimeTest PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(BleIdleRuntimeTest)

@@ -163,6 +163,11 @@ class BleKeyboardHost {
   bool connect(const char* addr);
   bool armBondedReconnect(PickPolicy policy, const char* priorityAddr);
   void disconnect();
+  struct ReconnectActivity {
+    bool busy;
+    uint32_t advertisements;
+  };
+  ReconnectActivity reconnectActivity() const;
   bool isConnected() const { return connected_; }
   bool isConnecting() const { return connecting_; }
   const char* connectedName() const { return connName_; }

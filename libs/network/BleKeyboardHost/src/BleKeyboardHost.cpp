@@ -96,6 +96,7 @@ char g_candidateAddr[18] = {};
 uint8_t g_candidateType = 0;
 uint32_t g_candidateFirstMs = 0;
 bool g_candidateReady = false;
+uint32_t g_bondedAdvertisements = 0;
 uint32_t g_connectStartedMs = 0;
 bool g_connectTimedOut = false;
 
@@ -1007,6 +1008,14 @@ bool BleKeyboardHost::connect(const char* addr) {
   return connectInternal(addr, /*explicitRequest=*/true);
 }
 
+BleKeyboardHost::ReconnectActivity BleKeyboardHost::reconnectActivity() const {
+  portENTER_CRITICAL(&g_mux);
+  const ReconnectActivity activity{g_connecting.load(std::memory_order_acquire) || g_candidateAddr[0] != '\0',
+                                   g_bondedAdvertisements};
+  portEXIT_CRITICAL(&g_mux);
+  return activity;
+}
+
 bool BleKeyboardHost::armBondedReconnect(PickPolicy policy, const char* priorityAddr) {
   portENTER_CRITICAL(&g_mux);
   if (!begun_ || stopRequested() || g_connTask == nullptr) {
@@ -1578,6 +1587,7 @@ void BleKeyboardHost::onScanResultIngest(const char* addr, const char* name, int
     if (callbacksAllowed() && !connected_ && !g_connecting.load(std::memory_order_acquire) && connectable) {
       for (uint8_t index = 0; index < bondCount_; ++index) {
         if (strncmp(bonds_[index].addr, addr, sizeof bonds_[index].addr) != 0) continue;
+        ++g_bondedAdvertisements;
         const bool priority = g_pickPolicy == PickPolicy::Priority && strcmp(g_priorityAddr, addr) == 0;
         if (!g_candidateAddr[0] || priority) {
           strncpy(g_candidateAddr, addr, sizeof g_candidateAddr - 1);
@@ -1900,6 +1910,7 @@ namespace freeink {
 bool BleKeyboardHost::begin(const char*) { return false; }
 bool BleKeyboardHost::end(uint32_t) { return true; }
 bool BleKeyboardHost::isStopping() const { return false; }
+BleKeyboardHost::ReconnectActivity BleKeyboardHost::reconnectActivity() const { return {false, 0}; }
 void BleKeyboardHost::poll() {}
 bool BleKeyboardHost::reportStreamFresh() const { return false; }
 void BleKeyboardHost::startScan(uint32_t) {}
