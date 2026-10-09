@@ -34,6 +34,7 @@ gtest_discover_tests(HidKeymapTest)
 
 add_executable(BleKeyboardHostIngestTest
   BleKeyboardHostIngestTest.cpp
+  BondedReconnectTest.cpp
   FakeBle.cpp
   ${BLE_HID_DIR}/src/HidKeymap.cpp
   ${BLE_HID_DIR}/src/BleKeyboardHost.cpp

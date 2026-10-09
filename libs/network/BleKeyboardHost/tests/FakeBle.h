@@ -64,6 +64,7 @@ struct FakeState {
   // each one ends that wait early while the stack still holds the waiter's frame.
   size_t notifiesDuringStackWait = 0;
   std::vector<std::string> connectAddresses;
+  std::vector<uint8_t> connectAddressTypes;
   // NimBLE invokes onDisconnect while the client can still report DISCONNECTING.
   // The test driver can hold that state until completeDisconnect() is called.
   bool holdDisconnectAtDisconnecting = false;

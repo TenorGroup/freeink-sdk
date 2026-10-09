@@ -305,6 +305,7 @@ void FakeState::reset() {
   disconnectCallbackCalls = 0;
   connectCalls = 0;
   connectAddresses.clear();
+  connectAddressTypes.clear();
   holdDisconnectAtDisconnecting = false;
   nvs.clear();
   nvsPutBytesSucceeds = true;
@@ -519,6 +520,7 @@ bool NimBLEClient::connect(const NimBLEAddress& address) {
   fakeble::FakeState& s = fakeble::state();
   s.connectCalls++;
   s.connectAddresses.push_back(address.toString());
+  s.connectAddressTypes.push_back(address.getType());
   bool cancelled = false;
   waitAtBlockingStage(fakeble::BlockingStage::Connect, cancelled);
   if (cancelled) {
