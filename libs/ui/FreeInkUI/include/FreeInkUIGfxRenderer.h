@@ -32,6 +32,8 @@ namespace ui {
 
 class GfxRendererTarget final : public DrawTarget {
  public:
+  using BitmapPainter = bool (*)(const GfxRenderer&, Rect, BitmapRef);
+  static void setBitmapPainter(BitmapPainter painter) { bitmapPainter_ = painter; }
   static constexpr FontId FONT_SMALL = 0;
   static constexpr FontId FONT_BODY = 1;
   static constexpr FontId FONT_TITLE = 2;
@@ -335,6 +337,8 @@ class GfxRendererTarget final : public DrawTarget {
     // panel. Note: GfxRenderer::drawIcon's pre-rotated asset layout is NOT
     // this contract; convert such assets before wrapping them in a BitmapRef.
     if (bitmap.format != BitmapFormat::BW1 && bitmap.format != BitmapFormat::Mask1) return;
+    if (foreground.color == Color::Black && rotation == Rotation::None && bitmapPainter_ &&
+        bitmapPainter_(renderer, rect, bitmap)) return;
     const bool black = foreground.color != Color::White;
     forEachBitmapPixel(
         rect, bitmap, mode, [&](const int16_t px, const int16_t py) { renderer.drawPixel(px, py, black); },
@@ -342,6 +346,7 @@ class GfxRendererTarget final : public DrawTarget {
   }
 
  private:
+  inline static BitmapPainter bitmapPainter_ = nullptr;
   Rect clip_{0, 0, 32767, 32767};
   const GfxRenderer& renderer;
   bool hasTouch_ = false;
