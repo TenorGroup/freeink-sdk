@@ -107,6 +107,8 @@ class SecureHttpClient {
   // seconds of latency plus the ECC/RSA heap spike on PSRAM-less boards.
   // setReuse(false) restores connection-per-request behavior.
   void setReuse(bool reuse) { _reuse = reuse; }
+  void setReuseTlsContext(bool reuse) { _secure.setReuseTlsContext(reuse); }
+  bool hasTlsContext() const { return _secure.hasTlsContext(); }
 
   // Parse the URL and reset per-request state. Returns false on a malformed
   // URL. A changed origin clears Basic credentials; explicit trust settings
@@ -115,6 +117,7 @@ class SecureHttpClient {
     _headers.clear();
     _body.clear();
     _status = 0;
+    _peerClosed = false;
     std::string scheme, host, path;
     uint16_t port = 0;
     if (!parseUrl(url, scheme, host, path, port)) return false;
@@ -363,6 +366,7 @@ class SecureHttpClient {
       // Reuse only a provably clean connection. An aborted/truncated body
       // leaves undrained bytes on the socket, and the next request would parse
       // leftover body data as its status line.
+      if (!_reuse && _bodyComplete) _peerClosed = waitForPeerClose(shouldAbort);
       if (!_reuse || !keepAlive || !_bodyComplete || !reusableFraming) closeConnection();
       return _status;
     }
@@ -373,6 +377,7 @@ class SecureHttpClient {
   int getStatus() const { return _status; }
   int getSize() const { return static_cast<int>(_body.size()); }
   bool responseComplete() const { return _bodyComplete; }
+  bool peerCloseComplete() const { return _peerClosed; }
   bool callbackAborted() const { return _callbackAborted; }
   bool aborted() const { return _aborted; }
   bool hasContentLength() const { return _haveContentLength; }
@@ -506,6 +511,20 @@ class SecureHttpClient {
     if (isAborted(shouldAbort)) {
       closeConnection();
       return false;
+    }
+    return true;
+  }
+
+  bool waitForPeerClose(const AbortCallback& shouldAbort) {
+    const unsigned long deadline = millis() + std::min(_timeoutMs, uint32_t{1000});
+    uint8_t trailing[128];
+    while (_conn && (_connHttps ? _secure.transportConnected() : _conn->connected())) {
+      if (isAborted(shouldAbort) || static_cast<int32_t>(millis() - deadline) >= 0) return false;
+      if (_conn->available()) {
+        if (_conn->read(trailing, sizeof(trailing)) < 0 && !_connHttps) return false;
+      } else {
+        delay(1);
+      }
     }
     return true;
   }
@@ -700,6 +719,7 @@ class SecureHttpClient {
   bool _reportProgress = false;
   bool _haveContentLength = false;
   bool _bodyComplete = false;
+  bool _peerClosed = false;
   bool _callbackAborted = false;
   bool _aborted = false;
   uint32_t _timeoutMs = 15000;

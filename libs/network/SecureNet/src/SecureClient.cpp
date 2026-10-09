@@ -22,13 +22,39 @@ bool SecureClient::tls13Available() {
 #endif
 }
 
-SecureClient::~SecureClient() { stop(); }
+SecureClient::~SecureClient() {
+  stop();
+  releaseContext();
+}
 
 void SecureClient::setCACert(const char* rootCA) {
+  if (_rootCA != rootCA || _insecure) {
+    stop();
+    releaseContext();
+  }
   _rootCA = rootCA;
   _insecure = false;
 }
-void SecureClient::setInsecure() { _insecure = true; }
+void SecureClient::setInsecure() {
+  if (!_insecure) {
+    stop();
+    releaseContext();
+  }
+  _insecure = true;
+}
+void SecureClient::setReuseTlsContext(bool reuse) {
+  if (!reuse) {
+    stop();
+    releaseContext();
+  }
+  _reuseTlsContext = reuse;
+}
+void SecureClient::releaseContext() {
+#if defined(FREEINK_NET_WOLFSSL)
+  if (_ctx) wolfSSL_CTX_free(static_cast<WOLFSSL_CTX*>(_ctx));
+#endif
+  _ctx = nullptr;
+}
 
 #if defined(FREEINK_NET_WOLFSSL)
 
@@ -104,6 +130,7 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, bool tls12O
 #endif
   const uint32_t started = millis();
   stop();
+  if (_ctx && _ctxTls12Only != tls12Only) releaseContext();
   _lastFailureError = 0;
   _lastFailureAlert = -1;
   _lastFailureAlertLevel = -1;
@@ -122,7 +149,9 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, bool tls12O
   }
 
   // CTX owns the method. Create it only after trust and TCP checks succeed.
-  auto* ctx = wolfSSL_CTX_new(tls12Only ? wolfTLSv1_2_client_method() : wolfSSLv23_client_method());
+  auto* ctx = static_cast<WOLFSSL_CTX*>(_ctx);
+  const bool cached = ctx != nullptr;
+  if (!ctx) ctx = wolfSSL_CTX_new(tls12Only ? wolfTLSv1_2_client_method() : wolfSSLv23_client_method());
   if (!ctx) {
     _lastFailureError = MEMORY_ERROR;
     if (Serial)
@@ -131,10 +160,12 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, bool tls12O
     return 0;
   }
   _ctx = ctx;
+  _ctxTls12Only = tls12Only;
 
-  if (_insecure) {
+  if (!cached && _reuseTlsContext) wolfSSL_CTX_set_session_cache_mode(ctx, WOLFSSL_SESS_CACHE_OFF);
+  if (!cached && _insecure) {
     wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, nullptr);
-  } else if (_rootCA) {
+  } else if (!cached && _rootCA) {
     wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER, nullptr);
 #ifdef FREEINK_TLS_AUDIT
     Serial.printf("[TLS_AUDIT] before-ca free=%u largest=%u\n", (unsigned)ESP.getFreeHeap(),
@@ -144,11 +175,12 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, bool tls12O
                                        WOLFSSL_FILETYPE_PEM) != WOLFSSL_SUCCESS) {
       _lastFailureError = VERIFY_CERT_ERROR;
       stop();
+      releaseContext();
       return 0;
     }
   }
 #ifdef FREEINK_TLS_AUDIT
-  Serial.printf("[TLS_AUDIT] after-ca free=%u largest=%u\n", (unsigned)ESP.getFreeHeap(),
+  Serial.printf("[TLS_AUDIT] %s free=%u largest=%u\n", cached ? "reuse-ca" : "after-ca", (unsigned)ESP.getFreeHeap(),
                 (unsigned)ESP.getMaxAllocHeap());
 #endif
   wolfSSL_SetIORecv(ctx, wcRecv);
@@ -250,8 +282,10 @@ int SecureClient::connect(const char* host, uint16_t port) {
   _aborted = false;
   // Negotiate the highest mutually supported version.
   // Retry TLS 1.2 only for allowlisted protocol or transport failures.
-  if (connectWithMethod(host, port, false, "auto")) return 1;
+  const bool tls12Only = _reuseTlsContext && _ctx && _ctxTls12Only;
+  if (connectWithMethod(host, port, tls12Only, tls12Only ? "tls1.2" : "auto")) return 1;
   if (_aborted || abortRequested()) return 0;
+  if (tls12Only) return 0;
   if (!isRetryableTls12Fallback(_lastFailureError, _lastFailureAlert, _lastFailureAlertLevel)) return 0;
   if (Serial) Serial.println("[SecureClient] retrying with TLS 1.2-only handshake");
   return connectWithMethod(host, port, true, "tls1.2");
@@ -302,10 +336,7 @@ void SecureClient::stop() {
     wolfSSL_free(static_cast<WOLFSSL*>(_ssl));
     _ssl = nullptr;
   }
-  if (_ctx) {
-    wolfSSL_CTX_free(static_cast<WOLFSSL_CTX*>(_ctx));
-    _ctx = nullptr;
-  }
+  if (!_reuseTlsContext) releaseContext();
   _transport.stop();
   _connected = false;
 }

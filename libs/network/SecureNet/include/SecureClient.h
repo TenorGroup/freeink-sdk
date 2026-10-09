@@ -38,6 +38,8 @@ class SecureClient : public Client {
   // Certificate / verification configuration (applied before connect()).
   void setCACert(const char* rootCA);
   void setInsecure();  // skip peer verification (testing only)
+  void setReuseTlsContext(bool reuse);
+  bool hasTlsContext() const { return _ctx != nullptr; }
   // Upper bound for the blocking TCP connect of each handshake attempt; the
   // client timeout still bounds the TLS handshake.
   void setConnectionTimeout(uint32_t ms) { _connectTimeoutMs = ms; }
@@ -68,6 +70,7 @@ class SecureClient : public Client {
   void flush() override;
   void stop() override;
   uint8_t connected() override;
+  uint8_t transportConnected() { return _transport.connected(); }
   operator bool() override { return connected(); }
 
   // True if the library was built with wolfSSL TLS 1.3 support enabled.
@@ -79,6 +82,7 @@ class SecureClient : public Client {
   // Polls _shouldAbort and latches _aborted so callers can tell a cancel from
   // a failure after connect() returns 0.
   bool abortRequested();
+  void releaseContext();
 
   WiFiClient _transport;
   AbortCallback _shouldAbort;
@@ -87,6 +91,8 @@ class SecureClient : public Client {
   bool _insecure = false;
   void* _ssl = nullptr;  // WOLFSSL* (opaque to keep wolfSSL headers out of here)
   void* _ctx = nullptr;  // WOLFSSL_CTX*
+  bool _reuseTlsContext = false;
+  bool _ctxTls12Only = false;
   bool _connected = false;
   uint32_t _connectTimeoutMs = 3000;
   int _lastFailureError = 0;
