@@ -38,6 +38,7 @@ class SDCardManager {
   // scans the FAT and is too slow to call on every frame). 0 if not mounted or
   // the cluster count cannot be determined.
   uint64_t sdUsedBytes();
+  bool freeSpace(uint64_t& bytes, uint32_t& clusterBytes);
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
   // Read the entire file at `path` into a String. Returns empty string on failure.
   String readFile(const char* path);

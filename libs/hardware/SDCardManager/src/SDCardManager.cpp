@@ -517,6 +517,18 @@ uint64_t SDCardManager::sdUsedBytes() {
   return cachedUsedBytes;
 }
 
+bool SDCardManager::freeSpace(uint64_t& bytes, uint32_t& clusterBytes) {
+  bytes = 0;
+  clusterBytes = 0;
+  if (!initialized) return false;
+  const int32_t clusters = vol().freeClusterCount();
+  if (clusters < 0) return false;
+  clusterBytes = vol().bytesPerCluster();
+  bytes = static_cast<uint64_t>(clusters) * clusterBytes;
+  cachedUsedBytesValid = false;
+  return clusterBytes != 0;
+}
+
 bool SDCardManager::removeDir(const char* path) {
   auto dir = vol().open(path);
   if (!dir) {
