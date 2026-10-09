@@ -217,6 +217,16 @@ class GfxRendererTarget final : public DrawTarget {
     return false;
   }
 
+  template <typename R>
+  static auto inkEdges(const R& r, int font, const char* line, EpdFontFamily::Style style, int)
+      -> decltype(r.getTextInkTop(font, line, style), std::pair<int, int>{}) {
+    return {r.getTextInkTop(font, line, style), r.getTextInkBottom(font, line, style)};
+  }
+  template <typename R>
+  static std::pair<int, int> inkEdges(const R& r, int font, const char*, EpdFontFamily::Style, long) {
+    return {0, r.getLineHeight(font)};
+  }
+
   void text(const Rect rect, const char* text, const TextStyle style) override {
     if (textSink_) {
       if (text && *text && !rect.empty()) textSink_(textSinkCtx_, rect, text, style);
@@ -302,20 +312,30 @@ class GfxRendererTarget final : public DrawTarget {
     // re-measures made every wrapped-capable label pay for wrapping it never
     // needed). Matters on e-paper list screens that rebuild every row per
     // repaint.
+    const auto singleY = [&](const char* line) {
+      if (!style.centerInkY) return rect.y + std::max(0, (rect.height - lh) / 2);
+      const auto edges = inkEdges(renderer, fontId, line, epdStyle, 0);
+      return rect.y + (rect.height - edges.first - edges.second) / 2;
+    };
     if (renderer.getTextWidth(fontId, text, epdStyle) <= rect.width) {
-      drawAligned(text, rect.y + std::max(0, (rect.height - lh) / 2));
+      drawAligned(text, singleY(text));
       return;
     }
 
     if (maxLines == 1) {
       const std::string textLine = renderer.truncatedText(fontId, text, rect.width, epdStyle);
-      drawAligned(textLine.c_str(), rect.y + std::max(0, (rect.height - lh) / 2));
+      drawAligned(textLine.c_str(), singleY(textLine.c_str()));
       return;
     }
 
     const std::vector<std::string> lines = renderer.wrappedText(fontId, text, rect.width, maxLines, epdStyle);
     const int blockH = static_cast<int>(lines.size()) * lh;
     int y = rect.y + std::max(0, (rect.height - blockH) / 2);
+    if (style.centerInkY && !lines.empty()) {
+      const auto first = inkEdges(renderer, fontId, lines.front().c_str(), epdStyle, 0);
+      const auto last = inkEdges(renderer, fontId, lines.back().c_str(), epdStyle, 0);
+      y = rect.y + (rect.height - (blockH - lh) - first.first - last.second) / 2;
+    }
     for (const auto& textLine : lines) {
       drawAligned(textLine.c_str(), y);
       y += lh;

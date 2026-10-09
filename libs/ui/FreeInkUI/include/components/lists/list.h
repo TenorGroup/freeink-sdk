@@ -1,4 +1,5 @@
 #pragma once
+#include "../controls/toggle.h"
 
 #include "../../FreeInkUICore.h"
 
@@ -992,28 +993,17 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       const bool fgWhite =
           fg.kind == PaintKind::Solid && fg.color == Color::White;
       const Paint paper = Paint::solid(fgWhite ? Color::Black : Color::White);
-      const uint8_t trackRadius = static_cast<uint8_t>(
-          props.toggleRadius > togH / 2 ? togH / 2 : props.toggleRadius);
-      frame.target().fill(toggleRect, item.toggleChecked ? fg : paper,
-                          trackRadius);
-      if (props.toggleBorderWidth > 0) {
-        frame.target().stroke(toggleRect, fg, props.toggleBorderWidth,
-                              trackRadius);
-      }
-      const int16_t knobInset =
-          props.toggleKnobInset < 0 ? 0 : props.toggleKnobInset;
-      const int16_t knobH = static_cast<int16_t>(togH - knobInset * 2);
-      if (knobH > 0) {
-        Rect knob{
-            static_cast<int16_t>(item.toggleChecked
-                                     ? toggleRect.right() - knobInset - knobH
-                                     : toggleRect.x + knobInset),
-            static_cast<int16_t>(toggleRect.y + knobInset), knobH, knobH};
-        const uint8_t knobRadius = static_cast<uint8_t>(
-            props.toggleKnobRadius > knobH / 2 ? knobH / 2
-                                               : props.toggleKnobRadius);
-        frame.target().fill(knob, item.toggleChecked ? paper : fg, knobRadius);
-      }
+      ToggleProps sw;
+      sw.checked = item.toggleChecked;
+      sw.width = togW;
+      sw.height = togH;
+      sw.radius = props.toggleRadius;
+      sw.knobRadius = props.toggleKnobRadius;
+      sw.knobInset = props.toggleKnobInset;
+      sw.borderWidth = props.toggleBorderWidth;
+      sw.track = sw.checkedKnob = paper;
+      sw.checkedTrack = sw.border = sw.knob = fg;
+      toggle(frame, toggleRect, sw);
       availW = static_cast<int16_t>(availW - togW - props.valueInset -
                                     props.textGap);
       if (props.rtl)
