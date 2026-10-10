@@ -2145,8 +2145,58 @@ void testListRtlMirrorsToggleSide() {
   CHECK(rtlDraw.opCount >= 2);
   CHECK_EQ(ltrDraw.ops[1].kind, FakeDrawTarget::Op::Fill);
   CHECK_EQ(rtlDraw.ops[1].kind, FakeDrawTarget::Op::Fill);
-  CHECK_EQ(ltrDraw.ops[1].rect.x, 480 - 38 - 4);  // right edge in LTR
+  // right edge in LTR: the switch ends on the chevron's last ink column, not at the value inset
+  CHECK_EQ(ltrDraw.ops[1].rect.x, listChevronInkRight(480, listChevronSpan(ltrDraw.lineH)) + 1 - 38);
   CHECK_EQ(rtlDraw.ops[1].rect.x, 4);             // left edge (band.x + valueInset) in RTL
+}
+
+// Every trailing element of a row ends on one ink column: the chevron's last pixel (it keeps its tip only where the
+// half-ink checker lands on ink), the switch's right edge, and ListNav::trailingInkRight, for every label line height.
+void testListTrailingElementsShareOneInkColumn() {
+  for (int lineH = 8; lineH <= 60; ++lineH) {
+    for (const bool column : {false, true}) {
+      for (const int16_t inset : {0, 8}) {
+        DeviceContext device = makeDevice();
+        InputSnapshot input;
+        ListNav nav;
+        ListProps props;
+        props.count = 1;
+        props.rowHeight = 40;
+        props.scrollIndicator = false;
+        props.chevronColumn = column;
+        props.valueInset = inset;
+        props.toggleWidth = 46;
+        props.toggleHeight = 26;
+        props.nav = &nav;
+        ListItem chevron{};
+        chevron.label = "Next";
+        chevron.opensNext = true;
+        ListItem sw{};
+        sw.label = "Switch";
+        sw.toggle = true;
+        FakeDrawTarget a;
+        a.lineH = static_cast<int16_t>(lineH);
+        InteractionBuffer<4> aHits;
+        Frame<4> aFrame(a, device, input, aHits);
+        props.items = &chevron;
+        list(aFrame, Rect{0, 0, 240, 120}, props);
+        int chevronRight = -1;
+        for (size_t i = 0; i < a.opCount; ++i)
+          if (a.ops[i].kind == FakeDrawTarget::Op::Fill && a.ops[i].rect.width == 1 && a.ops[i].rect.height == 1)
+            chevronRight = std::max<int>(chevronRight, a.ops[i].rect.x);
+        CHECK(chevronRight > 0);
+        CHECK_EQ(nav.trailingInkRight, chevronRight);
+        FakeDrawTarget b;
+        b.lineH = static_cast<int16_t>(lineH);
+        InteractionBuffer<4> bHits;
+        Frame<4> bFrame(b, device, input, bHits);
+        props.items = &sw;
+        list(bFrame, Rect{0, 0, 240, 120}, props);
+        CHECK_EQ(b.ops[1].kind, FakeDrawTarget::Op::Fill);
+        CHECK_EQ(b.ops[1].rect.x + b.ops[1].rect.width - 1, chevronRight);
+      }
+    }
+  }
 }
 
 void testButtonRegistersExpandedHit() {
@@ -5672,6 +5722,7 @@ int main() {
   testListValueIconsEndAtValueEdge();
   testListRtlMirrorsIconAndValueSides();
   testListRtlMirrorsToggleSide();
+  testListTrailingElementsShareOneInkColumn();
   testButtonRegistersExpandedHit();
   testProgressBarClamps();
   testBatteryIndicator();

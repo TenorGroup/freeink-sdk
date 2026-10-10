@@ -224,6 +224,9 @@ struct ListNav {
   // re-sort) still inherits the old measurement, which is close enough
   // because the next layout corrects it.
   int drawnCount = 0;
+  // The last ink column of the trailing elements the last build drew (listChevronInkRight); callers that draw
+  // a trailing mark over the rows end it here. 0 = no row drawn yet.
+  int16_t trailingInkRight = 0;
   // A follow() is awaiting confirmation from onListRendered() that the
   // selection was actually drawn. Swipe scrolling (scrollBy) never sets this:
   // the selection is allowed off-screen there by design.
@@ -498,6 +501,13 @@ inline int16_t listChevronWidth(const int16_t span) {
           LIST_CHEVRON_DEPTH_DENOMINATOR + LIST_CHEVRON_STROKE);
 }
 
+// The last ink column of a chevron whose slot ends at slotRight (exclusive), and so the column every trailing
+// element of a row ends on: the chevron, a pop-up mark, a switch. drawListChevron keeps its tip pixel only where the
+// half-ink checker lands on ink, which is when the slot width and the span add up to an even number.
+inline int16_t listChevronInkRight(const int16_t slotRight, const int16_t span) {
+  return static_cast<int16_t>(slotRight - ((listChevronWidth(span) + span) % 2 == 0 ? 1 : 2));
+}
+
 inline void drawListChevron(DrawTarget &target, const Rect slot,
                             const int16_t span, const bool rtl, const Paint ink) {
   const int16_t radius = LIST_CHEVRON_STROKE / 2;
@@ -751,6 +761,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
   int16_t cursorY = rowArea.y;
   uint16_t consumedIndexes = 0; // item AND header indexes laid out from top
   bool selectedDrawn = false;
+  int16_t trailingInkRight = 0; // listChevronInkRight of the rows drawn, for ListNav::trailingInkRight
   for (uint16_t i = top; i < props.count; ++i) {
     // Stop before reading the next window entry. The size/layout work below
     // dereferences `item`, so checking after it would require callers that
@@ -907,6 +918,9 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     }
 
     Rect content = row.inset(Insets{0, sidePad, 0, sidePad});
+    const int16_t trailInkRight = listChevronInkRight(
+        content.right(), listChevronSpan(frame.target().lineHeight(props.labelText.font)));
+    if (!partial) trailingInkRight = trailInkRight;
     if (listRowKeepsChevron(props, item)) {
       const int16_t span = listChevronSpan(frame.target().lineHeight(props.labelText.font));
       const int16_t chevronWidth = listChevronWidth(span);
@@ -992,7 +1006,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       const int16_t togH = props.toggleHeight < 12 ? 12 : props.toggleHeight;
       const int16_t togX = props.rtl
           ? static_cast<int16_t>(band.x + props.valueInset)
-          : static_cast<int16_t>(band.x + band.width - togW - props.valueInset);
+          : static_cast<int16_t>(trailInkRight + 1 - togW);
       Rect toggleRect{
           togX,
           static_cast<int16_t>(band.y + (band.height - togH) / 2), togW, togH};
@@ -1129,8 +1143,10 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     // cursor with zero reserved for their tab band and fill the props without
     // syncToProps(), so the follow check runs on the index this pass drew.
     props.nav->onListRendered(top, consumedIndexes, selectedDrawn, props.selectedIndex);
-    if (consumedIndexes > 0)
+    if (consumedIndexes > 0) {
       props.nav->drawnCount = props.count;
+      props.nav->trailingInkRight = trailingInkRight;
+    }
   }
 
 }
