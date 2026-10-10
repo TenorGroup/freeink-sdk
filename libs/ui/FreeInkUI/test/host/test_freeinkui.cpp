@@ -2199,6 +2199,56 @@ void testListTrailingElementsShareOneInkColumn() {
   }
 }
 
+// A value with nothing after it (no chevron, switch, value bitmaps, or mark the caller draws) ends on the same ink
+// column as the chevron; a value followed by a mark keeps the value column; a switch row gives its label the room
+// the chevron slot and the value inset used to take.
+static bool markOnOddRows(const void *, uint16_t index) { return index % 2 == 1; }
+
+void testListValueEndsRowOnTrailingColumn() {
+  for (int lineH = 8; lineH <= 40; ++lineH) {
+    DeviceContext device = makeDevice();
+    InputSnapshot input;
+    ListNav nav;
+    ListItem items[3]{};
+    items[0].label = "Bare";
+    items[0].value = "Not set";
+    items[1].label = "Mark";
+    items[1].value = "Fast";
+    items[2].label = "Switch";
+    items[2].toggle = true;
+    ListProps props;
+    props.items = items;
+    props.count = 3;
+    props.rowHeight = 40;
+    props.scrollIndicator = false;
+    props.chevronColumn = true;
+    props.valueInset = 8;
+    props.toggleWidth = 46;
+    props.toggleHeight = 26;
+    props.nav = &nav;
+    props.rowHasMark = markOnOddRows;
+    FakeDrawTarget draw;
+    draw.lineH = static_cast<int16_t>(lineH);
+    InteractionBuffer<4> hits;
+    Frame<4> frame(draw, device, input, hits);
+    list(frame, Rect{0, 0, 240, 200}, props);
+    const int16_t column = nav.trailingInkRight;
+    int bareRight = -1, markRight = -1;
+    // The first Text op of a value row is its value (the label follows).
+    int seen = 0;
+    for (size_t i = 0; i < draw.opCount; ++i) {
+      if (draw.ops[i].kind != FakeDrawTarget::Op::Text) continue;
+      if (seen == 0) bareRight = draw.ops[i].rect.right();
+      if (seen == 2) markRight = draw.ops[i].rect.right();
+      ++seen;
+    }
+    CHECK_EQ(bareRight, column + 1);
+    CHECK(markRight < column - 8);
+    ListRowLayout sw = measureListRow(draw, nullptr, 240, props, items[2]);
+    CHECK_EQ(sw.labelWidth, 240 - 16 - 46 - props.textGap);
+  }
+}
+
 void testButtonRegistersExpandedHit() {
   FakeDrawTarget draw;
   DeviceContext device = makeDevice();
@@ -5723,6 +5773,7 @@ int main() {
   testListRtlMirrorsIconAndValueSides();
   testListRtlMirrorsToggleSide();
   testListTrailingElementsShareOneInkColumn();
+  testListValueEndsRowOnTrailingColumn();
   testButtonRegistersExpandedHit();
   testProgressBarClamps();
   testBatteryIndicator();

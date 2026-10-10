@@ -108,6 +108,11 @@ struct ListProps {
   // A row with a value keeps the room of the chevron slot whether it opens anything or not, so every value of the
   // list ends on one column, the one before a chevron (the theme's listChevronColumn sets it).
   bool chevronColumn = false;
+  // Asks the caller whether row `index` has a mark of its own after its value (a pop-up mark drawn over the rows).
+  // With it set, a row that has a value and nothing after it (no chevron, switch, value bitmaps or mark) ends its
+  // value on the trailing column, the one chevrons and switches end on, and keeps no chevron slot.
+  bool (*rowHasMark)(const void *ctx, uint16_t index) = nullptr;
+  const void *rowHasMarkCtx = nullptr;
   // When a multi-line label would otherwise overlap its trailing value, keep
   // the wrapped title band visually balanced with that value. Callers with a
   // short, secondary value (such as a file extension) can disable this to
@@ -536,12 +541,26 @@ inline bool listRowKeepsChevron(const ListProps &props, const ListItem &item) {
   return item.opensNext || (props.chevronColumn && (item.value || item.toggle || item.valueIcons));
 }
 
+// The value of this row ends the row: no chevron, switch, value bitmaps or caller mark after it.
+inline bool listValueEndsRow(const ListProps &props, const ListItem &item, const uint16_t index) {
+  return props.rowHasMark && item.value && !item.toggle && !item.opensNext && !item.valueIcons && !item.isHeader &&
+         !props.rowHasMark(props.rowHasMarkCtx, index);
+}
+
+// The row's last element (its switch, or a value with nothing after it) ends on the trailing column: LTR rows keep
+// no chevron slot and no value inset for it.
+inline bool listRowEndsAtTrailingColumn(const ListProps &props, const ListItem &item, const bool valueEndsRow) {
+  return !props.rtl && (item.toggle || valueEndsRow);
+}
+
 constexpr int16_t VALUE_ICON_GAP = 6; // Between the two bitmaps of a value slot (ListItem::valueIconBefore).
 
 inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *assets,
                                     const int16_t width, const ListProps &props,
-                                    const ListItem &item) {
+                                    const ListItem &item, const bool valueEndsRow = false) {
   ListRowLayout result;
+  const bool atEdge = listRowEndsAtTrailingColumn(props, item, valueEndsRow);
+  const int16_t valueInset = atEdge ? 0 : props.valueInset;
   const int16_t rowH = props.rowHeight > 0 ? props.rowHeight : 36;
   const int16_t sidePad = props.sidePadding < 0 ? 8 : props.sidePadding;
   const int16_t labelLh = target.lineHeight(props.labelText.font);
@@ -549,7 +568,7 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   const int16_t iconSize = icon ? (props.iconSize > 0 ? props.iconSize : icon.width) : 0;
   const int16_t contentWidth = static_cast<int16_t>(width - sidePad * 2 -
                                                    (icon ? iconSize + props.textGap : 0) -
-                                                   (listRowKeepsChevron(props, item) ? listChevronWidth(listChevronSpan(labelLh)) +
+                                                   (!atEdge && listRowKeepsChevron(props, item) ? listChevronWidth(listChevronSpan(labelLh)) +
                                                                          props.textGap : 0) -
                                                    (item.chosen && props.chosenMark
                                                         ? props.chosenMark.width + props.textGap : 0));
@@ -564,7 +583,7 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   }
   if (item.toggle || item.value || item.valueIcons)
     result.labelWidth = static_cast<int16_t>(result.labelWidth - result.valueWidth -
-                                            props.valueInset - props.textGap);
+                                            valueInset - props.textGap);
   // A chosen label is drawn bold (list()), so it is measured bold.
   TextStyle labelText = props.labelText;
   if (item.chosen) labelText.bold = true;
@@ -576,7 +595,7 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
       // an even one, the one whose label and value both fit whole (the value on up to 2 lines) in the fewest lines,
       // then with the fewest value lines, then with the widest label. A row never cuts its words while a split
       // shows them whole; with none, the label keeps 3/5 as before.
-      const int16_t space = static_cast<int16_t>(contentWidth - props.valueInset - props.textGap);
+      const int16_t space = static_cast<int16_t>(contentWidth - valueInset - props.textGap);
       TextStyle labelAll = labelText, valueAll = props.valueText;
       labelAll.maxLines = valueAll.maxLines = 8;
       const int16_t labelLhAll = labelLh > 0 ? labelLh : 1;
@@ -733,11 +752,12 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       return nullptr;
     return &props.items[i - props.itemsWindowFirst];
   };
-  const auto heightOf = [&](const ListItem &item) -> int32_t {
+  const auto heightOf = [&](const ListItem &item, const uint16_t index) -> int32_t {
     if (item.isHeader)
       return props.sectionGap + headerH;
     const bool heading = item.sectionHeading != nullptr && item.sectionHeading[0] != '\0';
-    return measureListRow(frame.target(), frame.assets(), rowArea.width, props, item).height +
+    return measureListRow(frame.target(), frame.assets(), rowArea.width, props, item,
+                          listValueEndsRow(props, item, index)).height +
            (heading ? props.sectionGap + headerH + rowGap : 0);
   };
   // The last page fills the rect: when every row from top to the end fits, start at the first row from which
@@ -749,7 +769,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       const ListItem *item = rowAt(static_cast<uint16_t>(start - 1));
       if (!item)
         break;
-      const int32_t need = used + (used > 0 ? rowGap : 0) + heightOf(*item);
+      const int32_t need = used + (used > 0 ? rowGap : 0) + heightOf(*item, static_cast<uint16_t>(start - 1));
       if (need > rowArea.height)
         break;
       used = need;
@@ -798,8 +818,9 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       cursorY = static_cast<int16_t>(cursorY + headerH + rowGap);
       continue;
     }
+    const bool valueEndsRow = listValueEndsRow(props, item, i);
     const ListRowLayout layout = measureListRow(frame.target(), frame.assets(),
-                                                 rowArea.width, props, item);
+                                                 rowArea.width, props, item, valueEndsRow);
     const int16_t itemH = layout.height;
     const int16_t subH = layout.subtitleHeight;
     const bool hasSectionHeading = item.sectionHeading != nullptr && item.sectionHeading[0] != '\0';
@@ -813,7 +834,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       const int32_t room = rowArea.bottom() - (cursorY + sectionH + itemH + rowGap);
       if (room < 2 * itemH) {
         const ListItem *next = rowAt(static_cast<uint16_t>(i + 1));
-        const int32_t nextH = next ? heightOf(*next) : 0;
+        const int32_t nextH = next ? heightOf(*next, static_cast<uint16_t>(i + 1)) : 0;
         // A provider may give every row one label buffer: ask for this row again before drawing it.
         if (props.rowProvider) {
           scratch = ListItem{};
@@ -921,7 +942,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     const int16_t trailInkRight = listChevronInkRight(
         content.right(), listChevronSpan(frame.target().lineHeight(props.labelText.font)));
     if (!partial) trailingInkRight = trailInkRight;
-    if (listRowKeepsChevron(props, item)) {
+    if (!listRowEndsAtTrailingColumn(props, item, valueEndsRow) && listRowKeepsChevron(props, item)) {
       const int16_t span = listChevronSpan(frame.target().lineHeight(props.labelText.font));
       const int16_t chevronWidth = listChevronWidth(span);
       const int16_t chevronX = props.rtl ? content.x
@@ -1039,7 +1060,8 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       const int16_t valueW = layout.valueWidth;
       const int16_t valueX = props.rtl
           ? static_cast<int16_t>(band.x + props.valueInset)
-          : static_cast<int16_t>(band.x + availW - valueW - props.valueInset);
+          : valueEndsRow ? static_cast<int16_t>(trailInkRight + 1 - valueW)
+                         : static_cast<int16_t>(band.x + availW - valueW - props.valueInset);
       Rect valueRect{valueX, band.y, valueW, band.height};
       frame.target().text(valueRect, item.value, valueStyle);
       availW = static_cast<int16_t>(availW - valueW - props.valueInset -
