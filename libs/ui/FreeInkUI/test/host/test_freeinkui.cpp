@@ -1983,6 +1983,48 @@ void testListChosenMarkReservesTrailingSlot() {
   }
 }
 
+// A value slot of bitmaps ends at the value edge, the second bitmap stands left of the first, both centre on the
+// row, and the label gives up their width like it does for a text value.
+void testListValueIconsEndAtValueEdge() {
+  struct Marks : FakeDrawTarget {
+    Rect label{}, first{}, second{};
+    int bitmaps = 0;
+    void text(Rect rect, const char* text, TextStyle style) override {
+      if (std::strcmp(text, "Label") == 0) label = rect;
+      FakeDrawTarget::text(rect, text, style);
+    }
+    void bitmap(Rect rect, BitmapRef bits, BitmapMode mode, Paint paint, Rotation rotation) override {
+      (bitmaps++ == 0 ? first : second) = rect;
+      FakeDrawTarget::bitmap(rect, bits, mode, paint, rotation);
+    }
+  };
+  static const uint8_t bits[72] = {};
+  Marks draw;
+  auto device = makeDevice();
+  InputSnapshot input;
+  InteractionBuffer<4> hits;
+  Frame<4> frame(draw, device, input, hits);
+  ListItem item;
+  item.label = "Label";
+  const BitmapRef marks[2] = {{bits, 12, 16, BitmapFormat::BW1}, {bits, 22, 18, BitmapFormat::BW1}};
+  item.valueIcons = marks;
+  ListProps props;
+  props.items = &item; props.count = 1; props.rowHeight = 56; props.scrollIndicator = false;
+  props.valueInset = 8;
+  const ListRowLayout measured = measureListRow(draw, nullptr, 240, props, item);
+  CHECK_EQ(measured.valueWidth, 22 + 6 + 12);
+  CHECK_EQ(measured.labelWidth, 240 - 16 - (22 + 6 + 12) - props.valueInset - props.textGap);
+  list(frame, Rect{0, 0, 240, 100}, props);
+  CHECK_EQ(draw.bitmaps, 2);
+  CHECK_EQ(draw.second.right(), 240 - 8 - props.valueInset);   // the bitmap drawn first is the left one
+  CHECK_EQ(draw.second.x, draw.first.right() + 6);
+  CHECK_EQ(draw.first.width, 12);
+  CHECK_EQ(draw.second.width, 22);
+  CHECK_EQ(draw.first.y, (56 - 16) / 2);
+  CHECK_EQ(draw.second.y, (56 - 18) / 2);
+  CHECK_EQ(draw.label.width, measured.labelWidth);
+}
+
 // A chosen row draws its label bold, so its lines are counted at the bold width.
 void testListChosenLabelMeasuresBold() {
   struct BoldWide : FakeDrawTarget {
@@ -5627,6 +5669,7 @@ int main() {
   testListRowKeepsLongLabelAndValueWhole();
   testListChosenMarkReservesTrailingSlot();
   testListChosenLabelMeasuresBold();
+  testListValueIconsEndAtValueEdge();
   testListRtlMirrorsIconAndValueSides();
   testListRtlMirrorsToggleSide();
   testButtonRegistersExpandedHit();

@@ -32,6 +32,10 @@ struct ListItem {
   bool chosen = false;
   // Optional trailing navigation cue; legacy aggregate initializers keep it off.
   bool opensNext = false;
+  // The value slot holds 2 bitmaps instead of text (ignored when `value` or `toggle` is set): valueIcons[1] ends at the
+  // slot's edge, valueIcons[0] stands to its left (either may be empty), both centred on the row's height in the row's
+  // ink. A pointer, not the bitmaps: every constant ListItem table of the firmware carries this field.
+  const BitmapRef *valueIcons = nullptr;
 };
 
 struct ListNav;
@@ -519,8 +523,10 @@ inline void drawListChevron(DrawTarget &target, const Rect slot,
 
 // The row ends in the chevron slot: its own chevron, or the slot kept for a value (ListProps::chevronColumn).
 inline bool listRowKeepsChevron(const ListProps &props, const ListItem &item) {
-  return item.opensNext || (props.chevronColumn && (item.value || item.toggle));
+  return item.opensNext || (props.chevronColumn && (item.value || item.toggle || item.valueIcons));
 }
+
+constexpr int16_t VALUE_ICON_GAP = 6; // Between the two bitmaps of a value slot (ListItem::valueIconBefore).
 
 inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *assets,
                                     const int16_t width, const ListProps &props,
@@ -542,8 +548,11 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
     result.valueWidth = props.toggleWidth < 18 ? 18 : props.toggleWidth;
   } else if (item.value) {
     result.valueWidth = target.measureText(props.valueText.font, item.value, props.valueText).width;
+  } else if (item.valueIcons) {
+    result.valueWidth = static_cast<int16_t>(item.valueIcons[1].width +
+        (item.valueIcons[0] ? item.valueIcons[0].width + VALUE_ICON_GAP : 0));
   }
-  if (item.toggle || item.value)
+  if (item.toggle || item.value || item.valueIcons)
     result.labelWidth = static_cast<int16_t>(result.labelWidth - result.valueWidth -
                                             props.valueInset - props.textGap);
   // A chosen label is drawn bold (list()), so it is measured bold.
@@ -1021,6 +1030,21 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       frame.target().text(valueRect, item.value, valueStyle);
       availW = static_cast<int16_t>(availW - valueW - props.valueInset -
                                     props.textGap);
+      if (props.rtl)
+        labelX = static_cast<int16_t>(band.x + band.width - availW);
+    } else if (item.valueIcons) {
+      const int16_t valueW = layout.valueWidth;
+      int16_t x = props.rtl ? static_cast<int16_t>(band.x + props.valueInset)
+                            : static_cast<int16_t>(band.x + availW - valueW - props.valueInset);
+      for (int k = 0; k < 2; ++k) {
+        const BitmapRef &mark = item.valueIcons[k];
+        if (!mark) continue;
+        frame.target().bitmap(Rect{x, static_cast<int16_t>(band.y + (band.height - mark.height) / 2),
+                                   static_cast<int16_t>(mark.width), static_cast<int16_t>(mark.height)},
+                              mark, BitmapMode::Contain, style.foreground);
+        x = static_cast<int16_t>(x + mark.width + VALUE_ICON_GAP);
+      }
+      availW = static_cast<int16_t>(availW - valueW - props.valueInset - props.textGap);
       if (props.rtl)
         labelX = static_cast<int16_t>(band.x + band.width - availW);
     }
