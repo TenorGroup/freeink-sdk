@@ -751,7 +751,12 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
   int16_t cursorY = rowArea.y;
   uint16_t consumedIndexes = 0; // item AND header indexes laid out from top
   bool selectedDrawn = false;
+  // Touch: the interaction index of the row just above the one being laid out, -1 unless that row registered
+  // a hit and no heading or header stands between the two (they are one group).
+  int32_t rowAboveHit = -1;
   for (uint16_t i = top; i < props.count; ++i) {
+    const int32_t adjacentHit = rowAboveHit;
+    rowAboveHit = -1;
     // Stop before reading the next window entry. The size/layout work below
     // dereferences `item`, so checking after it would require callers that
     // virtualize their data to provide one extra, otherwise out-of-window row.
@@ -891,7 +896,18 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
         hit.y = row.y;
         hit.height = row.height;
       }
-      frame.hit(hit, props.action, item.actionValue, props.inputMask, hitState);
+      const size_t index = frame.hitCount();
+      if (frame.hit(hit, props.action, item.actionValue, props.inputMask, hitState)) {
+        rowAboveHit = static_cast<int32_t>(index);
+        // The gap between two rows of one group is shared by halves: each row reaches its half. Only a touch
+        // board taps, and a drag-masked row maps its position through its rect.
+        if (adjacentHit >= 0 && !hasSectionHeading && rowGap > 0 && frame.device().hasTouch &&
+            !acceptsInput(props.inputMask, InputDrag)) {
+          const uint8_t lower = static_cast<uint8_t>(rowGap / 2);
+          frame.padHit(index, lower, 0);
+          frame.padHit(static_cast<size_t>(adjacentHit), 0, static_cast<uint8_t>(rowGap - lower));
+        }
+      }
     }
     if (!partial)
       state = frame.stateFor(props.action, item.actionValue, state);
