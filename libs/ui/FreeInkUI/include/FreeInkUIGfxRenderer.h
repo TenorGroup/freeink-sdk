@@ -1,7 +1,7 @@
 #pragma once
 
 // Optional adapter: FreeInkUI DrawTarget backed by the GfxRenderer used in
-// CrossPoint and CrossInk (the same class in both forks). Header-only and
+// CrossPoint-based firmwares. Header-only and
 // include-driven like FreeInkUIInputManager.h - FreeInkUI itself stays
 // dependency-free, and this header only compiles in firmwares that provide
 // <GfxRenderer.h>.

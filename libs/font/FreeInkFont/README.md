@@ -162,7 +162,7 @@ This is strictly more faithful to what the font actually specifies, but it
 exposes a real boundary in the `Font::ligature()` contract: it must return a
 Unicode **codepoint** (the layout pass bakes it into cached page text), while
 GSUB substitutes to a **glyph ID** that commonly has no codepoint at all. For
-example, CrossInk's bundled Bitter font defines a real 3-glyph GSUB ligature
+example, the Bitter font defines a real 3-glyph GSUB ligature
 for "ffi" (glyph 427), but nothing in Bitter's cmap maps any codepoint to
 glyph 427 — calling `ligature(0xFB00, 'i')` directly on Bitter correctly
 returns 0 even though GSUB did match, because there is no codepoint this

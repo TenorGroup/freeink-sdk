@@ -300,7 +300,7 @@ int main(int argc, char** argv) {
   // Raw glyph-ID path: 'f'+'i' should resolve to *some* nonzero glyph via the
   // font's real GSUB table (not a hardcoded guess) whenever the font ships a
   // 'liga'/'rlig' feature that covers it — this is the unrestricted form a
-  // glyph-indexed consumer (e.g. CrossInk's own page cache) can rely on even
+  // glyph-indexed consumer (such as a page cache keyed by glyph) can rely on even
   // when the substituted glyph has no cmap entry.
   const uint32_t fi[2] = {'f', 'i'};
   const uint32_t glyphFi = font.ligatureGlyphId(fi, 2);

@@ -2320,12 +2320,12 @@ void testOptionDialog() {
   CHECK_EQ(draw5.ops[2].rect.x, 46);  // card.x + default padding.left 16
 }
 
-// CrossInk compatibility surfaces: these tests mirror the hardest screens in
-// the CrossInk fork (keyboard entry, reader status bar, XTC overlay, reader
+// Reader compatibility surfaces: these tests mirror the hardest screens in
+// an e-ink reader firmware (keyboard entry, reader status bar, XTC overlay, reader
 // menu) to prove the SDK primitives cover them without fork-specific code.
 
-void testCrossInkKeyboardComposition() {
-  // CrossInk's keyboard is a 4x10 character grid plus a 5-key bottom row
+void testReaderKeyboardComposition() {
+  // A reader keyboard laid out as a 4x10 character grid plus a 5-key bottom row
   // (Shift/Mode/Space/Del/Ok). FreeInkUI composes that as two keyGrids
   // sharing one action.
   FakeDrawTarget draw;
@@ -2393,7 +2393,7 @@ void testCrossInkKeyboardComposition() {
   CHECK(sawCursorPastPrefix);
 }
 
-void testCrossInkStatusBarAndXtcOverlay() {
+void testReaderStatusBarAndXtcOverlay() {
   FakeDrawTarget draw;
   DeviceContext device = makeDevice();
   InputSnapshot input;
@@ -2464,7 +2464,7 @@ void testCrossInkStatusBarAndXtcOverlay() {
   CHECK(allTextWhite);
 }
 
-void testCrossInkReaderMenuList() {
+void testReaderReaderMenuList() {
   // Reader menu rows: label plus a right-aligned current value (rotate
   // orientation, auto page turn) and dimmed/disabled entries.
   FakeDrawTarget draw;
@@ -2499,8 +2499,8 @@ void testCrossInkReaderMenuList() {
   CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Text), 5u);
 }
 
-void testCrossInkReadingStatsSurfaces() {
-  // Mirrors CrossInk's feat/x3-reading-stats BookStatsView: a stat-cell grid
+void testReaderReadingStatsSurfaces() {
+  // Mirrors a reading stats view: a stat-cell grid
   // (value + label), a section card with title divider, and horizontal bar
   // charts where any nonzero value must stay visible.
   FakeDrawTarget draw;
@@ -3093,7 +3093,7 @@ void testListWrappedLabelHeights() {
   }
 }
 
-void testCrossInkSleepScreenComposition() {
+void testReaderSleepScreenComposition() {
   // The minimal-stats sleep screen composes from existing pieces: an
   // app-drawn cover slot, a title block, and a stats overlay row of
   // value/label cells with an icon - no bespoke SDK surface needed.
@@ -5677,10 +5677,10 @@ int main() {
   testBatteryIndicator();
   testMetricCard();
   testOptionDialog();
-  testCrossInkKeyboardComposition();
-  testCrossInkStatusBarAndXtcOverlay();
-  testCrossInkReaderMenuList();
-  testCrossInkReadingStatsSurfaces();
+  testReaderKeyboardComposition();
+  testReaderStatusBarAndXtcOverlay();
+  testReaderReaderMenuList();
+  testReaderReadingStatsSurfaces();
   testInteractionOverflowFlag();
   testContentWidthTabBarLayout();
   testTabBarTrailingIndicatorLayout();
@@ -5689,7 +5689,7 @@ int main() {
   testRotationAndBitmapSampling();
   testListSectionHeaders();
   testListWrappedLabelHeights();
-  testCrossInkSleepScreenComposition();
+  testReaderSleepScreenComposition();
   testCoverCarousel();
   testLayoutTextWrapping();
   testTouchToLogical();
