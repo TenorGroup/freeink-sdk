@@ -317,6 +317,65 @@ void Uc8279X4Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev
   displayFinish(bus, fb);
 }
 
+bool Uc8279X4Driver::makeWindow(Window& out, uint16_t x, uint16_t y, uint16_t w, uint16_t h) const {
+  if (BoardConfig::ACTIVE.board != BoardConfig::Board::XteinkX4Pro || _w != 800 || _h != 480 ||
+      _tresH != 600 || _cfg.gateOffset != 120 || FREEINK_UC8279X4_ROWREV || FREEINK_UC8279X4_XMIRROR ||
+      _windowDark || !w || !h || x >= _w || y >= _h || w > _w - x || h > _h - y) return false;
+  out = {static_cast<uint16_t>(x & ~7u), y, static_cast<uint16_t>((x + w - 1u) | 7u),
+         static_cast<uint16_t>(y + h - 1u)};
+  return true;
+}
+
+void Uc8279X4Driver::openWindow(EpdBus& bus, const Window& window) {
+  const uint16_t ys = window.ys + _cfg.gateOffset, ye = window.ye + _cfg.gateOffset;
+  const uint8_t ptl[] = {static_cast<uint8_t>(window.xs >> 8), static_cast<uint8_t>(window.xs),
+                         static_cast<uint8_t>(window.xe >> 8), static_cast<uint8_t>(window.xe),
+                         static_cast<uint8_t>(ys >> 8), static_cast<uint8_t>(ys),
+                         static_cast<uint8_t>(ye >> 8), static_cast<uint8_t>(ye), 0x01};
+  bus.cmd(CMD_PARTIAL_IN);
+  bus.cmd(CMD_PARTIAL_WINDOW);
+  bus.data(ptl, sizeof(ptl));
+}
+
+void Uc8279X4Driver::streamWindow(EpdBus& bus, uint8_t command, const uint8_t* fb, const Window& window) {
+  const uint16_t first = window.xs / 8, count = (window.xe - window.xs + 1) / 8;
+  bus.cmd(command);
+  bus.beginTxn();
+  for (uint16_t y = window.ys; y <= window.ye; ++y)
+    bus.rawWriteBytes(fb + static_cast<uint32_t>(y) * _wb + first, count);
+  bus.endTxn();
+}
+
+void Uc8279X4Driver::displayWindow(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, uint16_t x, uint16_t y,
+                                   uint16_t w, uint16_t h, bool turnOff) {
+  if (!fb) { _needFullClear = true; return; }
+  Window window;
+  if (!makeWindow(window, x, y, w, h) || !_oldPlaneValid || _needFullClear || _windowGrayPending ||
+      _redriveAfterGray || _directGrayOnPanel || _pendingRefresh) {
+    display(bus, fb, prev, RefreshMode::Full, turnOff);
+    return;
+  }
+  openWindow(bus, window);
+  streamWindow(bus, CMD_DTM2, fb, window);
+  startBwRefresh(bus, true, true);
+  bus.waitRefreshComplete(" 8279x4_window");
+  streamWindow(bus, CMD_DTM1, fb, window);
+  bus.cmd(CMD_PARTIAL_OUT);
+  // The full snapshot also serves a later legacy grayscale overlay.
+  if (_grayBase && _grayBaseValid) {
+    const uint16_t count = (window.xe - window.xs + 1) / 8;
+    for (uint16_t row = window.ys; row <= window.ye; ++row) {
+      const uint32_t offset = static_cast<uint32_t>(row) * _wb + window.xs / 8;
+      memcpy(_grayBase + offset, fb + offset, count);
+    }
+  }
+  if (turnOff) {
+    bus.cmd(CMD_POWER_OFF);
+    bus.waitBusy(" 8279x4_POF");
+    _isScreenOn = false;
+  }
+}
+
 void Uc8279X4Driver::streamPlane(EpdBus& bus, uint8_t ramCmd, const uint8_t* fb, bool invert) {
   uint8_t row[128];
   const uint16_t wb = _wb <= sizeof(row) ? _wb : sizeof(row);
@@ -391,6 +450,7 @@ void Uc8279X4Driver::powerOnIfNeeded(EpdBus& bus, const char* tag) {
 }
 
 bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
+  _windowGrayPending = false;
 #if defined(FREEINK_EPD_STAGE_TRACE) && FREEINK_EPD_STAGE_TRACE
   // Where the time before the refresh goes: the base copy, each plane, the trigger.
   const unsigned long tS0 = millis();
@@ -472,7 +532,7 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
   return true;
 }
 
-void Uc8279X4Driver::startBwRefresh(EpdBus& bus, bool fast) {
+void Uc8279X4Driver::startBwRefresh(EpdBus& bus, bool fast, bool windowOpen) {
   // Built-in refresh setup, byte-for-byte the stock FW trigger order (RE of
   // Factory.bin FUN_4214d050 partial / FUN_4214cfe8 full): CDI first - stock
   // writes the 1-byte CDI on EVERY refresh, 0x97 full / 0xD7 partial - then
@@ -493,7 +553,7 @@ void Uc8279X4Driver::startBwRefresh(EpdBus& bus, bool fast) {
 
   powerOnIfNeeded(bus, " 8279x4_PON");
 
-  if (fast) {
+  if (fast && !windowOpen) {
     // Stock NEVER issues PTIN without a PTL (0x90) window - with PTL unset the
     // DU scans but develops nothing (first field unit: 443 ms DRF, no image).
     // Full-screen window; gate coords carry the 120-gate visible offset.
@@ -601,6 +661,7 @@ void Uc8279X4Driver::beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMod
   _absoluteInput = false;
   _directGrayPass = false;
   if (mode == GrayscaleMode::Direct) {
+    _windowGrayPending = true;
     _absoluteInput = true;
     _directGrayPass = true;
     _grayBaseValid = false;
@@ -612,9 +673,11 @@ void Uc8279X4Driver::beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMod
   }
   displayGrayscaleBase(bus, fb, fallback, turnOff);
   _absoluteInput = mode == GrayscaleMode::Absolute;
+  _windowGrayPending = true;
 }
 
 void Uc8279X4Driver::copyGrayscaleLsb(EpdBus& bus, const uint8_t* lsb) {
+  _windowGrayPending = true;
   if (!lsb) return;
   if (_absoluteInput) {
     bus.waitBusy(" absolute plane");
@@ -671,6 +734,7 @@ void Uc8279X4Driver::copyGrayscaleMsb(EpdBus& bus, const uint8_t* msb) {
 
 void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, const unsigned char* lut,
                                  bool factoryMode) {
+  _windowGrayPending = false;
   (void)lut;
 
   // Vendor AA sequence: PSR (REG=1) -> [planes already in RAM via
@@ -831,6 +895,7 @@ void Uc8279X4Driver::runGrayscalePrecondition(EpdBus& bus) {
 }
 
 void Uc8279X4Driver::cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) {
+  _windowGrayPending = false;
   _grayImagePass = false;
   _absoluteInput = false;
   _directGrayPass = false;

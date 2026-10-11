@@ -73,6 +73,9 @@ class Uc8279X4Driver : public PanelDriver {
   void deepSleep(EpdBus& bus) override;
 
   void display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) override;
+  void displayWindow(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, uint16_t x, uint16_t y, uint16_t w,
+                     uint16_t h, bool turnOff) override;
+  void setBackgroundHint(bool dark) override { _windowDark = dark; }
   bool displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) override;
   void displayFinish(EpdBus& bus, const uint8_t* fb) override;
   bool supportsAsyncDisplay() const override { return true; }
@@ -112,7 +115,15 @@ class Uc8279X4Driver : public PanelDriver {
 
  private:
   void initController(EpdBus& bus);
-  void startBwRefresh(EpdBus& bus, bool fast);
+  void startBwRefresh(EpdBus& bus, bool fast, bool windowOpen = false);
+  struct Window {
+    uint16_t xs = 0, ys = 0, xe = 0, ye = 0;
+  };
+  bool makeWindow(Window& out, uint16_t x, uint16_t y, uint16_t w, uint16_t h) const;
+  void openWindow(EpdBus& bus, const Window& window);
+  void streamWindow(EpdBus& bus, uint8_t command, const uint8_t* fb, const Window& window);
+  bool _windowDark = false;
+  bool _windowGrayPending = false;
   // Stream a framebuffer into a RAM plane: 0xFF padding for gates before the
   // visible offset, visible rows in the stock convention (forward order, bytes
   // as-is; FREEINK_UC8279X4_ROWREV/XMIRROR can flip either axis for future
