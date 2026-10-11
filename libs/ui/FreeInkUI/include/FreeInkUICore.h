@@ -1029,6 +1029,15 @@ struct Interaction {
   uint16_t inputMask = InputDefault;
   State state = StateNormal;
   uint8_t focusOrder = 0;
+  // Rows the touch routing reaches above and below `rect` (the gap to a neighbouring row). `rect` stays the
+  // drawn rect everything else reads (publishedRect); only a tap's hit test grows by these.
+  uint8_t touchPadTop = 0;
+  uint8_t touchPadBottom = 0;
+  bool touchContains(int16_t x, int16_t y) const {
+    return Rect{rect.x, static_cast<int16_t>(rect.y - touchPadTop), rect.width,
+                static_cast<int16_t>(rect.height + touchPadTop + touchPadBottom)}
+        .contains(x, y);
+  }
 };
 
 class InteractionSink {
@@ -1081,6 +1090,18 @@ public:
   void clear() {
     count_[building_] = 0;
     overflowed_[building_] = false;
+  }
+
+  // Lets a tap reach up to `top`/`bottom` px past the rect of interaction `index` of the generation being built
+  // (the larger of the old and the new reach).
+  void padTouch(size_t index, uint8_t top, uint8_t bottom) {
+    if (index >= count_[building_])
+      return;
+    Interaction &interaction = interactions_[building_][index];
+    if (top > interaction.touchPadTop)
+      interaction.touchPadTop = top;
+    if (bottom > interaction.touchPadBottom)
+      interaction.touchPadBottom = bottom;
   }
 
   size_t count() const { return count_[building_]; }
@@ -1224,7 +1245,7 @@ private:
           acceptsInput(interaction.inputMask, InputTouch);
       if (!acceptsKind && !acceptsTouchFallback)
         continue;
-      if (interaction.rect.contains(x, y))
+      if (interaction.touchContains(x, y))
         return i;
     }
     return -1;
@@ -1508,6 +1529,13 @@ public:
            uint16_t inputMask = InputDefault, State state = StateNormal) {
     return interactions_.addInteraction(
         Interaction{rect, action, value, inputMask, state, 0});
+  }
+
+  // Interactions registered so far; the one hit() just added sits at hitCount() - 1. padHit() widens what a
+  // tap reaches around one of them without moving its published rect.
+  size_t hitCount() const { return interactions_.count(); }
+  void padHit(size_t index, uint8_t top, uint8_t bottom) {
+    interactions_.padTouch(index, top, bottom);
   }
 
   State stateFor(ActionId action, int16_t value = 0,

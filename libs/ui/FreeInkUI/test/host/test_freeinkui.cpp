@@ -5720,7 +5720,133 @@ void testScrollClampUsesMeasuredPage() {
   CHECK_EQ(nav.top, 4);
 }
 
+// Touch lists: the gap between two rows of one group belongs to the nearer row, so no tap there is lost. The
+// row's published rect stays the drawn one; only the touch routing reaches into the gap.
+int rowTappedAt(InteractionBuffer<16>& hits, int y) {
+  InputSnapshot tap;
+  tap.touchReleased = true;
+  tap.touchX = 200;
+  tap.touchY = static_cast<int16_t>(y);
+  const ActionEvent event = hits.route(tap);
+  return event ? event.value : -1;
+}
+
+void testListRowGapTouchBelongsToNearerRow() {
+  FakeDrawTarget draw;
+  DeviceContext device = makeDevice();
+  InputSnapshot input;
+  InteractionBuffer<16> hits;
+  Frame<16> frame(draw, device, input, hits);
+
+  ListItem items[6]{};
+  for (int i = 0; i < 6; ++i) {
+    items[i].label = "Row";
+    items[i].actionValue = static_cast<int16_t>(i);
+  }
+  items[3].sectionHeading = "Second group";  // rows 0-2 are one group, 3-5 another
+  ListNav nav;
+  ListProps props;
+  props.items = items;
+  props.itemsWindowCount = 6;
+  props.count = 6;
+  props.action = 9;
+  props.rowHeight = 56;
+  props.rowGap = 6;
+  props.headerUnderline = false;
+  props.partialTrailingRow = true;
+  props.nav = &nav;
+  list(frame, Rect{16, 40, 448, 684}, props);  // 40..724: the dynamic bar starts at 724
+
+  CHECK_EQ(hits.count(), 6u);
+  Rect r[6];
+  for (int i = 0; i < 6; ++i) r[i] = hits.data()[i].rect;
+  CHECK_EQ(r[1].y - r[0].bottom(), 6);  // the drawn rows keep their 56 px and 6 px gap
+  CHECK_EQ(r[0].height, 56);
+
+  // Inside a group: upper half of the gap is the upper row, lower half the lower row.
+  for (int k = 0; k < 2; ++k) {
+    const int gapTop = r[k].bottom();
+    CHECK_EQ(rowTappedAt(hits, gapTop), k);
+    CHECK_EQ(rowTappedAt(hits, gapTop + 2), k);
+    CHECK_EQ(rowTappedAt(hits, gapTop + 3), k + 1);
+    CHECK_EQ(rowTappedAt(hits, gapTop + 5), k + 1);
+  }
+  // The group's own outer edges are not widened.
+  CHECK_EQ(rowTappedAt(hits, r[0].y - 1), -1);
+  // Between two groups the heading stands in the gap: no row there.
+  CHECK_EQ(rowTappedAt(hits, r[2].bottom()), -1);
+  CHECK_EQ(rowTappedAt(hits, r[2].bottom() + 2), -1);
+  CHECK_EQ(rowTappedAt(hits, r[3].y - 1), -1);
+  CHECK_EQ(rowTappedAt(hits, r[3].y - 3), -1);
+  // After the last row of the list, and in the dynamic bar band.
+  CHECK_EQ(rowTappedAt(hits, r[5].bottom()), -1);
+  CHECK_EQ(rowTappedAt(hits, r[5].bottom() + 3), -1);
+  CHECK_EQ(rowTappedAt(hits, 724), -1);
+  CHECK_EQ(rowTappedAt(hits, 750), -1);
+  // The rows themselves still answer across their full height.
+  CHECK_EQ(rowTappedAt(hits, r[1].y), 1);
+  CHECK_EQ(rowTappedAt(hits, r[1].bottom() - 1), 1);
+}
+
+void testListRowGapTouchSkipsButtonBoards() {
+  FakeDrawTarget draw;
+  DeviceContext device = makeDevice();
+  device.hasTouch = false;
+  InputSnapshot input;
+  InteractionBuffer<16> hits;
+  Frame<16> frame(draw, device, input, hits);
+  ListItem items[3]{};
+  for (int i = 0; i < 3; ++i) {
+    items[i].label = "Row";
+    items[i].actionValue = static_cast<int16_t>(i);
+  }
+  ListNav nav;
+  ListProps props;
+  props.items = items;
+  props.itemsWindowCount = 3;
+  props.count = 3;
+  props.action = 9;
+  props.rowHeight = 56;
+  props.rowGap = 6;
+  props.nav = &nav;
+  list(frame, Rect{16, 40, 448, 300}, props);
+  CHECK_EQ(hits.count(), 3u);
+  CHECK_EQ(rowTappedAt(hits, hits.data()[0].rect.bottom() + 1), -1);
+}
+
+void testListRowGapTouchStopsAtPartialRow() {
+  FakeDrawTarget draw;
+  DeviceContext device = makeDevice();
+  InputSnapshot input;
+  InteractionBuffer<16> hits;
+  Frame<16> frame(draw, device, input, hits);
+  ListItem items[8]{};
+  for (int i = 0; i < 8; ++i) {
+    items[i].label = "Row";
+    items[i].actionValue = static_cast<int16_t>(i);
+  }
+  ListNav nav;
+  ListProps props;
+  props.items = items;
+  props.itemsWindowCount = 8;
+  props.count = 8;
+  props.action = 9;
+  props.rowHeight = 56;
+  props.rowGap = 6;
+  props.partialTrailingRow = true;
+  props.nav = &nav;
+  list(frame, Rect{16, 40, 448, 184}, props);  // 3 rows = 56*3 + 12 = 180, a glimpse of the 4th below
+  const size_t n = hits.count();
+  CHECK(n >= 2u && n < 8u);
+  const Rect last = hits.data()[n - 1].rect;
+  CHECK_EQ(rowTappedAt(hits, last.bottom()), -1);  // the glimpse registers no row, and no row reaches for it
+  CHECK_EQ(rowTappedAt(hits, last.bottom() + 2), -1);
+}
+
 int main() {
+  testListRowGapTouchBelongsToNearerRow();
+  testListRowGapTouchSkipsButtonBoards();
+  testListRowGapTouchStopsAtPartialRow();
   testScrollClampUsesMeasuredPage();
   testScrollBarHasRoundEndsWithoutFrame();
   testListGlimpseAndFullLastPage();
