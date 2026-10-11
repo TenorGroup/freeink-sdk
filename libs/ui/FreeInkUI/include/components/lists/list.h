@@ -4,6 +4,7 @@
 #include "../../FreeInkUICore.h"
 
 #include <atomic>
+#include <array>
 
 namespace freeink {
 namespace ui {
@@ -480,6 +481,7 @@ inline void drawListScrollIndicator(DrawTarget &target, const Rect rect,
 struct ListRowLayout {
   int16_t height = 0;
   int16_t labelWidth = 0;
+  int16_t naturalLabelWidth = 0;
   int16_t labelHeight = 0;
   int16_t subtitleHeight = 0;
   int16_t valueWidth = 0;
@@ -555,6 +557,70 @@ inline bool listRowEndsAtTrailingColumn(const ListProps &props, const ListItem &
 
 constexpr int16_t VALUE_ICON_GAP = 6; // Between the two bitmaps of a value slot (ListItem::valueIconBefore).
 
+inline uint32_t listTextFingerprint(const char *text) {
+  if (!text) return 0;
+  uint32_t hash = 2166136261u;
+  for (const auto *p = reinterpret_cast<const unsigned char *>(text); *p; ++p) {
+    hash ^= *p;
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
+struct ListMeasureCacheEntry {
+  bool valid = false;
+  uint32_t label = 0;
+  uint32_t subtitle = 0;
+  uint32_t value = 0;
+  uint32_t style = 0;
+  int16_t width = 0;
+  bool valueEndsRow = false;
+  ListRowLayout layout{};
+};
+
+inline uint32_t listMeasureStyleKey(const ListProps &props, const ListItem &item,
+                                    const int16_t width, const DrawTarget &target,
+                                    const bool valueEndsRow, AssetResolver *assets) {
+  uint32_t key = 2166136261u;
+  const auto add = [&](const uint32_t value) {
+    key ^= value;
+    key *= 16777619u;
+  };
+  add(static_cast<uint16_t>(width));
+  add(static_cast<uint16_t>(props.rowHeight));
+  add(static_cast<uint16_t>(props.rowPaddingY));
+  add(static_cast<uint16_t>(props.sidePadding));
+  add(static_cast<uint16_t>(props.textGap));
+  add(static_cast<uint16_t>(props.valueInset));
+  add(static_cast<uint16_t>(props.iconSize));
+  add(static_cast<uint16_t>(props.toggleWidth));
+  add(static_cast<uint16_t>(props.toggleHeight));
+  add(static_cast<uint16_t>(props.sectionGap));
+  add(static_cast<uint16_t>(target.lineHeight(props.labelText.font)));
+  add(static_cast<uint16_t>(target.lineHeight(props.valueText.font)));
+  add(static_cast<uint16_t>(target.lineHeight(props.subtitleText.font)));
+  add(static_cast<uint8_t>(props.labelText.font));
+  add(static_cast<uint8_t>(props.valueText.font));
+  add(static_cast<uint8_t>(props.subtitleText.font));
+  add(props.labelText.maxLines);
+  add(props.valueText.maxLines);
+  add(props.subtitleText.maxLines);
+  add(props.balanceWrappedLabelWithValue ? 1u : 0u);
+  const BitmapRef icon = item.icon ? item.icon : resolveBitmap(assets, item.iconAsset);
+  add(icon ? static_cast<uint16_t>(props.iconSize > 0 ? props.iconSize : icon.width) : 0u);
+  add(icon ? 1u : 0u);
+  add(item.opensNext ? 1u : 0u);
+  if (item.valueIcons) {
+    add(item.valueIcons[0] ? static_cast<uint16_t>(item.valueIcons[0].width + VALUE_ICON_GAP) : 0u);
+    add(static_cast<uint16_t>(item.valueIcons[1].width));
+  }
+  add(item.chosen ? 1u : 0u);
+  add(item.toggle ? 1u : 0u);
+  add(item.valueIcons ? 1u : 0u);
+  add(valueEndsRow ? 1u : 0u);
+  return key;
+}
+
 inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *assets,
                                     const int16_t width, const ListProps &props,
                                     const ListItem &item, const bool valueEndsRow = false) {
@@ -573,6 +639,9 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
                                                    (item.chosen && props.chosenMark
                                                         ? props.chosenMark.width + props.textGap : 0));
   result.labelWidth = contentWidth;
+  if (props.hugContents && item.label) {
+    result.naturalLabelWidth = target.measureText(props.labelText.font, item.label, props.labelText).width;
+  }
   if (item.toggle) {
     result.valueWidth = props.toggleWidth < 18 ? 18 : props.toggleWidth;
   } else if (item.value) {
@@ -587,6 +656,7 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   // A chosen label is drawn bold (list()), so it is measured bold.
   TextStyle labelText = props.labelText;
   if (item.chosen) labelText.bold = true;
+  bool labelWrapped = false;
   if (props.balanceWrappedLabelWithValue && labelText.maxLines > 1 &&
       (item.toggle || item.value) && item.label &&
       target.measureText(labelText.font, item.label, labelText).width > result.labelWidth) {
@@ -600,7 +670,7 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
       labelAll.maxLines = valueAll.maxLines = 8;
       const int16_t labelLhAll = labelLh > 0 ? labelLh : 1;
       const int16_t valueLh = target.lineHeight(props.valueText.font) > 0 ? target.lineHeight(props.valueText.font) : 1;
-      int bestRows = 0, bestValueLines = 0, bestLabel = 0;
+      int bestRows = 0, bestValueLines = 0, bestLabel = 0, bestLabelLines = 0;
       // The label beside its value on one line, then the label from 4/5 of the row down to half of it.
       for (int k = -1; k <= 6; ++k) {
         const int labelW = k < 0 ? space - result.valueWidth : space * (80 - 5 * k) / 100;
@@ -616,12 +686,15 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
           bestRows = rows;
           bestValueLines = valueLines;
           bestLabel = labelW;
+          bestLabelLines = labelLines;
         }
       }
       if (bestRows) {
         result.labelWidth = static_cast<int16_t>(bestLabel);
         if (space - bestLabel < result.valueWidth) result.valueWidth = static_cast<int16_t>(space - bestLabel);
         result.valueLines = static_cast<uint8_t>(bestValueLines);
+        result.labelLines = static_cast<uint8_t>(bestLabelLines);
+        labelWrapped = true;
       } else {
         const int16_t cap = static_cast<int16_t>(contentWidth * 3 / 5);
         if (result.labelWidth > cap) result.labelWidth = cap;
@@ -632,7 +705,7 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
     }
   }
   if (result.labelWidth < 0) result.labelWidth = 0;
-  if (item.label && labelText.maxLines > 1 && labelLh > 0 && result.labelWidth > 0) {
+  if (!labelWrapped && item.label && labelText.maxLines > 1 && labelLh > 0 && result.labelWidth > 0) {
     const int16_t lines = static_cast<int16_t>(measureWrappedText(
         target, item.label, labelText, result.labelWidth).height / labelLh);
     if (lines > 1) result.labelLines = static_cast<uint8_t>(lines);
@@ -738,6 +811,23 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
   const int16_t headerH = props.headerRowHeight > 0
                               ? props.headerRowHeight
                               : static_cast<int16_t>(headerLh + 4);
+  std::array<ListMeasureCacheEntry, 16> measureCache{};
+  size_t nextMeasureCache = 0;
+  const auto measureCached = [&](const ListItem &item, const bool valueEndsRow) {
+    const uint32_t label = listTextFingerprint(item.label);
+    const uint32_t subtitle = listTextFingerprint(item.subtitle);
+    const uint32_t value = listTextFingerprint(item.value);
+    const uint32_t style = listMeasureStyleKey(props, item, rowArea.width, frame.target(), valueEndsRow, frame.assets());
+    for (const auto &entry : measureCache) {
+      if (entry.valid && entry.label == label && entry.subtitle == subtitle && entry.value == value &&
+          entry.style == style && entry.width == rowArea.width && entry.valueEndsRow == valueEndsRow)
+        return entry.layout;
+    }
+    const ListRowLayout layout = measureListRow(frame.target(), frame.assets(), rowArea.width, props, item, valueEndsRow);
+    auto &slot = measureCache[nextMeasureCache++ % measureCache.size()];
+    slot = ListMeasureCacheEntry{true, label, subtitle, value, style, rowArea.width, valueEndsRow, layout};
+    return layout;
+  };
   // The row at index i, from the provider or the caller's window (null outside the window), and the height
   // it takes with its section block, for the two look-ahead rules below.
   ListItem probe;
@@ -756,8 +846,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     if (item.isHeader)
       return props.sectionGap + headerH;
     const bool heading = item.sectionHeading != nullptr && item.sectionHeading[0] != '\0';
-    return measureListRow(frame.target(), frame.assets(), rowArea.width, props, item,
-                          listValueEndsRow(props, item, index)).height +
+    return measureCached(item, listValueEndsRow(props, item, index)).height +
            (heading ? props.sectionGap + headerH + rowGap : 0);
   };
   // The last page fills the rect: when every row from top to the end fits, start at the first row from which
@@ -824,8 +913,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       continue;
     }
     const bool valueEndsRow = listValueEndsRow(props, item, i);
-    const ListRowLayout layout = measureListRow(frame.target(), frame.assets(),
-                                                 rowArea.width, props, item, valueEndsRow);
+    const ListRowLayout layout = measureCached(item, valueEndsRow);
     const int16_t itemH = layout.height;
     const int16_t subH = layout.subtitleHeight;
     const bool hasSectionHeading = item.sectionHeading != nullptr && item.sectionHeading[0] != '\0';
@@ -889,10 +977,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     if (props.hugContents && item.label) {
       // Hug-content rows shrink to the label width plus padding so the
       // selection pill wraps the text instead of spanning the rect.
-      const int16_t labelW =
-          frame.target()
-              .measureText(props.labelText.font, item.label, props.labelText)
-              .width;
+      const int16_t labelW = layout.naturalLabelWidth;
       const int16_t hugW = static_cast<int16_t>(labelW + sidePad * 2);
       if (hugW < row.width)
         row.width = hugW;
