@@ -533,12 +533,15 @@ static void testStickyAbsolute() {
   display.releaseBuffers();
 }
 
+#include "test_window.h"
+
 int main(int argc, char**) {
   if (argc > 1) {
     testStickyAbsolute();
     std::puts("Sticky absolute capability, activation, power-down and B/W recovery passed");
     return 0;
   }
+  testWindowBw();
   testUc8179GrayShadeSplit();
   testUc8279X4WaveformSelection();
   testDirectSleep<Uc8179Driver>();
