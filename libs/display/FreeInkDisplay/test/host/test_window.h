@@ -79,7 +79,7 @@ static void testWindowBw() {
     for (unsigned y : {0u, 479u}) run(x, y, w, 1);
   run(799, 479, 1, 1);
   run(72, 30, 254, 383);
-  BoardConfig::ACTIVE.board = BoardConfig::Board::XteinkX4;
+  BoardConfig::ACTIVE.board = BoardConfig::Board::XteinkX4Classic;
   bus.clear();
   driver.displayWindow(bus, target.data(), nullptr, 80, 120, 600, 8, false);
   assert(lastRegister(bus, 0xe5) == 0x5a && windowBytes(bus, 0x13) == 60000);
@@ -211,3 +211,21 @@ static void testWindowRecovery() {
   display.releaseBuffers();
   free(driver._grayBase);
 }
+
+#ifdef TENOR_PRESS_PROBE
+static void testWindowScan() {
+  Uc8279X4Driver driver;
+  EpdBus bus;
+  const auto base = frame(5);
+  driver.begin(bus);
+  driver.display(bus, base.data(), nullptr, RefreshMode::Full, false);
+  for (uint8_t scan : {0, 1}) {
+    uc8279X4WindowScan = scan;
+    bus.clear();
+    driver.displayWindow(bus, base.data(), nullptr, 80, 120, 600, 8, false);
+    checkWindowTrace(bus, base, 80, 120, 600, 8, scan);
+  }
+  uc8279X4WindowScan = 1;
+  free(driver._grayBase);
+}
+#endif

@@ -1,5 +1,6 @@
 #pragma once
 #include <cassert>
+#include <Arduino.h>
 #include <cstdint>
 #include <vector>
 namespace freeink {
@@ -20,8 +21,8 @@ class EpdBus {
     assert(!transaction); ++writes.back().transactions;
     writes.back().bytes.insert(writes.back().bytes.end(),p,p+n);
   }
-  void beginTxn() { assert(!transaction); transaction=true; ++writes.back().transactions; }
-  void endTxn() { assert(transaction); transaction=false; }
+  void beginTxn() { assert(!transaction); transaction=true; proSpiTransaction=true; ++writes.back().transactions; }
+  void endTxn() { assert(transaction); transaction=false; proSpiTransaction=false; }
   void rawWriteBytes(const uint8_t* p, uint16_t n) {
     assert(transaction); writes.back().bytes.insert(writes.back().bytes.end(),p,p+n);
   }

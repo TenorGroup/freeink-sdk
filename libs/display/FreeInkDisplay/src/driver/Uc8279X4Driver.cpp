@@ -20,7 +20,38 @@
 #endif
 
 namespace freeink {
+#ifdef TENOR_PRESS_PROBE
+volatile uint8_t uc8279X4WindowScan = 1;
+#endif
 namespace {
+#ifdef TENOR_PRESS_PROBE
+struct WindowTrace;
+WindowTrace* windowTrace = nullptr;
+struct WindowTrace {
+  uint32_t dtm1 = 0, dtm2 = 0, drf = 0;
+  unsigned long busyMs = 0, refreshStart = 0;
+  WindowTrace(const char* kind, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+    windowTrace = this;
+    Serial.printf("WINDOW_BEGIN kind=%s x=%u y=%u w=%u h=%u free=%u largest=%u\n", kind, x, y, w, h,
+                  unsigned(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                  unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+  }
+  ~WindowTrace() {
+    Serial.printf("WINDOW_BYTES dtm1=%u dtm2=%u DRF=%u busy_ms=%lu\n", unsigned(dtm1), unsigned(dtm2),
+                  unsigned(drf), busyMs);
+    Serial.printf("WINDOW_END free=%u largest=%u\n",
+                  unsigned(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                  unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+    windowTrace = nullptr;
+  }
+};
+void traceWindowPlane(uint8_t command, uint32_t bytes) {
+  if (!windowTrace) return;
+  if (command == 0x10) windowTrace->dtm1 += bytes;
+  if (command == 0x13) windowTrace->dtm2 += bytes;
+  Serial.printf("WINDOW_PLANE command=%02x bytes=%u\n", command, unsigned(bytes));
+}
+#endif
 // UC8279 (800x480 X4 Pro variant) command set - UC81xx KW family, per the vendor
 // X4 Pro display hardware reference.
 constexpr uint8_t CMD_PANEL_SETTING = 0x00;       // PSR
@@ -333,7 +364,14 @@ void Uc8279X4Driver::openWindow(EpdBus& bus, const Window& window) {
   const uint8_t ptl[] = {static_cast<uint8_t>(window.xs >> 8), static_cast<uint8_t>(window.xs),
                          static_cast<uint8_t>(window.xe >> 8), static_cast<uint8_t>(window.xe),
                          static_cast<uint8_t>(ys >> 8), static_cast<uint8_t>(ys),
-                         static_cast<uint8_t>(ye >> 8), static_cast<uint8_t>(ye), 0x01};
+                         static_cast<uint8_t>(ye >> 8), static_cast<uint8_t>(ye),
+#ifdef TENOR_PRESS_PROBE
+                         static_cast<uint8_t>(uc8279X4WindowScan == 0 ? 0 : 1)};
+  Serial.printf("WINDOW_PTL %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                ptl[0], ptl[1], ptl[2], ptl[3], ptl[4], ptl[5], ptl[6], ptl[7], ptl[8]);
+#else
+                         0x01};
+#endif
   bus.cmd(CMD_PARTIAL_IN);
   bus.cmd(CMD_PARTIAL_WINDOW);
   bus.data(ptl, sizeof(ptl));
@@ -354,10 +392,16 @@ void Uc8279X4Driver::streamWindow(EpdBus& bus, uint8_t command, const uint8_t* f
     }
   }
   bus.endTxn();
+#ifdef TENOR_PRESS_PROBE
+  traceWindowPlane(command, uint32_t(count) * (window.ye - window.ys + 1));
+#endif
 }
 
 void Uc8279X4Driver::displayWindow(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, uint16_t x, uint16_t y,
                                    uint16_t w, uint16_t h, bool turnOff) {
+#ifdef TENOR_PRESS_PROBE
+  WindowTrace trace("BW", x, y, w, h);
+#endif
   if (!fb) { _needFullClear = true; return; }
   if (BoardConfig::ACTIVE.board != BoardConfig::Board::XteinkX4Pro) {
     PanelDriver::displayWindow(bus, fb, prev, x, y, w, h, turnOff);
@@ -366,6 +410,10 @@ void Uc8279X4Driver::displayWindow(EpdBus& bus, const uint8_t* fb, const uint8_t
   Window window;
   if (!makeWindow(window, x, y, w, h) || !_oldPlaneValid || _needFullClear || _windowGrayPending ||
       _redriveAfterGray || _directGrayOnPanel || _pendingRefresh) {
+#ifdef TENOR_PRESS_PROBE
+    Serial.printf("WINDOW_FALLBACK reason=%s\n", !makeWindow(window, x, y, w, h) ? "bounds_or_inversion" :
+                  !_oldPlaneValid ? "old_plane" : _needFullClear ? "full_clear" : "gray_or_pending");
+#endif
     display(bus, fb, prev, RefreshMode::Full, turnOff);
     return;
   }
@@ -373,6 +421,9 @@ void Uc8279X4Driver::displayWindow(EpdBus& bus, const uint8_t* fb, const uint8_t
   streamWindow(bus, CMD_DTM2, fb, window);
   startBwRefresh(bus, true, true);
   bus.waitRefreshComplete(" 8279x4_window");
+#ifdef TENOR_PRESS_PROBE
+  if (windowTrace) windowTrace->busyMs += millis() - windowTrace->refreshStart;
+#endif
   streamWindow(bus, CMD_DTM1, fb, window);
   bus.cmd(CMD_PARTIAL_OUT);
   // The full snapshot also serves a later legacy grayscale overlay.
@@ -424,6 +475,9 @@ void Uc8279X4Driver::streamPlane(EpdBus& bus, uint8_t ramCmd, const uint8_t* fb,
   memset(row, 0xFF, wb);
   for (uint16_t y = _cfg.gateOffset + _h; y < _tresH; y++) bus.rawWriteBytes(row, wb);
   bus.endTxn();
+#ifdef TENOR_PRESS_PROBE
+  traceWindowPlane(ramCmd, uint32_t(_tresH) * wb);
+#endif
 }
 
 // Same geometry/mirroring as streamPlane, but each visible byte is lhs ^ rhs.
@@ -454,6 +508,9 @@ void Uc8279X4Driver::streamPlaneXor(EpdBus& bus, uint8_t ramCmd, const uint8_t* 
   memset(row, 0xFF, wb);
   for (uint16_t y = _cfg.gateOffset + _h; y < _tresH; y++) bus.rawWriteBytes(row, wb);
   bus.endTxn();
+#ifdef TENOR_PRESS_PROBE
+  traceWindowPlane(ramCmd, uint32_t(_tresH) * wb);
+#endif
 }
 
 void Uc8279X4Driver::powerOnIfNeeded(EpdBus& bus, const char* tag) {
@@ -524,6 +581,9 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
       // Full flash: seed the OLD plane white across the whole 600-gate scan for
       // the absolute GC-from-white waveform.
       bus.fillPlane(CMD_DTM1, 0xFF, _tresH, _wb);
+#ifdef TENOR_PRESS_PROBE
+      traceWindowPlane(CMD_DTM1, uint32_t(_tresH) * _wb);
+#endif
     }
   } else if (_redriveAfterGray) {
     // Re-drive every pixel once after grayscale so the B/W transition scrubs
@@ -591,6 +651,9 @@ void Uc8279X4Driver::startBwRefresh(EpdBus& bus, bool fast, bool windowOpen) {
   bus.cmd(CMD_PANEL_SETTING);
   bus.data(static_cast<uint8_t>(_cfg.psr0 & 0xDF));  // REG cleared -> OTP (0x13)
   bus.data(_cfg.psr1);
+#ifdef TENOR_PRESS_PROBE
+  if (windowTrace) { ++windowTrace->drf; windowTrace->refreshStart = millis(); }
+#endif
   bus.cmd(CMD_DISPLAY_REFRESH);
   // Confirm the waveform started (BUSY dropped) before returning, so
   // displayFinish() only rides out the completion edge.
@@ -606,6 +669,9 @@ void Uc8279X4Driver::displayFinish(EpdBus& bus, const uint8_t* fb) {
   _pendingRefresh = false;
 
   bus.waitRefreshComplete(" 8279x4_DRF");
+#ifdef TENOR_PRESS_PROBE
+  if (windowTrace) windowTrace->busyMs += millis() - windowTrace->refreshStart;
+#endif
 #if defined(FREEINK_EPD_STAGE_TRACE) && FREEINK_EPD_STAGE_TRACE
   const unsigned long tF0 = millis();
 #endif
@@ -678,7 +744,13 @@ GrayscaleCapabilities Uc8279X4Driver::grayscaleCapabilities(GrayscaleMode mode) 
 bool Uc8279X4Driver::displayGrayscaleWindow(EpdBus& bus, const uint8_t* bw, const uint8_t* lsb,
                                            const uint8_t* msb, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                                            bool turnOff) {
+#ifdef TENOR_PRESS_PROBE
+  WindowTrace trace("AA", x, y, w, h);
+#endif
   if (!bw || !lsb || !msb) {
+#ifdef TENOR_PRESS_PROBE
+    Serial.printf("WINDOW_FALLBACK reason=missing_plane\n");
+#endif
     requestResync(1);
     return false;
   }
@@ -691,6 +763,13 @@ bool Uc8279X4Driver::displayGrayscaleWindow(EpdBus& bus, const uint8_t* bw, cons
   if (!valid || _grayWindowCount >= 10 || moved || !_oldPlaneValid || _needFullClear || _windowGrayPending ||
       _redriveAfterGray || _directGrayOnPanel || _pendingRefresh || !_grayBase || !_grayBaseValid ||
       memcmp(_grayBase, bw, _bufferSize) != 0) {
+#ifdef TENOR_PRESS_PROBE
+    Serial.printf("WINDOW_FALLBACK reason=%s\n", !valid ? "bounds_or_inversion" :
+                  _grayWindowCount >= 10 ? "gray_limit" : moved ? "window_changed" :
+                  !_oldPlaneValid ? "old_plane" : _needFullClear ? "full_clear" :
+                  _windowGrayPending || _redriveAfterGray || _directGrayOnPanel || _pendingRefresh ? "gray_or_pending" :
+                  !_grayBase || !_grayBaseValid ? "gray_base" : "base_changed");
+#endif
     beginGrayscale(bus, bw, GrayscaleMode::Absolute, RefreshMode::Full, false);
     copyGrayscaleLsb(bus, lsb);
     copyGrayscaleMsb(bus, msb);
@@ -822,8 +901,14 @@ void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, c
   bus.data(_cfg.psr0);
   bus.data(_cfg.psr1);
 
+#ifdef TENOR_PRESS_PROBE
+  if (windowTrace) { ++windowTrace->drf; windowTrace->refreshStart = millis(); }
+#endif
   bus.cmd(CMD_DISPLAY_REFRESH);
   bus.waitBusy((_directGrayPass ? " 8279x4_DIRECT_GRAY_DRF" : " 8279x4_gray"));
+#ifdef TENOR_PRESS_PROBE
+  if (windowTrace) windowTrace->busyMs += millis() - windowTrace->refreshStart;
+#endif
   // Vendor production behavior: the UC8279 AA path leaves analog power enabled
   // between page refreshes (the UC8179 sibling does the same - its gray_aa sends
   // no POF). Honor only an explicit turnOff.
@@ -954,6 +1039,9 @@ void Uc8279X4Driver::runGrayscalePrecondition(EpdBus& bus) {
   }
 
   powerOnIfNeeded(bus, " 8279x4_gray_pre_PON");
+#ifdef TENOR_PRESS_PROBE
+  if (windowTrace) { ++windowTrace->drf; windowTrace->refreshStart = millis(); }
+#endif
   bus.cmd(CMD_DISPLAY_REFRESH);
   bus.waitBusy(" 8279x4_gray_pre_DRF");
   bus.cmd(CMD_PARTIAL_OUT);
@@ -961,6 +1049,10 @@ void Uc8279X4Driver::runGrayscalePrecondition(EpdBus& bus) {
 
 void Uc8279X4Driver::cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) {
   if (_grayWindowValid && bw) {
+#ifdef TENOR_PRESS_PROBE
+    WindowTrace trace("cleanup", _grayWindow.xs, _grayWindow.ys, _grayWindow.xe - _grayWindow.xs + 1,
+                      _grayWindow.ye - _grayWindow.ys + 1);
+#endif
     openWindow(bus, _grayWindow);
     streamWindow(bus, CMD_DTM1, bw, _grayWindow);
     bus.cmd(CMD_PARTIAL_OUT);

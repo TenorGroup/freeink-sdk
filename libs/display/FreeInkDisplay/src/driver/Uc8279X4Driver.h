@@ -24,6 +24,10 @@
 #include "PanelDriver.h"
 
 namespace freeink {
+#ifdef TENOR_PRESS_PROBE
+extern volatile uint8_t uc8279X4WindowScan;
+#endif
+
 
 struct Uc8279X4Config {
   // PSR (0x00) byte 0 as written at init and for the AA path (REG bit5=1,

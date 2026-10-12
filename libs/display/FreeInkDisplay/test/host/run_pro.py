@@ -25,15 +25,26 @@ with tempfile.TemporaryDirectory(prefix="freeink-pro-test-") as directory:
     for name in ("Arduino.h", "BoardConfig.h", "SPI.h", "esp_heap_caps.h"):
         shutil.copy2(HERE / "pro_stubs" / name, root / name)
     shutil.copy2(HERE / "pro_stubs/EpdBus.h", root / "src/bus/EpdBus.h")
-    for single in (False, True):
+    for single, probe in ((False, False), (True, False), (False, True), (True, True)):
         exe = root / ("single" if single else "dual")
         command = [os.environ.get("CXX", "c++"), "-std=c++17", "-Wall", "-Wextra",
                    "-Wno-unused-parameter", "-Wno-unused-function", "-DBOARD_HAS_PSRAM=1",
                    "-DARDUINO=1", "-I"+str(root), "-I"+str(root / "include")]
+        if probe:
+            command += ["-DTENOR_PRESS_PROBE=1"]
+        command += ["-Werror"]
         if single:
             command += ["-DEINK_DISPLAY_SINGLE_BUFFER_MODE=1"]
         command += [str(HERE / "test_pro.cpp"), str(root / "src/FreeInkDisplay.cpp")]
         command += [str(root / f"src/driver/{name}Driver.cpp") for name in drivers]
         subprocess.run(command + ["-o", str(exe)], check=True)
-        subprocess.run([str(exe)], check=True)
+        result = subprocess.run([str(exe)], check=True, capture_output=True, text=True)
+        if probe:
+            for marker in ("WINDOW_BEGIN", "WINDOW_PTL", "WINDOW_BYTES dtm1=600 dtm2=600 DRF=1",
+                           "WINDOW_FALLBACK reason=gray_limit", "WINDOW_FALLBACK reason=missing_plane",
+                           "WINDOW_END free=131072 largest=65536"):
+                assert marker in result.stdout, marker
+        else:
+            assert b"WINDOW_BEGIN" not in exe.read_bytes()
+        print(result.stdout, end="")
         subprocess.run([str(exe), "sticky"], check=True)

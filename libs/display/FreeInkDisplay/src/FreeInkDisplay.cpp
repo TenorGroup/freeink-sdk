@@ -787,6 +787,9 @@ void FreeInkDisplay::displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t 
   Serial.printf("[EPD] displayWindow %u,%u %ux%u\n", x, y, w, h);
 #endif
   if (_inverted || _inversionDirty) {
+#ifdef TENOR_PRESS_PROBE
+    Serial.printf("WINDOW_FALLBACK reason=inverted\n");
+#endif
     // A window diff would need an inverted controller baseline for just the
     // requested region. A full refresh is simpler and keeps every driver
     // correct without a second framebuffer.
@@ -837,9 +840,12 @@ bool FreeInkDisplay::displayGrayscaleWindow(const uint8_t* lsb, const uint8_t* m
   syncPendingAsync();
   if (!lsb || !msb || !frameBuffer) {
     requestResync(1);
-    return false;
+    return _driver && _driver->displayGrayscaleWindow(_bus, frameBuffer, lsb, msb, x, y, w, h, turnOffScreen);
   }
   if (_inverted || _inversionDirty) {
+#ifdef TENOR_PRESS_PROBE
+    Serial.printf("WINDOW_FALLBACK reason=inverted\n");
+#endif
     displayBuffer(FULL_REFRESH, turnOffScreen);
     return false;
   }

@@ -544,6 +544,9 @@ int main(int argc, char**) {
   testWindowBw();
   testWindowGray();
   testWindowRecovery();
+#ifdef TENOR_PRESS_PROBE
+  testWindowScan();
+#endif
   testUc8179GrayShadeSplit();
   testUc8279X4WaveformSelection();
   testDirectSleep<Uc8179Driver>();
