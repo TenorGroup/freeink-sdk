@@ -542,6 +542,7 @@ int main(int argc, char**) {
     return 0;
   }
   testWindowBw();
+  testWindowGray();
   testUc8179GrayShadeSplit();
   testUc8279X4WaveformSelection();
   testDirectSleep<Uc8179Driver>();

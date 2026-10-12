@@ -826,6 +826,23 @@ void FreeInkDisplay::displayGrayBuffer(bool turnOffScreen, const unsigned char* 
   _driver->displayGray(_bus, frameBuffer, turnOffScreen, lut, factoryMode);
 }
 
+bool FreeInkDisplay::displayGrayscaleWindow(const uint8_t* lsb, const uint8_t* msb, uint16_t x, uint16_t y,
+                                            uint16_t w, uint16_t h, bool turnOffScreen) {
+  cancelGrayscalePass();
+  syncPendingAsync();
+  if (!lsb || !msb || !frameBuffer) {
+    requestResync(1);
+    return false;
+  }
+  if (_inverted || _inversionDirty) {
+    displayBuffer(FULL_REFRESH, turnOffScreen);
+    return false;
+  }
+  _shadowValid = false;
+  _redRamSynced = false;
+  return _driver->displayGrayscaleWindow(_bus, frameBuffer, lsb, msb, x, y, w, h, turnOffScreen);
+}
+
 void FreeInkDisplay::displayGrayCalibration(uint16_t customX, uint16_t customY, uint16_t customW, uint16_t customH) {
   cancelGrayscalePass();
   if (_inverted) return;

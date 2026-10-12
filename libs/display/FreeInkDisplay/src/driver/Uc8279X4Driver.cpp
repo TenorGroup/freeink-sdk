@@ -283,6 +283,7 @@ void Uc8279X4Driver::initController(EpdBus& bus) {
 }
 
 void Uc8279X4Driver::begin(EpdBus& bus) {
+  _grayWindowActive = _grayWindowValid = false;
   _directGrayOnPanel = false;
   _grayImagePass = false;
   _absoluteInput = false;
@@ -337,12 +338,20 @@ void Uc8279X4Driver::openWindow(EpdBus& bus, const Window& window) {
   bus.data(ptl, sizeof(ptl));
 }
 
-void Uc8279X4Driver::streamWindow(EpdBus& bus, uint8_t command, const uint8_t* fb, const Window& window) {
+void Uc8279X4Driver::streamWindow(EpdBus& bus, uint8_t command, const uint8_t* fb, const Window& window, bool invert) {
+  uint8_t row[100];
   const uint16_t first = window.xs / 8, count = (window.xe - window.xs + 1) / 8;
   bus.cmd(command);
   bus.beginTxn();
-  for (uint16_t y = window.ys; y <= window.ye; ++y)
-    bus.rawWriteBytes(fb + static_cast<uint32_t>(y) * _wb + first, count);
+  for (uint16_t y = window.ys; y <= window.ye; ++y) {
+    const auto* source = fb + static_cast<uint32_t>(y) * _wb + first;
+    if (invert) {
+      for (uint16_t i = 0; i < count; ++i) row[i] = static_cast<uint8_t>(~source[i]);
+      bus.rawWriteBytes(row, count);
+    } else {
+      bus.rawWriteBytes(source, count);
+    }
+  }
   bus.endTxn();
 }
 
@@ -450,6 +459,7 @@ void Uc8279X4Driver::powerOnIfNeeded(EpdBus& bus, const char* tag) {
 }
 
 bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
+  _grayWindowActive = _grayWindowValid = false;
   _windowGrayPending = false;
 #if defined(FREEINK_EPD_STAGE_TRACE) && FREEINK_EPD_STAGE_TRACE
   // Where the time before the refresh goes: the base copy, each plane, the trigger.
@@ -612,6 +622,7 @@ void Uc8279X4Driver::displayFinish(EpdBus& bus, const uint8_t* fb) {
 }
 
 void Uc8279X4Driver::requestResync(uint8_t settlePasses) {
+  _grayWindowActive = _grayWindowValid = false;
   _grayImagePass = false;
   _absoluteInput = false;
   _directGrayPass = false;
@@ -622,6 +633,7 @@ void Uc8279X4Driver::requestResync(uint8_t settlePasses) {
 void Uc8279X4Driver::skipInitialResync() { _needFullClear = false; }
 
 void Uc8279X4Driver::deepSleep(EpdBus& bus) {
+  _grayWindowActive = _grayWindowValid = false;
   _directGrayOnPanel = false;
   _grayImagePass = false;
   _absoluteInput = false;
@@ -655,8 +667,39 @@ GrayscaleCapabilities Uc8279X4Driver::grayscaleCapabilities(GrayscaleMode mode) 
   return {GrayscaleEncoding::OverlayMasks, GrayscaleBase::Separate, false, false, false};
 }
 
+bool Uc8279X4Driver::displayGrayscaleWindow(EpdBus& bus, const uint8_t* bw, const uint8_t* lsb,
+                                           const uint8_t* msb, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                                           bool turnOff) {
+  if (!bw || !lsb || !msb) {
+    requestResync(1);
+    return false;
+  }
+  if (BoardConfig::ACTIVE.board != BoardConfig::Board::XteinkX4Pro ||
+      !grayscaleCapabilities(GrayscaleMode::Absolute).supported()) return false;
+  Window window;
+  if (!makeWindow(window, x, y, w, h) || !_oldPlaneValid || _needFullClear || _windowGrayPending ||
+      _redriveAfterGray || _directGrayOnPanel || _pendingRefresh || !_grayBase || !_grayBaseValid ||
+      memcmp(_grayBase, bw, _bufferSize) != 0) {
+    beginGrayscale(bus, bw, GrayscaleMode::Absolute, RefreshMode::Full, false);
+    copyGrayscaleLsb(bus, lsb);
+    copyGrayscaleMsb(bus, msb);
+    displayGray(bus, bw, turnOff, nullptr, true);
+    return true;
+  }
+  _grayWindow = window;
+  _grayWindowActive = _grayWindowValid = true;
+  _absoluteInput = true;
+  _windowGrayPending = true;
+  openWindow(bus, window);
+  streamWindow(bus, CMD_DTM1, lsb, window, true);
+  streamWindow(bus, CMD_DTM2, msb, window, true);
+  displayGray(bus, bw, turnOff, nullptr, true);
+  return true;
+}
+
 void Uc8279X4Driver::beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode mode, RefreshMode fallback,
                                     bool turnOff) {
+  _grayWindowActive = _grayWindowValid = false;
   _grayImagePass = false;
   _absoluteInput = false;
   _directGrayPass = false;
@@ -785,6 +828,16 @@ void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, c
   // stops a stale gray selector plane from being reused by a later refresh - the
   // core of why absolute planes de-ghost where raw delta planes did not.
   (void)fb;
+  if (_grayWindowActive) {
+    streamWindow(bus, CMD_DTM1, _grayBase, _grayWindow);
+    streamWindow(bus, CMD_DTM2, _grayBase, _grayWindow);
+    bus.cmd(CMD_PARTIAL_OUT);
+    _grayWindowActive = false;
+    _oldPlaneValid = true;
+    _needFullClear = false;
+    _absoluteInput = false;
+    return;
+  }
   if (_grayBaseValid && _grayBase != nullptr) {
     streamPlane(bus, CMD_DTM1, _grayBase);
     streamPlane(bus, CMD_DTM2, _grayBase);
@@ -895,6 +948,14 @@ void Uc8279X4Driver::runGrayscalePrecondition(EpdBus& bus) {
 }
 
 void Uc8279X4Driver::cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) {
+  if (_grayWindowValid && bw) {
+    openWindow(bus, _grayWindow);
+    streamWindow(bus, CMD_DTM1, bw, _grayWindow);
+    bus.cmd(CMD_PARTIAL_OUT);
+    _grayWindowValid = false;
+    return;
+  }
+  _grayWindowActive = _grayWindowValid = false;
   _windowGrayPending = false;
   _grayImagePass = false;
   _absoluteInput = false;
