@@ -756,12 +756,19 @@ bool Uc8279X4Driver::displayGrayscaleWindow(EpdBus& bus, const uint8_t* bw, cons
   }
   if (BoardConfig::ACTIVE.board != BoardConfig::Board::XteinkX4Pro ||
       !grayscaleCapabilities(GrayscaleMode::Absolute).supported()) return false;
+  if (!_grayBase) {
+#ifdef TENOR_PRESS_PROBE
+    Serial.printf("WINDOW_FALLBACK reason=gray_base\n");
+#endif
+    display(bus, bw, nullptr, RefreshMode::Full, turnOff);
+    return false;
+  }
   Window window;
   const bool valid = makeWindow(window, x, y, w, h);
   const bool moved = _grayWindowCount && (window.xs != _grayWindow.xs || window.xe != _grayWindow.xe ||
                                         window.ys != _grayWindow.ys || window.ye != _grayWindow.ye);
   if (!valid || _grayWindowCount >= 10 || moved || !_oldPlaneValid || _needFullClear || _windowGrayPending ||
-      _redriveAfterGray || _directGrayOnPanel || _pendingRefresh || !_grayBase || !_grayBaseValid ||
+      _redriveAfterGray || _directGrayOnPanel || _pendingRefresh || !_grayBaseValid ||
       memcmp(_grayBase, bw, _bufferSize) != 0) {
 #ifdef TENOR_PRESS_PROBE
     Serial.printf("WINDOW_FALLBACK reason=%s\n", !valid ? "bounds_or_inversion" :

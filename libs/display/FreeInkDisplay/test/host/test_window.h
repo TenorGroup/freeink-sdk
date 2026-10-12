@@ -158,8 +158,14 @@ static void testWindowGray() {
     display.displayWindow(80, 120, 600, 8);
     assert(windowBytes(bus, 0x13) == 60000 && windowCommands(bus, 0x12) == 1);
   }
-  display.releaseBuffers();
   free(driver._grayBase);
+  driver._grayBase = nullptr;
+  driver._grayBaseValid = false;
+  bus.clear();
+  assert(!display.displayGrayscaleWindow(lsb.data(), msb.data(), 73, 30, 254, 383));
+  assert(windowCommands(bus, 0x12) == 1 && windowBytes(bus, 0x13) == 60000);
+  assert((lastRegister(bus, 0x00) & 0x20) == 0);
+  display.releaseBuffers();
 }
 
 static void testWindowRecovery() {

@@ -38,7 +38,11 @@ with tempfile.TemporaryDirectory(prefix="freeink-pro-test-") as directory:
         command += [str(HERE / "test_pro.cpp"), str(root / "src/FreeInkDisplay.cpp")]
         command += [str(root / f"src/driver/{name}Driver.cpp") for name in drivers]
         subprocess.run(command + ["-o", str(exe)], check=True)
-        result = subprocess.run([str(exe)], check=True, capture_output=True, text=True)
+        result = subprocess.run([str(exe)], capture_output=True, text=True)
+        if result.returncode:
+            print(result.stdout, end="")
+            print(result.stderr, end="")
+            result.check_returncode()
         if probe:
             for marker in ("WINDOW_BEGIN", "WINDOW_PTL", "WINDOW_BYTES dtm1=600 dtm2=600 DRF=1",
                            "WINDOW_FALLBACK reason=gray_limit", "WINDOW_FALLBACK reason=missing_plane",
