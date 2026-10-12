@@ -283,6 +283,7 @@ void Uc8279X4Driver::initController(EpdBus& bus) {
 }
 
 void Uc8279X4Driver::begin(EpdBus& bus) {
+  _grayWindowCount = 0;
   _grayWindowActive = _grayWindowValid = false;
   _directGrayOnPanel = false;
   _grayImagePass = false;
@@ -497,6 +498,7 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
   // pages) AND the manual force-refresh; it MUST scrub, exactly like UC8179.
   const bool scrub = (mode == RefreshMode::Half);
   const bool fast = (mode == RefreshMode::Fast) && !_needFullClear && _oldPlaneValid;
+  if (!fast) _grayWindowCount = 0;
 
   if (paintDestination) {
     streamPlane(bus, CMD_DTM1, fb, true);
@@ -622,6 +624,7 @@ void Uc8279X4Driver::displayFinish(EpdBus& bus, const uint8_t* fb) {
 }
 
 void Uc8279X4Driver::requestResync(uint8_t settlePasses) {
+  _grayWindowCount = 0;
   _grayWindowActive = _grayWindowValid = false;
   _grayImagePass = false;
   _absoluteInput = false;
@@ -633,6 +636,7 @@ void Uc8279X4Driver::requestResync(uint8_t settlePasses) {
 void Uc8279X4Driver::skipInitialResync() { _needFullClear = false; }
 
 void Uc8279X4Driver::deepSleep(EpdBus& bus) {
+  _grayWindowCount = 0;
   _grayWindowActive = _grayWindowValid = false;
   _directGrayOnPanel = false;
   _grayImagePass = false;
@@ -677,7 +681,10 @@ bool Uc8279X4Driver::displayGrayscaleWindow(EpdBus& bus, const uint8_t* bw, cons
   if (BoardConfig::ACTIVE.board != BoardConfig::Board::XteinkX4Pro ||
       !grayscaleCapabilities(GrayscaleMode::Absolute).supported()) return false;
   Window window;
-  if (!makeWindow(window, x, y, w, h) || !_oldPlaneValid || _needFullClear || _windowGrayPending ||
+  const bool valid = makeWindow(window, x, y, w, h);
+  const bool moved = _grayWindowCount && (window.xs != _grayWindow.xs || window.xe != _grayWindow.xe ||
+                                        window.ys != _grayWindow.ys || window.ye != _grayWindow.ye);
+  if (!valid || _grayWindowCount >= 10 || moved || !_oldPlaneValid || _needFullClear || _windowGrayPending ||
       _redriveAfterGray || _directGrayOnPanel || _pendingRefresh || !_grayBase || !_grayBaseValid ||
       memcmp(_grayBase, bw, _bufferSize) != 0) {
     beginGrayscale(bus, bw, GrayscaleMode::Absolute, RefreshMode::Full, false);
@@ -833,6 +840,7 @@ void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, c
     streamWindow(bus, CMD_DTM2, _grayBase, _grayWindow);
     bus.cmd(CMD_PARTIAL_OUT);
     _grayWindowActive = false;
+    ++_grayWindowCount;
     _oldPlaneValid = true;
     _needFullClear = false;
     _absoluteInput = false;

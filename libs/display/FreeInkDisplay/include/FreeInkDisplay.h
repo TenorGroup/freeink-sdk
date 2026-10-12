@@ -267,6 +267,8 @@ class FreeInkDisplay {
   void displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOffScreen = false);
   void displayGrayBuffer(bool turnOffScreen = false, const unsigned char* lut = nullptr, bool factoryMode = false);
   void displayGrayCalibration(uint16_t customX, uint16_t customY, uint16_t customW, uint16_t customH);
+  // Call when leaving the surface that used local gray refreshes.
+  void endGrayscaleWindowSession();
   // Absolute selectors, full-frame buffers and panel coordinates. The current
   // framebuffer is the B/W base already shown. Invalid state uses a full pass;
   // missing planes or an unsupported panel return false without a gray refresh.

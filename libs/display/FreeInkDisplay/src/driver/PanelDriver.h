@@ -138,6 +138,8 @@ class PanelDriver {
     return false;
   }
 
+  virtual void endGrayscaleWindowSession() {}
+
   // Mode is fixed before uploads; drivers may adapt the common host encoding.
   virtual void beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode mode, RefreshMode fallback, bool turnOff) {
     (void)mode;

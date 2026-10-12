@@ -100,6 +100,7 @@ class Uc8279X4Driver : public PanelDriver {
   // stock's panel LUT registry (X4 Pro 260917 build) recognizes but ships no
   // external-LUT tables for — that panel runs OTP waveforms only.
   GrayscaleCapabilities grayscaleCapabilities(GrayscaleMode mode = GrayscaleMode::Overlay) const override;
+  void endGrayscaleWindowSession() override { requestResync(1); }
   bool displayGrayscaleWindow(EpdBus& bus, const uint8_t* bw, const uint8_t* lsb, const uint8_t* msb,
                               uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOff) override;
   void beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode mode, RefreshMode fallback, bool turnOff) override;
@@ -125,6 +126,7 @@ class Uc8279X4Driver : public PanelDriver {
   void openWindow(EpdBus& bus, const Window& window);
   void streamWindow(EpdBus& bus, uint8_t command, const uint8_t* fb, const Window& window, bool invert = false);
   Window _grayWindow;
+  uint8_t _grayWindowCount = 0;
   bool _grayWindowActive = false;
   bool _grayWindowValid = false;
   bool _windowDark = false;

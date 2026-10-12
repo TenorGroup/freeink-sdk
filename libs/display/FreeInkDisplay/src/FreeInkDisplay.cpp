@@ -826,6 +826,11 @@ void FreeInkDisplay::displayGrayBuffer(bool turnOffScreen, const unsigned char* 
   _driver->displayGray(_bus, frameBuffer, turnOffScreen, lut, factoryMode);
 }
 
+void FreeInkDisplay::endGrayscaleWindowSession() {
+  syncPendingAsync();
+  if (_driver) _driver->endGrayscaleWindowSession();
+}
+
 bool FreeInkDisplay::displayGrayscaleWindow(const uint8_t* lsb, const uint8_t* msb, uint16_t x, uint16_t y,
                                             uint16_t w, uint16_t h, bool turnOffScreen) {
   cancelGrayscalePass();

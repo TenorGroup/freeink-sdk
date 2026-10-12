@@ -155,3 +155,53 @@ static void testWindowGray() {
   display.releaseBuffers();
   free(driver._grayBase);
 }
+
+static void testWindowRecovery() {
+  BoardConfig::ACTIVE.board = BoardConfig::Board::XteinkX4Pro;
+  Uc8279X4Driver driver;
+  FreeInkDisplay display(12, 11, 13, 18, 14, 6);
+  display._driver = &driver;
+  display.begin();
+  const auto base = frame(31), lsb = frame(74), msb = frame(109);
+  auto& bus = display._bus;
+  const auto reset = [&] {
+    std::memcpy(display.getFrameBuffer(), base.data(), base.size());
+    display.displayBuffer(FreeInkDisplay::FULL_REFRESH);
+    display.syncWriteBufferFromActive();
+  };
+  const auto local = [&] {
+    bus.clear();
+    assert(display.displayGrayscaleWindow(lsb.data(), msb.data(), 73, 30, 254, 383));
+  };
+  reset();
+  for (unsigned pass = 1; pass <= 11; ++pass) {
+    local();
+    const size_t bytes = windowBytes(bus, 0x10) + windowBytes(bus, 0x13);
+    const size_t drf = windowCommands(bus, 0x12);
+    if (pass >= 9) std::printf("AA recovery pass=%u bytes=%zu DRF=%zu\n", pass, bytes, drf);
+    assert(bytes == (pass <= 10 ? 49024u : 420000u));
+    assert(drf == (pass <= 10 ? 1u : 2u));
+    display.cleanupGrayscaleBuffers(base.data());
+  }
+  for (unsigned count : {1u, 5u, 10u}) {
+    reset();
+    for (unsigned pass = 0; pass < count; ++pass) local();
+    display.endGrayscaleWindowSession();
+    bus.clear();
+    display.displayWindow(80, 120, 600, 8);
+    assert(windowBytes(bus, 0x13) == 60000 && windowCommands(bus, 0x12) == 1);
+    assert(lastRegister(bus, 0xe5) == 0x1e);
+  }
+  reset();
+  local();
+  display.endGrayscaleWindowSession();
+  local();
+  assert(windowCommands(bus, 0x12) == 2 && windowBytes(bus, 0x13) == 180000);
+  reset();
+  local();
+  bus.clear();
+  assert(display.displayGrayscaleWindow(lsb.data(), msb.data(), 73, 30, 248, 382));
+  assert(windowCommands(bus, 0x12) == 2 && windowBytes(bus, 0x13) == 180000);
+  display.releaseBuffers();
+  free(driver._grayBase);
+}
