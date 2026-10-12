@@ -79,6 +79,12 @@ static void testWindowBw() {
     for (unsigned y : {0u, 479u}) run(x, y, w, 1);
   run(799, 479, 1, 1);
   run(72, 30, 254, 383);
+  BoardConfig::ACTIVE.board = BoardConfig::Board::XteinkX4;
+  bus.clear();
+  driver.displayWindow(bus, target.data(), nullptr, 80, 120, 600, 8, false);
+  assert(lastRegister(bus, 0xe5) == 0x5a && windowBytes(bus, 0x13) == 60000);
+  BoardConfig::ACTIVE.board = BoardConfig::Board::XteinkX4Pro;
+  run(72, 30, 254, 383);
   std::printf("BW cover DTM1=%zu DTM2=%zu\n", windowBytes(bus, 0x10), windowBytes(bus, 0x13));
   for (unsigned failure = 0; failure < 6; ++failure) {
     driver.display(bus, initial.data(), nullptr, RefreshMode::Full, false);

@@ -359,6 +359,10 @@ void Uc8279X4Driver::streamWindow(EpdBus& bus, uint8_t command, const uint8_t* f
 void Uc8279X4Driver::displayWindow(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, uint16_t x, uint16_t y,
                                    uint16_t w, uint16_t h, bool turnOff) {
   if (!fb) { _needFullClear = true; return; }
+  if (BoardConfig::ACTIVE.board != BoardConfig::Board::XteinkX4Pro) {
+    PanelDriver::displayWindow(bus, fb, prev, x, y, w, h, turnOff);
+    return;
+  }
   Window window;
   if (!makeWindow(window, x, y, w, h) || !_oldPlaneValid || _needFullClear || _windowGrayPending ||
       _redriveAfterGray || _directGrayOnPanel || _pendingRefresh) {
