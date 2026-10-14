@@ -564,7 +564,13 @@ bool FtFont::loadGlyph(const GlyphId glyph, const uint32_t pixelSize26_6) {
   const int64_t syntheticBold = emboldenBold_ ? int64_t(pixelSize26_6) / 26 : 0;
   const FT_Pos strength =
       static_cast<FT_Pos>(std::clamp<int64_t>(syntheticBold + options_.embolden26_6, INT32_MIN, INT32_MAX));
-  return !strength || slot->format != FT_GLYPH_FORMAT_OUTLINE || FT_Outline_Embolden(&slot->outline, strength) == 0;
+  if (!strength || slot->format != FT_GLYPH_FORMAT_OUTLINE) return true;
+  if (FT_Outline_Embolden(&slot->outline, strength) != 0) return false;
+  // FT_Outline_Embolden keeps the left and bottom edges where they were, so the whole outline sits half the
+  // strength up and to the right. Move the ink-ramp part of that back, so the strokes thicken (or thin) around
+  // the same centre line as a font pack baked with the same strength.
+  if (const FT_Pos half = static_cast<FT_Pos>(options_.embolden26_6) / 2) FT_Outline_Translate(&slot->outline, -half, -half);
+  return true;
 }
 
 bool FtFont::hasGlyph(const uint32_t codepoint) const { return glyphId(codepoint) != 0; }
