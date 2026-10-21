@@ -2109,6 +2109,77 @@ void testListRtlMirrorsIconAndValueSides() {
   CHECK_EQ(rtlDraw.ops[rtlValueIdx].rect.x, 4);  // band.x(0) + valueInset(4) in RTL
 }
 
+// A row dimmed only for looks (item.state carries StateDisabled, item.enabled stays true) still shows the cursor when
+// selected: the font store dims installed families, and the selected one drew no cursor at all (v1.0.70).
+void testListCursorShowsOnDimmedRow() {
+  ListItem items[2]{};
+  items[0].label = "Installed";
+  items[0].state = StateDisabled;
+  items[1].label = "Other";
+
+  ListProps props;
+  props.items = items;
+  props.count = 2;
+  props.rowHeight = 40;
+  props.selectedIndex = 0;
+  props.rowStyles.selected.background = Paint::solid(Color::Black);
+  props.rowStyles.selected.foreground = Paint::solid(Color::White);
+  props.rowStyles.disabled.foreground = Paint::dither(Color::LightGray);
+  props.rowStyles.explicitlySet = true;
+
+  DeviceContext device = makeDevice();
+  InputSnapshot input;
+  FakeDrawTarget draw;
+  InteractionBuffer<4> interactions;
+  Frame<4> frame(draw, device, input, interactions);
+  list(frame, Rect{0, 0, 480, 80}, props);
+
+  bool cursor = false;
+  for (size_t i = 0; i < draw.opCount; ++i) {
+    const FakeDrawTarget::Op& op = draw.ops[i];
+    if (op.kind == FakeDrawTarget::Op::Fill && op.paint == PaintKind::Solid && op.color == Color::Black &&
+        op.rect.y < 40 && op.rect.height >= 30)
+      cursor = true;
+  }
+  CHECK(cursor);
+}
+
+// A check row shows a round box in the switch's slot: a ring when off, a disc plus the tick's two strokes when on.
+void testListCheckRowDrawsRoundBox() {
+  for (const bool on : {false, true}) {
+    ListItem item{};
+    item.label = "Family";
+    item.toggle = true;
+    item.check = true;
+    item.toggleChecked = on;
+    ListProps props;
+    props.items = &item;
+    props.count = 1;
+    props.rowHeight = 40;
+    props.toggleWidth = 46;
+    props.toggleHeight = 26;
+    props.toggleRadius = 13;
+    DeviceContext device = makeDevice();
+    InputSnapshot input;
+    FakeDrawTarget draw;
+    InteractionBuffer<4> interactions;
+    Frame<4> frame(draw, device, input, interactions);
+    list(frame, Rect{0, 0, 480, 40}, props);
+    int lines = 0, stroke = 0, disc = 0;
+    for (size_t i = 0; i < draw.opCount; ++i) {
+      const auto& op = draw.ops[i];
+      if (op.kind == FakeDrawTarget::Op::Line) ++lines;
+      if (op.kind == FakeDrawTarget::Op::Stroke && op.rect.width == 26 && op.rect.height == 26) ++stroke;
+      if (op.kind == FakeDrawTarget::Op::Fill && op.rect.width == 26 && op.rect.height == 26 && op.radius == 13 &&
+          op.color == Color::Black)
+        ++disc;
+    }
+    CHECK_EQ(lines, on ? 2 : 0);
+    CHECK_EQ(stroke, on ? 0 : 1);
+    CHECK_EQ(disc, on ? 1 : 0);
+  }
+}
+
 // Same swap, but for a toggle row instead of a value row: the switch itself
 // (not just its knob) must relocate, since activateSelectedRow-style callers
 // rely on the toggle's on-screen position matching its touch hit region.
@@ -5898,6 +5969,8 @@ int main() {
   testListValueIconsEndAtValueEdge();
   testListRtlMirrorsIconAndValueSides();
   testListRtlMirrorsToggleSide();
+  testListCursorShowsOnDimmedRow();
+  testListCheckRowDrawsRoundBox();
   testListTrailingElementsShareOneInkColumn();
   testListValueEndsRowOnTrailingColumn();
   testButtonRegistersExpandedHit();

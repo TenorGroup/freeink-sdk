@@ -25,6 +25,9 @@ struct ListItem {
   // value string is ignored when set. Activation stays row-level via action.
   bool toggle = false;
   bool toggleChecked = false;
+  // With `toggle`: the slot holds a round check box (ring, or a disc with a tick) instead of a switch. For a list
+  // of things to pick several of; a switch stays for a real On/Off.
+  bool check = false;
   // Optional section heading drawn immediately before this selectable row.
   // It shares the row's logical index and interaction value.
   const char *sectionHeading = nullptr;
@@ -984,8 +987,10 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     }
     State state = partial ? static_cast<State>(item.state & ~(StateSelected | StateFocused | StateActive))
                           : item.state;
+    // A row dimmed only for looks (StateDisabled in item.state) yields to the
+    // cursor: resolve() puts disabled first, which hid the selected row.
     if (!partial && props.selectedIndex == static_cast<int16_t>(i))
-      state |= StateSelected;
+      state = static_cast<State>((state | StateSelected) & ~StateDisabled);
     if (!item.enabled)
       state |= StateDisabled;
     if (!partial && props.action != NO_ACTION && item.enabled) {
@@ -1148,7 +1153,27 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       sw.borderWidth = props.toggleBorderWidth;
       sw.track = sw.checkedKnob = paper;
       sw.checkedTrack = sw.border = sw.knob = fg;
-      toggle(frame, toggleRect, sw);
+      if (item.check) {
+        // A ring; ticked, a disc with the tick drawn in paper. Same ink pair as the switch, so it inverts with the row.
+        const int16_t box = togH < togW ? togH : togW;
+        const Rect boxRect{static_cast<int16_t>(props.rtl ? togX : togX + togW - box), toggleRect.y, box, box};
+        const uint8_t radius = static_cast<uint8_t>(box / 2);
+        if (item.toggleChecked) {
+          frame.target().fill(boxRect, fg, radius);
+          const int16_t w = box > 0 ? box : 1;
+          const Point a{static_cast<int16_t>(boxRect.x + w * 27 / 100), static_cast<int16_t>(boxRect.y + w * 52 / 100)};
+          const Point b{static_cast<int16_t>(boxRect.x + w * 44 / 100), static_cast<int16_t>(boxRect.y + w * 68 / 100)};
+          const Point c{static_cast<int16_t>(boxRect.x + w * 74 / 100), static_cast<int16_t>(boxRect.y + w * 34 / 100)};
+          const uint8_t pen = w >= 24 ? 3 : 2;
+          frame.target().line(a, b, pen, paper);
+          frame.target().line(b, c, pen, paper);
+        } else {
+          frame.target().fill(boxRect, paper, radius);
+          frame.target().stroke(boxRect, fg, props.toggleBorderWidth ? props.toggleBorderWidth : 2, radius);
+        }
+      } else {
+        toggle(frame, toggleRect, sw);
+      }
       availW = static_cast<int16_t>(availW - togW - props.valueInset -
                                     props.textGap);
       if (props.rtl)
