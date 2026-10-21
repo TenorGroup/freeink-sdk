@@ -2180,6 +2180,43 @@ void testListCheckRowDrawsBox() {
   }
 }
 
+// The check circle, the switch and a value stand at the middle of the WHOLE row, also when the row has a subtitle
+// (it used to follow the title band and sat high on two-tier rows).
+void testListTrailingMarksCentreOnTwoTierRows() {
+  for (const bool check : {false, true}) {
+    ListItem item{};
+    item.label = "Family";
+    item.subtitle = "12.2 MB";
+    item.toggle = true;
+    item.check = check;
+    item.toggleChecked = check;
+    ListProps props;
+    props.items = &item;
+    props.count = 1;
+    props.rowHeight = 80;
+    props.toggleWidth = 46;
+    props.toggleHeight = 26;
+    props.toggleRadius = 13;
+    DeviceContext device = makeDevice();
+    InputSnapshot input;
+    FakeDrawTarget draw;
+    InteractionBuffer<4> interactions;
+    Frame<4> frame(draw, device, input, interactions);
+    list(frame, Rect{0, 0, 480, 120}, props);
+    int found = 0;
+    for (size_t i = 0; i < draw.opCount; ++i) {
+      const auto& op = draw.ops[i];
+      if ((op.kind == FakeDrawTarget::Op::Fill || op.kind == FakeDrawTarget::Op::Stroke) && op.rect.height == 26 &&
+          op.rect.x > 300) {
+        ++found;
+        const int middle = draw.ops[0].rect.height / 2;  // the row background is the first fill
+        CHECK(op.rect.y + op.rect.height / 2 >= middle - 2 && op.rect.y + op.rect.height / 2 <= middle + 2);
+      }
+    }
+    CHECK(found > 0);
+  }
+}
+
 // Same swap, but for a toggle row instead of a value row: the switch itself
 // (not just its knob) must relocate, since activateSelectedRow-style callers
 // rely on the toggle's on-screen position matching its touch hit region.
@@ -5971,6 +6008,7 @@ int main() {
   testListRtlMirrorsToggleSide();
   testListCursorShowsOnDimmedRow();
   testListCheckRowDrawsBox();
+  testListTrailingMarksCentreOnTwoTierRows();
   testListTrailingElementsShareOneInkColumn();
   testListValueEndsRowOnTrailingColumn();
   testButtonRegistersExpandedHit();

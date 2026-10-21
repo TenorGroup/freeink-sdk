@@ -1136,7 +1136,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
           : static_cast<int16_t>(trailInkRight + 1 - togW);
       Rect toggleRect{
           togX,
-          static_cast<int16_t>(band.y + (band.height - togH) / 2), togW, togH};
+          static_cast<int16_t>(content.y + (content.height - togH) / 2), togW, togH};
       // The switch draws in row-foreground ink with the foreground's opposite
       // as "paper", so it inverts along with the row when selected.
       const Paint fg = style.foreground;
@@ -1189,7 +1189,9 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
           ? static_cast<int16_t>(band.x + props.valueInset)
           : valueEndsRow ? static_cast<int16_t>(trailInkRight + 1 - valueW)
                          : static_cast<int16_t>(band.x + availW - valueW - props.valueInset);
-      Rect valueRect{valueX, band.y, valueW, band.height};
+      // The whole row's height, not the title band: with a subtitle the value stands at the row's middle, as the
+      // switch, the check and the chevron do.
+      Rect valueRect{valueX, content.y, valueW, content.height};
       frame.target().text(valueRect, item.value, valueStyle);
       availW = static_cast<int16_t>(availW - valueW - props.valueInset -
                                     props.textGap);
@@ -1202,7 +1204,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       for (int k = 0; k < 2; ++k) {
         const BitmapRef &mark = item.valueIcons[k];
         if (!mark) continue;
-        frame.target().bitmap(Rect{x, static_cast<int16_t>(band.y + (band.height - mark.height) / 2),
+        frame.target().bitmap(Rect{x, static_cast<int16_t>(content.y + (content.height - mark.height) / 2),
                                    static_cast<int16_t>(mark.width), static_cast<int16_t>(mark.height)},
                               mark, BitmapMode::Contain, style.foreground);
         x = static_cast<int16_t>(x + mark.width + VALUE_ICON_GAP);
