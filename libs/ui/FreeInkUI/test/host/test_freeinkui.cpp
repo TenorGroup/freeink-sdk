@@ -2025,6 +2025,190 @@ void testListValueIconsEndAtValueEdge() {
   CHECK_EQ(draw.label.width, measured.labelWidth);
 }
 
+// A label picture (ListItem::labelImage) stands in the label's place: it starts at the label's edge, its baseline sits
+// on the text baseline (props.labelAscent) or, without it, it centres in the label band; it is cut at the label's
+// width, takes the row's ink (a chosen or dimmed row), and a subtitle still draws under it.
+void testListLabelImageStandsInLabelPlace() {
+  struct Pic : FakeDrawTarget {
+    Rect pic{};
+    BitmapMode mode = BitmapMode::Center;
+    Color ink = Color::Transparent;
+    void bitmap(Rect rect, BitmapRef bits, BitmapMode m, Paint paint, Rotation rotation) override {
+      pic = rect;
+      mode = m;
+      ink = paint.color;
+      FakeDrawTarget::bitmap(rect, bits, m, paint, rotation);
+    }
+  };
+  static const uint8_t bits[16] = {};
+  const LabelImage wide{{bits, 80, 10, BitmapFormat::BW1}, 8};
+  const LabelImage fits{{bits, 40, 10, BitmapFormat::BW1}, 8};
+  const auto draw = [&](const LabelImage& image, const int16_t width, const int16_t ascent, const bool subtitle,
+                        const int16_t selected, const State state, Pic& out) {
+    ListItem item;
+    item.label = "Name";
+    item.labelImage = &image;
+    item.state = state;
+    if (subtitle) item.subtitle = "48 MB";
+    ListProps props;
+    props.items = &item; props.count = 1; props.rowHeight = 56; props.scrollIndicator = false;
+    props.labelAscent = ascent;
+    props.selectedIndex = selected;
+    auto device = makeDevice();
+    InputSnapshot input;
+    InteractionBuffer<4> hits;
+    Frame<4> frame(out, device, input, hits);
+    list(frame, Rect{0, 0, width, 100}, props);
+  };
+  Pic base;
+  draw(fits, 240, 10, false, -1, StateNormal, base);
+  CHECK_EQ(base.countKind(FakeDrawTarget::Op::Text), 0u);   // the picture replaces the text
+  CHECK_EQ(base.countKind(FakeDrawTarget::Op::Bitmap), 1u);
+  CHECK_EQ(base.pic.x, 8);
+  CHECK_EQ(base.pic.y, (56 - 12) / 2 + 10 - 8);               // line top + ascent - rows above the baseline
+  CHECK_EQ(base.pic.width, 40);
+  CHECK_EQ(base.pic.height, 10);
+  Pic centred;
+  draw(fits, 240, 0, false, -1, StateNormal, centred);
+  CHECK_EQ(centred.pic.y, (56 - 10) / 2);                      // no ascent given: centred in the band
+  Pic cut;
+  draw(wide, 60, 10, false, -1, StateNormal, cut);
+  CHECK_EQ(cut.pic.width, 60 - 16);                            // cut at the label's width, from its left edge
+  CHECK(cut.mode == BitmapMode::TileX);
+  Pic selected, dimmed;
+  draw(fits, 240, 10, false, 0, StateNormal, selected);
+  draw(fits, 240, 10, false, -1, StateDisabled, dimmed);
+  CHECK(selected.ink != base.ink);                              // the cursor row inverts its ink
+  CHECK(dimmed.ink != base.ink);                                // a dimmed row draws in its dimmed ink
+  Pic two;
+  draw(fits, 240, 10, true, -1, StateNormal, two);
+  CHECK_EQ(two.countKind(FakeDrawTarget::Op::Text), 1u);       // the subtitle
+  CHECK_EQ(two.pic.y, (56 - 12 - 12) / 2 + 10 - 8);            // inside the label band, above the subtitle
+}
+
+// Rows of every kind a list draws, on a real 1-bit page, folded into one hash: a list without label pictures must
+// paint these pixels exactly as before the field existed (the hash was taken with the list.h that had no field).
+uint32_t listPageHash(const bool selectLast) {
+  constexpr int W = 240, H = 300, WB = W / 8;
+  uint8_t page[WB * H];
+  std::memset(page, 0xff, sizeof(page));
+  DisplayTarget target(page, W, H, WB, Orientation::Portrait);
+  const DeviceContext device = makeDevice();
+  InputSnapshot input;
+  InteractionBuffer<16> hits;
+  Frame<16> frame(target, device, input, hits);
+  static const uint8_t iconBits[32] = {0xff, 0xff, 0x80, 0x01, 0xbf, 0xfd, 0xa0, 0x05};
+  ListItem items[7]{};
+  items[0].label = "Plain";
+  items[1].label = "Two tier";
+  items[1].subtitle = "48 MB";
+  items[2].label = "With value";
+  items[2].value = "On";
+  items[2].opensNext = true;
+  items[3].label = "Check";
+  items[3].toggle = items[3].check = items[3].toggleChecked = true;
+  items[4].label = "Dimmed";
+  items[4].state = StateDisabled;
+  items[5].label = "Icon";
+  items[5].icon = BitmapRef{iconBits, 16, 16, BitmapFormat::BW1, false};
+  items[6].label = "Chosen";
+  items[6].chosen = true;
+  ListProps props;
+  props.items = items;
+  props.count = 7;
+  props.action = 2;
+  props.rowHeight = 40;
+  props.partialTrailingRow = true;
+  props.selectedIndex = selectLast ? 6 : 1;
+  list(frame, Rect{0, 0, W, 262}, props);
+  uint32_t hash = 2166136261u;
+  for (const uint8_t byte : page) hash = (hash ^ byte) * 16777619u;
+  return hash;
+}
+
+// No label picture: every pixel of the list is what it was before the field existed.
+void testListWithoutLabelImagePaintsAsBefore() {
+  CHECK_EQ(listPageHash(false), 341656261u);
+  CHECK_EQ(listPageHash(true), 4073146353u);
+}
+
+// The picture sizes the row like a label: as tall as itself when over a text line, its width is the hug width, the
+// label text beside it is not measured, and two pictures of different sizes do not share a measured row.
+void testListLabelImageSizesTheRow() {
+  FakeDrawTarget draw;
+  static const uint8_t bits[64] = {};
+  const LabelImage low{{bits, 30, 10, BitmapFormat::BW1}, 8}, tall{{bits, 50, 40, BitmapFormat::BW1}, 30};
+  ListItem item;
+  item.label = "must-not-measure";
+  item.labelImage = &low;
+  ListProps props;
+  props.items = &item; props.count = 1; props.rowHeight = 20; props.hugContents = true; props.labelText.maxLines = 3;
+  props.scrollIndicator = false;
+  ListRowLayout layout = measureListRow(draw, nullptr, 240, props, item);
+  CHECK(!draw.measuredForbiddenLabel);
+  CHECK_EQ(layout.naturalLabelWidth, 30);
+  CHECK_EQ(layout.labelLines, 1);
+  CHECK_EQ(layout.height, 20);                                // under a text line: the row keeps its height
+  item.labelImage = &tall;
+  layout = measureListRow(draw, nullptr, 240, props, item);
+  CHECK_EQ(layout.labelHeight, 40);
+  CHECK_EQ(layout.height, 40);
+  CHECK_EQ(layout.naturalLabelWidth, 50);
+  // The measure cache of list() keys on the picture: rows alike but for the picture are not one row.
+  ListItem two[2]{};
+  two[0].labelImage = &low;
+  two[1].labelImage = &tall;
+  props.items = two; props.count = 2; props.hugContents = false;
+  FakeDrawTarget page;
+  auto device = makeDevice();
+  InputSnapshot input;
+  InteractionBuffer<4> hits;
+  Frame<4> frame(page, device, input, hits);
+  list(frame, Rect{0, 0, 240, 200}, props);
+  CHECK_EQ(page.countKind(FakeDrawTarget::Op::Bitmap), 2u);
+  size_t seen = 0;
+  int16_t tops[2]{};
+  for (size_t i = 0; i < page.opCount && seen < 2; ++i)
+    if (page.ops[i].kind == FakeDrawTarget::Op::Bitmap) tops[seen++] = page.ops[i].rect.y;
+  CHECK_EQ(tops[1], 20);                                      // the second row starts under the first, 20 tall
+}
+
+// Under the fold the picture is clipped with its row, like a text label: the cropped page equals the full page
+// masked at the fold, for a plain and a cursor row.
+void testListLabelImagePreviewIsClipped() {
+  constexpr int W = 160, H = 160, WB = W / 8;
+  static const uint8_t bits[40 * 3] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+  const LabelImage pic{{bits, 24, 40, BitmapFormat::BW1}, 30};
+  for (const int16_t selected : {-1, 1}) {
+    uint8_t full[WB * H], cropped[WB * H], mask[WB * H];
+    std::memset(full, 0xff, sizeof(full));
+    std::memset(cropped, 0xff, sizeof(cropped));
+    std::memset(mask, 0xff, sizeof(mask));
+    DisplayTarget fullTarget(full, W, H, WB, Orientation::Portrait);
+    DisplayTarget cropTarget(cropped, W, H, WB, Orientation::Portrait);
+    DisplayTarget maskTarget(mask, W, H, WB, Orientation::Portrait);
+    const DeviceContext device = makeDevice();
+    InputSnapshot input;
+    InteractionBuffer<16> fullHits, cropHits;
+    Frame<16> fullFrame(fullTarget, device, input, fullHits);
+    Frame<16> cropFrame(cropTarget, device, input, cropHits);
+    ListItem items[3]{};
+    for (auto& item : items) item.labelImage = &pic;
+    ListProps props;
+    props.items = items; props.count = 3; props.action = 2; props.rowHeight = 40; props.scrollIndicator = false;
+    props.partialTrailingRow = true; props.selectedIndex = selected;
+    list(fullFrame, Rect{0, 0, W, 120}, props);
+    list(cropFrame, Rect{0, 0, W, 103}, props);
+    maskTarget.fill(Rect{0, 0, W, 103}, Paint::solid(Color::Black));
+    bool inked = false;
+    for (size_t i = 0; i < sizeof(full); ++i) {
+      CHECK_EQ(cropped[i], static_cast<uint8_t>(full[i] | mask[i]));
+      inked |= full[i] != 0xff;
+    }
+    CHECK(inked);
+  }
+}
+
 // A chosen row draws its label bold, so its lines are counted at the bold width.
 void testListChosenLabelMeasuresBold() {
   struct BoldWide : FakeDrawTarget {
@@ -6004,6 +6188,10 @@ int main() {
   testListChosenMarkReservesTrailingSlot();
   testListChosenLabelMeasuresBold();
   testListValueIconsEndAtValueEdge();
+  testListLabelImageStandsInLabelPlace();
+  testListWithoutLabelImagePaintsAsBefore();
+  testListLabelImageSizesTheRow();
+  testListLabelImagePreviewIsClipped();
   testListRtlMirrorsIconAndValueSides();
   testListRtlMirrorsToggleSide();
   testListCursorShowsOnDimmedRow();

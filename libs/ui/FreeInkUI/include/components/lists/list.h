@@ -9,6 +9,13 @@
 namespace freeink {
 namespace ui {
 
+// A picture standing for a label: the name of a font in its own letters. `baseline` counts the rows from the top of
+// the picture down to the baseline of its letters.
+struct LabelImage {
+  BitmapRef bitmap{};
+  int16_t baseline = 0;
+};
+
 struct ListItem {
   const char *label = nullptr;
   const char *subtitle = nullptr;
@@ -40,6 +47,11 @@ struct ListItem {
   // slot's edge, valueIcons[0] stands to its left (either may be empty), both centred on the row's height in the row's
   // ink. A pointer, not the bitmaps: every constant ListItem table of the firmware carries this field.
   const BitmapRef *valueIcons = nullptr;
+  // Drawn in the label's place (the label text is then neither measured nor drawn): the row is as tall as the picture
+  // when that is more than a text line. Left-aligned at the label's edge, cut at the label's width, in the row's text
+  // ink, so the cursor row inverts it and a dimmed row dims it where the target paints bitmaps in gray. Not through
+  // `icon`, which scales to a square. Null keeps the text label.
+  const LabelImage *labelImage = nullptr;
 };
 
 struct ListNav;
@@ -201,6 +213,9 @@ struct ListProps {
   // Explicit vertical content padding. -1 preserves legacy row-height-derived
   // padding; non-negative values make rowHeight a minimum, growing to content.
   int16_t rowPaddingY = -1;
+  // Ascent of the label font: a label picture's baseline then stands on the text baseline of the line it replaces.
+  // 0 centres the picture in the label band.
+  int16_t labelAscent = 0;
 };
 
 // Stateful companion to the immediate-mode list helpers in FreeInkUICore.h:
@@ -617,6 +632,10 @@ inline uint32_t listMeasureStyleKey(const ListProps &props, const ListItem &item
     add(item.valueIcons[0] ? static_cast<uint16_t>(item.valueIcons[0].width + VALUE_ICON_GAP) : 0u);
     add(static_cast<uint16_t>(item.valueIcons[1].width));
   }
+  if (item.labelImage) {
+    add(item.labelImage->bitmap.width);
+    add(item.labelImage->bitmap.height);
+  }
   add(item.chosen ? 1u : 0u);
   add(item.toggle ? 1u : 0u);
   add(item.valueIcons ? 1u : 0u);
@@ -642,8 +661,13 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
                                                    (item.chosen && props.chosenMark
                                                         ? props.chosenMark.width + props.textGap : 0));
   result.labelWidth = contentWidth;
-  if (props.hugContents && item.label) {
-    result.naturalLabelWidth = target.measureText(props.labelText.font, item.label, props.labelText).width;
+  // A label picture takes the label's place: one line as tall as the picture, cut at the label's width, and the text
+  // beside it is not measured.
+  const char *label = item.labelImage ? nullptr : item.label;
+  if (props.hugContents && item.labelImage) {
+    result.naturalLabelWidth = static_cast<int16_t>(item.labelImage->bitmap.width);
+  } else if (props.hugContents && label) {
+    result.naturalLabelWidth = target.measureText(props.labelText.font, label, props.labelText).width;
   }
   if (item.toggle) {
     result.valueWidth = props.toggleWidth < 18 ? 18 : props.toggleWidth;
@@ -661,8 +685,8 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   if (item.chosen) labelText.bold = true;
   bool labelWrapped = false;
   if (props.balanceWrappedLabelWithValue && labelText.maxLines > 1 &&
-      (item.toggle || item.value) && item.label &&
-      target.measureText(labelText.font, item.label, labelText).width > result.labelWidth) {
+      (item.toggle || item.value) && label &&
+      target.measureText(labelText.font, label, labelText).width > result.labelWidth) {
     if (item.value && !item.toggle) {
       // Label and value do not share one line. The label goes first: of the splits from the widest label down to
       // an even one, the one whose label and value both fit whole (the value on up to 2 lines) in the fewest lines,
@@ -679,7 +703,7 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
         const int labelW = k < 0 ? space - result.valueWidth : space * (80 - 5 * k) / 100;
         const int valueW = space - labelW;
         if (labelW <= 0 || valueW <= 0) continue;
-        const int labelLines = measureWrappedText(target, item.label, labelAll, static_cast<int16_t>(labelW)).height / labelLhAll;
+        const int labelLines = measureWrappedText(target, label, labelAll, static_cast<int16_t>(labelW)).height / labelLhAll;
         const int valueLines = valueW >= result.valueWidth ? 1
             : measureWrappedText(target, item.value, valueAll, static_cast<int16_t>(valueW)).height / valueLh;
         if (labelLines > props.labelText.maxLines || valueLines > 2) continue;
@@ -708,9 +732,9 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
     }
   }
   if (result.labelWidth < 0) result.labelWidth = 0;
-  if (!labelWrapped && item.label && labelText.maxLines > 1 && labelLh > 0 && result.labelWidth > 0) {
+  if (!labelWrapped && label && labelText.maxLines > 1 && labelLh > 0 && result.labelWidth > 0) {
     const int16_t lines = static_cast<int16_t>(measureWrappedText(
-        target, item.label, labelText, result.labelWidth).height / labelLh);
+        target, label, labelText, result.labelWidth).height / labelLh);
     if (lines > 1) result.labelLines = static_cast<uint8_t>(lines);
   }
   const int16_t subLh = item.subtitle ? target.lineHeight(props.subtitleText.font) : 0;
@@ -720,7 +744,9 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   }
   const int16_t valueHeight = item.toggle ? (props.toggleHeight < 12 ? 12 : props.toggleHeight)
       : (item.value ? static_cast<int16_t>(target.lineHeight(props.valueText.font) * result.valueLines) : 0);
-  const int16_t labelHeight = static_cast<int16_t>(labelLh * result.labelLines);
+  int16_t labelHeight = static_cast<int16_t>(labelLh * result.labelLines);
+  if (item.labelImage && item.labelImage->bitmap.height > labelHeight)
+    labelHeight = static_cast<int16_t>(item.labelImage->bitmap.height);
   result.labelHeight = labelHeight > valueHeight ? labelHeight : valueHeight;
   int16_t needed = rowH;
   if (props.rowPaddingY >= 0) {
@@ -977,7 +1003,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     }
     Rect row{rowArea.x, cursorY, rowArea.width, itemH};
     cursorY = static_cast<int16_t>(cursorY + itemH + rowGap);
-    if (props.hugContents && item.label) {
+    if (props.hugContents && (item.label || item.labelImage)) {
       // Hug-content rows shrink to the label width plus padding so the
       // selection pill wraps the text instead of spanning the rect.
       const int16_t labelW = layout.naturalLabelWidth;
@@ -1220,9 +1246,23 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
 
     if (props.rtl && !props.centerSingleLine)
       labelStyle.align = TextAlign::Right;
+    if (item.labelImage) {
+      // TileX shows the picture's first `w` columns from the rect's left edge: cut at the label's width.
+      const LabelImage &pic = *item.labelImage;
+      const int16_t w = pic.bitmap.width < availW ? static_cast<int16_t>(pic.bitmap.width) : availW;
+      const int16_t lineTop =
+          static_cast<int16_t>(band.y + (band.height - frame.target().lineHeight(props.labelText.font)) / 2);
+      frame.target().bitmap(
+          Rect{props.rtl ? static_cast<int16_t>(labelX + availW - w) : labelX,
+               props.labelAscent > 0 ? static_cast<int16_t>(lineTop + props.labelAscent - pic.baseline)
+                                     : static_cast<int16_t>(band.y + (band.height - pic.bitmap.height) / 2),
+               w, static_cast<int16_t>(pic.bitmap.height)},
+          pic.bitmap, BitmapMode::TileX, style.foreground);
+    }
     if (item.subtitle) {
-      frame.target().text(Rect{labelX, band.y, availW, band.height}, item.label,
-                          labelStyle);
+      if (!item.labelImage)
+        frame.target().text(Rect{labelX, band.y, availW, band.height}, item.label,
+                            labelStyle);
       frame.target().text(
           Rect{content.x, static_cast<int16_t>(band.y + band.height),
                content.width, subH},
@@ -1231,8 +1271,9 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     } else {
       if (props.centerSingleLine)
         labelStyle.align = TextAlign::Center;
-      frame.target().text(Rect{labelX, band.y, availW, band.height}, item.label,
-                          labelStyle);
+      if (!item.labelImage)
+        frame.target().text(Rect{labelX, band.y, availW, band.height}, item.label,
+                            labelStyle);
     }
 
     if (!partial && props.selectedIndex == static_cast<int16_t>(i) &&
