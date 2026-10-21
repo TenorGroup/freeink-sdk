@@ -32,6 +32,7 @@ void progressBar(Frame<MaxInteractions>& frame, Rect rect, const ProgressBarProp
     const int32_t clamped = props.value > props.max ? props.max : props.value;
     int16_t fillWidth = static_cast<int16_t>((static_cast<int64_t>(inner.width) * clamped) / props.max);
     if (fillWidth < inner.height) fillWidth = inner.height < inner.width ? inner.height : inner.width;
+    if (fillWidth < props.minFill) fillWidth = props.minFill > inner.width ? inner.width : props.minFill;
     frame.target().fill(Rect{inner.x, inner.y, fillWidth, inner.height}, props.fill,
                         static_cast<uint8_t>(inner.height / 2));
     return;

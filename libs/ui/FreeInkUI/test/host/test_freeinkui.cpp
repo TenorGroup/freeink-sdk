@@ -2144,8 +2144,8 @@ void testListCursorShowsOnDimmedRow() {
   CHECK(cursor);
 }
 
-// A check row shows a round box in the switch's slot: a ring when off, a disc plus the tick's two strokes when on.
-void testListCheckRowDrawsRoundBox() {
+// A check row shows a check circle in the switch's slot: a ring when off, a disc plus the tick's two strokes when on.
+void testListCheckRowDrawsBox() {
   for (const bool on : {false, true}) {
     ListItem item{};
     item.label = "Family";
@@ -5970,7 +5970,7 @@ int main() {
   testListRtlMirrorsIconAndValueSides();
   testListRtlMirrorsToggleSide();
   testListCursorShowsOnDimmedRow();
-  testListCheckRowDrawsRoundBox();
+  testListCheckRowDrawsBox();
   testListTrailingElementsShareOneInkColumn();
   testListValueEndsRowOnTrailingColumn();
   testButtonRegistersExpandedHit();

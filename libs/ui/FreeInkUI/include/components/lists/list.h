@@ -1154,7 +1154,8 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       sw.track = sw.checkedKnob = paper;
       sw.checkedTrack = sw.border = sw.knob = fg;
       if (item.check) {
-        // A ring; ticked, a disc with the tick drawn in paper. Same ink pair as the switch, so it inverts with the row.
+        // The iOS check circle: a ring; ticked, a disc with the tick drawn in paper. Same ink pair as the switch, so
+        // it inverts with the row.
         const int16_t box = togH < togW ? togH : togW;
         const Rect boxRect{static_cast<int16_t>(props.rtl ? togX : togX + togW - box), toggleRect.y, box, box};
         const uint8_t radius = static_cast<uint8_t>(box / 2);
