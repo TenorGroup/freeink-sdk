@@ -58,6 +58,16 @@ class GfxRendererTarget final : public DrawTarget {
     textSinkCtx_ = ctx;
   }
 
+  // Reports every picture the target is asked to draw (non-empty rect and bitmap), painting on or off, before
+  // anything is drawn: a skin that lays a list out with painting off learns where its label pictures stand and
+  // paints them itself. Unlike the text sink it only watches; with painting on the picture is drawn as usual.
+  using BitmapSink = void (*)(void* ctx, Rect rect, BitmapRef bitmap, BitmapMode mode, const Paint& foreground,
+                              Rotation rotation);
+  void setBitmapSink(BitmapSink sink, void* ctx) {
+    bitmapSink_ = sink;
+    bitmapSinkCtx_ = ctx;
+  }
+
   Rect clipRect() const override { return clip_; }
   bool setClipRect(Rect rect) override {
     if (!trySetClip(renderer, rect, 0)) return false;
@@ -345,6 +355,7 @@ class GfxRendererTarget final : public DrawTarget {
   void bitmap(const Rect rect, const BitmapRef bitmap, const BitmapMode mode,
               const Paint foreground = Paint::solid(Color::Black),
               const Rotation rotation = Rotation::None) override {
+    if (bitmapSink_ && bitmap && !rect.empty()) bitmapSink_(bitmapSinkCtx_, rect, bitmap, mode, foreground, rotation);
     if (!paintEnabled_) return;
     if (!bitmap || rect.empty()) return;
 
@@ -373,6 +384,8 @@ class GfxRendererTarget final : public DrawTarget {
   bool paintEnabled_ = true;
   TextSink textSink_ = nullptr;
   void* textSinkCtx_ = nullptr;
+  BitmapSink bitmapSink_ = nullptr;
+  void* bitmapSinkCtx_ = nullptr;
   int fonts[FONT_SLOTS];
 
   int gfxFont(const FontId slot) const {
