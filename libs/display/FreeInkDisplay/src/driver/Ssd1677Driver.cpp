@@ -506,6 +506,14 @@ void Ssd1677Driver::displayWindow(EpdBus& bus, const uint8_t* fb, const uint8_t*
     displayImpl(bus, fb, nullptr, _cfg.halfSeqOverride ? RefreshMode::Half : RefreshMode::Full, turnOff, /*async=*/false);
     return;
   }
+  // No host baseline: nothing here proves the BW plane outside the window still holds the frame on
+  // the glass (a deferred refresh skips the post-activation resync). The fast waveform runs across the
+  // whole panel anyway, so send the whole frame: on the X4 Pro a window over the open reader sheet
+  // otherwise cleared the sheet off the glass (23/10/2026).
+  if (prev == nullptr) {
+    displayImpl(bus, fb, nullptr, RefreshMode::Fast, turnOff, /*async=*/false);
+    return;
+  }
 
   const uint16_t windowWidthBytes = w / 8;
   const uint32_t windowBufferSize = static_cast<uint32_t>(windowWidthBytes) * h;

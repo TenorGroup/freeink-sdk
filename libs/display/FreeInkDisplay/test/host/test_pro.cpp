@@ -120,6 +120,27 @@ static void testSsd() {
   assert(lastRegister(bus,0x22)==0xcf && !d._isScreenOn);
 }
 
+// A window after a deferred refresh with no host baseline (the reader sheet, then the scrollbar
+// hiding): on the X4 Pro the 0xFC waveform runs across the whole panel, and with only the window's
+// bytes in the BW plane the sheet left the glass (23/10/2026). The whole frame goes in instead.
+static void testSsdWindowAfterNoBaselineAsync() {
+  const auto page=frame(41), sheet=frame(42);
+  EpdBus bus;
+  Ssd1677Driver d;
+  d.begin(bus);
+  d.display(bus,page.data(),nullptr,RefreshMode::Half,false);  // first paint, baseline seeded
+  d.displayStart(bus,sheet.data(),nullptr,RefreshMode::Fast,false);
+  d.displayFinish(bus,sheet.data());
+  bus.clear();
+  d.displayWindow(bus,sheet.data(),nullptr,0,0,8,16,false);
+  bool fullPlaneBeforeRefresh=false;
+  for (const auto& w : bus.writes) {
+    if (w.command==0x20) break;  // master activation
+    if (w.command==0x24 && w.bytes.size()==sheet.size()) fullPlaneBeforeRefresh=true;
+  }
+  assert(fullPlaneBeforeRefresh);
+}
+
 template<class Driver>
 static void testAsyncFrame() {
   Driver driver;
@@ -561,6 +582,7 @@ int main(int argc, char**) {
   testStream<Uc8179Driver>(true,0);
   testStream<Uc8279X4Driver>(false,120);
   testSsd();
+  testSsdWindowAfterNoBaselineAsync();
   testAsyncFrame<Uc8179Driver>();
   testAsyncFrame<Uc8279X4Driver>();
   std::puts("Pro plane bytes, transaction counts, clean refreshes, power state and async frame ownership passed");
