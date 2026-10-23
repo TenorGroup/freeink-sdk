@@ -139,6 +139,14 @@ static void testSsdWindowAfterNoBaselineAsync() {
     if (w.command==0x24 && w.bytes.size()==sheet.size()) fullPlaneBeforeRefresh=true;
   }
   assert(fullPlaneBeforeRefresh);
+  // After a blocking refresh (resync done) a window stays a window: the jump-bar tick, the Home swap.
+  d.display(bus,sheet.data(),nullptr,RefreshMode::Fast,false);
+  bus.clear();
+  d.displayWindow(bus,sheet.data(),nullptr,0,0,8,16,false);
+  for (const auto& w : bus.writes) {
+    if (w.command==0x20) break;
+    assert(!(w.command==0x24 && w.bytes.size()==sheet.size()));
+  }
 }
 
 template<class Driver>

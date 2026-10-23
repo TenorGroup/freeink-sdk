@@ -141,6 +141,8 @@ class Ssd1677Driver : public PanelDriver {
   // Async 0xFC updates cannot issue the separate power-off activation until the
   // display waveform completes; displayFinish() consumes this flag.
   bool _pendingPowerOff = false;
+  // The last refresh was deferred with no host baseline: its BW/RED resync never ran (displayWindow).
+  bool _resyncOwedByAsync = false;
   // First paint after begin() (boot or deep-sleep wake) must be a full refresh to
   // clear whatever is physically on the panel (e.g. the black boot screen) and set
   // a clean differential baseline. Only armed for boards whose self-powering fast
