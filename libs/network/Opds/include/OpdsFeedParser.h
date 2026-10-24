@@ -29,6 +29,15 @@ class OpdsFeedParser final : public Print {
   // authenticated retry after a 401).
   void reset();
 
+  // The OPDS 2.0 backend is one block of sizeof(Opds2Parser) bytes (14,592 B on the device) taken on the
+  // first JSON byte, usually inside a TLS session. The app can hand over the allocator it wants that block
+  // from (malloc-compatible, released with free()); nullptr from it fails the feed with allocationFailed().
+  // Unset, the block comes from operator new (nothrow). The Atom backend is not affected.
+  using BlockAllocator = void* (*)(size_t bytes);
+  void setBlockAllocator(BlockAllocator allocator) { blockAllocator = allocator; }
+  // True when a backend could not be allocated (error() is true too).
+  bool allocationFailed() const { return allocFailed; }
+
   size_t write(uint8_t c) override;
   size_t write(const uint8_t* data, size_t length) override;
   void flush() override;
@@ -61,7 +70,10 @@ class OpdsFeedParser final : public Print {
   bool selectBackend(uint8_t firstByte);
 
   std::unique_ptr<OpdsParser> xmlParser;
-  std::unique_ptr<Opds2Parser> jsonParser;
+  static void deleteJson(Opds2Parser* p) { delete p; }
+  static void freeJson(Opds2Parser* p);  // destructor, then free(): the block came from blockAllocator
+  std::unique_ptr<Opds2Parser, void (*)(Opds2Parser*)> jsonParser{nullptr, &deleteJson};
+  BlockAllocator blockAllocator = nullptr;
   uint8_t bomBytesSkipped = 0;
   bool allocFailed = false;
   char preferredLang[12] = {0};

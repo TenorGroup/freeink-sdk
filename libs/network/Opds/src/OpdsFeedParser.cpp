@@ -4,6 +4,7 @@
 #include <new>
 
 #include <cctype>
+#include <cstdlib>
 
 namespace {
 const std::string kNoValue;
@@ -19,9 +20,20 @@ void OpdsFeedParser::setPreferredLanguage(const char* lang) {
   if (jsonParser) jsonParser->setPreferredLanguage(preferredLang);
 }
 
+void OpdsFeedParser::freeJson(Opds2Parser* p) {
+  p->~Opds2Parser();
+  free(p);
+}
+
 bool OpdsFeedParser::selectBackend(const uint8_t firstByte) {
   if (firstByte == '{') {
-    jsonParser.reset(new (std::nothrow) Opds2Parser());
+    if (blockAllocator) {
+      void* block = blockAllocator(sizeof(Opds2Parser));
+      jsonParser = block ? decltype(jsonParser)(new (block) Opds2Parser(), &freeJson)
+                         : decltype(jsonParser)(nullptr, &deleteJson);
+    } else {
+      jsonParser = decltype(jsonParser)(new (std::nothrow) Opds2Parser(), &deleteJson);
+    }
     if (!jsonParser) {
       LOG_ERR("OPDS", "OOM: OPDS 2.0 parser");
       allocFailed = true;
