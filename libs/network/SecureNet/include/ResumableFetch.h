@@ -28,6 +28,9 @@ struct FetchOptions {
   // Step followed https redirect targets down to http. For payloads that are
   // already content-encrypted, this skips a second TLS session and its record
   // buffer on low-heap boards; only the URL token loses transport security.
+  // Off, a redirect from an https URL to an http one is refused (the answer
+  // stays the 3xx). The credential callback gets sameOrigin false after the
+  // step, so none cross it.
   bool redirectToHttp = false;
 };
 
@@ -175,10 +178,13 @@ inline FetchResult fetchResumable(const std::string& startUrl, const FetchOption
     const int status = result.status;
     if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
       const std::string location = http.getHeader("location");
+      const bool wasHttps = url.rfind("https://", 0) == 0;
       if (redirects++ >= kMaxRedirects || location.empty() || !SecureHttpClient::resolveUrl(url, location, url)) {
         return result;
       }
       if (options.redirectToHttp && url.rfind("https://", 0) == 0) url.replace(0, 8, "http://");
+      // A hop that leaves https for http is the caller's call (redirectToHttp), never the server's.
+      if (!options.redirectToHttp && wasHttps && url.rfind("https://", 0) != 0) return result;
       --attempt;  // a hop is not a transfer attempt
       continue;
     }
