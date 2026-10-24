@@ -11,7 +11,7 @@
 
 #ifdef FREEINK_CONTENT_WOLFSSL
 
-#include <wolfssl/options.h>
+#include <wolfssl/wolfcrypt/settings.h>
 #include <wolfssl/wolfcrypt/random.h>
 
 namespace freeink {
