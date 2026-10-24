@@ -28,8 +28,8 @@ BleKeyboardHost& BleKeyboardHost::getInstance() {
 #include <esp_bt.h>
 #endif
 
-#include <cstring>
 #include <atomic>
+#include <cstring>
 #include <string>
 
 #include "HidKeymap.h"
@@ -44,8 +44,7 @@ constexpr uint16_t kCharProtocolMode = 0x2A4E;
 constexpr uint16_t kCharBootKbdInput = 0x2A22;
 constexpr uint16_t kCharReportMap = 0x2A4B;
 constexpr uint16_t kDescReportReference = 0x2908;
-// Input report characteristics kept for report-id identity (a HID peripheral
-// typically exposes one per report id; the ceiling bounds the lookup table).
+// Input report characteristics whose Report Reference id is kept for raw edges.
 constexpr uint8_t kMaxInputReportChars = 4;
 
 // Page-turner remotes often stream a held key (or omit a clean release frame). If no
@@ -56,9 +55,9 @@ constexpr uint32_t kReconnectBackoffMs = 4000;
 constexpr uint32_t kPriorityWaitMs = 3000;  // tune on device
 constexpr uint32_t kConnectTimeoutMs = 8000;
 constexpr uint32_t kConnectAttemptTimeoutMs = 15000;  // GAP + pairing + GATT
+constexpr uint32_t kScanCancelWaitMs = 1000;
 constexpr uint32_t kMaxTeardownTimeoutMs = 2000;
 constexpr uint32_t kTeardownPollMs = 10;
-constexpr uint32_t kScanCancelWaitMs = 1000;
 constexpr size_t kScanDebugPayloadMax = 31;
 
 portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -68,27 +67,42 @@ NimBLEClient* g_client = nullptr;
 // Connection task: connect() stores a target and notifies it; it runs the
 // blocking connect+pair+discover sequence off the main and NimBLE host tasks.
 TaskHandle_t g_connTask = nullptr;
-std::atomic<bool> g_connecting{false};
-// end() sets this before touching NimBLE. The connection worker checks it before
-// every next blocking stage and parks itself for a safe external vTaskDelete().
-std::atomic<bool> g_stopRequested{false};
-// A scan request can cancel an in-flight connection without tearing down the host.
-std::atomic<bool> g_connectCancelRequested{false};
-std::atomic<bool> g_workerSafeToDelete{false};
-std::atomic<bool> g_teardownPending{false};
-// True when there is no live link, or after NimBLE's disconnect callback has run.
-// NimBLE keeps a client DISCONNECTING until that callback completes; end() waits
-// for both this acknowledgement and getDisconnectedClient() before deleteClient().
-std::atomic<bool> g_disconnectObserved{true};
+volatile bool g_connecting = false;
 char g_targetAddr[18] = {0};
 uint8_t g_targetType = 0;
 bool g_targetTryAltType = false;
+// Set by an end() that could not finish; cleared by the one that does.
+std::atomic<bool> g_teardownPending{false};
+// Held by the one end() that is running. end() is called from more than one task
+// (an app may stop the radio from its main loop and from a render task), and its
+// teardown (connection task delete, client delete, NimBLEDevice::deinit) is not
+// re-entrant: two at once can double-free NimBLE state. A second caller does not
+// wait; it gets false, which reads as "still stopping" and is retried like a
+// teardown that ran out of time.
+std::atomic<bool> g_endBusy{false};
+// False while a link attempt or a link exists; set again by NimBLE's disconnect
+// callback. NimBLE only lets go of the client once that callback has run.
+std::atomic<bool> g_disconnectObserved{true};
 
 uint32_t g_lastReconnectMs = 0;
 // Protected by g_mux. Each disconnected episode tries each saved bond once.
 uint8_t g_reconnectTriedMask = 0;
+// On for a disconnected episode (begin(), a link the peer dropped, connect()); off
+// while a link is up and once the app calls disconnect(), so a link the user closed
+// stays closed. Protected by g_mux.
 bool g_autoReconnect = false;
 bool g_userDisconnect = false;
+
+// Overall deadline of one connection attempt, serviced by poll(). Protected by g_mux.
+uint32_t g_connectStartedMs = 0;
+bool g_connectTimedOut = false;
+// A request to end the attempt in flight (disconnect(), the connect deadline, a
+// scan). The worker checks it before each stage it enters and drops the result of one
+// that is still running; it clears the flag once the attempt has ended.
+std::atomic<bool> g_connectCancelRequested{false};
+
+// armBondedReconnect(): scan for the saved remotes instead of dialling them blind,
+// and connect to the one the policy picks. Protected by g_mux.
 bool g_bondedReconnectArmed = false;
 PickPolicy g_pickPolicy = PickPolicy::Priority;
 char g_priorityAddr[18] = {};
@@ -97,25 +111,52 @@ uint8_t g_candidateType = 0;
 uint32_t g_candidateFirstMs = 0;
 bool g_candidateReady = false;
 uint32_t g_bondedAdvertisements = 0;
-uint32_t g_connectStartedMs = 0;
-bool g_connectTimedOut = false;
+
+// Caller holds g_mux.
+void clearBondedCandidate() {
+  g_candidateAddr[0] = '\0';
+  g_candidateReady = false;
+  g_candidateFirstMs = 0;
+}
+
+// Caller holds g_mux.
+void cancelBondedReconnect() {
+  g_bondedReconnectArmed = false;
+  g_priorityAddr[0] = '\0';
+  clearBondedCandidate();
+}
+
+// armSelectedPeerReconnect(): while an address is set, auto-reconnect tries only
+// that peer, and only while attempts and the window last. Guarded by g_mux.
+constexpr uint8_t kSelectedReconnectAttempts = 6;
+constexpr uint32_t kSelectedReconnectWindowMs = 120000;
+char g_selectedAddr[18] = {0};
+uint8_t g_selectedAttemptsLeft = 0;
+uint32_t g_selectedStartedMs = 0;
+
+// Caller holds g_mux.
+void clearSelectedPlanLocked() {
+  g_selectedAddr[0] = '\0';
+  g_selectedAttemptsLeft = 0;
+}
 
 // HID Report Map (parsed item by item once per connection in setupHid). Every
 // incoming report is decoded through this map, so the modifier byte and the key
 // fields are read where the descriptor says they are - not where a byte pattern
 // suggests. Many BLE page-turner remotes are NOT plain boot keyboards: they place
 // their code on the Consumer Control page (0x0C) or at a non-standard byte offset,
-// and that is exactly what the map describes. g_lastGenericCode edge-detects the
-// last-resort extraction below so one physical press = one key event.
+// and that is exactly what the map describes (a keyboard array of 16-bit slots
+// included). g_lastGenericCode edge-detects the last-resort extraction below so one
+// physical press = one key event.
 HidReportMap g_hidMap;
 uint8_t g_lastGenericCode = 0;         // last non-zero code seen on the last-resort path
 volatile uint32_t g_lastReportMs = 0;  // millis() of the last HID notification (stale-release)
 
 // Report id each subscribed Input characteristic declares in its Report Reference
-// descriptor (0x2908). Keeps a report's identity when it arrives without the id
-// byte its own descriptor promises. 0xFFFF = unknown.
+// descriptor (0x2908), so a report keeps its identity when its payload has no id
+// byte. 0xFFFF = unknown.
 struct InputReportChar {
-  uint16_t handle;
+  const NimBLERemoteCharacteristic* chr;
   uint16_t reportId;
 };
 InputReportChar g_inputChars[kMaxInputReportChars];
@@ -124,108 +165,16 @@ uint16_t g_notifyReportId = 0xFFFF;  // report id of the characteristic that jus
 
 BleKeyboardHost& self() { return BleKeyboardHost::getInstance(); }
 
-void clearBondedCandidate() {
-  g_candidateAddr[0] = '\0';
-  g_candidateReady = false;
-  g_candidateFirstMs = 0;
-}
-
-void cancelBondedReconnect() {
-  g_bondedReconnectArmed = false;
-  g_priorityAddr[0] = '\0';
-  clearBondedCandidate();
-}
-
-bool stopRequested() { return g_stopRequested.load(std::memory_order_acquire); }
-
+// The attempt in flight was cancelled, or end() is tearing the stack down: nothing the
+// worker or a NimBLE callback still reports may change the host state.
 bool operationCancelled() {
-  return stopRequested() || g_connectCancelRequested.load(std::memory_order_acquire);
+  return g_connectCancelRequested.load(std::memory_order_acquire) || g_teardownPending.load(std::memory_order_acquire);
 }
+bool callbacksAllowed() { return !operationCancelled(); }
 
-bool callbacksAllowed() {
-  // g_stopRequested is the cross-task synchronization point. begin_/isRunning()
-  // is owned by the app task and must not be read from a NimBLE callback thread.
-  return !operationCancelled();
-}
-
-// Wake the worker only while it waits idle in connTaskFn. During connect,
-// security and GATT waits NimBLE blocks the same task on its notification, and
-// any foreign notify ends that wait as a success while the GATT procedure still
-// points at the worker's stack. A busy worker is released by cancelActiveClient().
-void notifyIdleConnectionWorker() {
-  portENTER_CRITICAL(&g_mux);
-  TaskHandle_t task = g_connecting.load(std::memory_order_acquire) ? nullptr : g_connTask;
-  portEXIT_CRITICAL(&g_mux);
-  if (task != nullptr) xTaskNotifyGive(task);
-}
-
-bool workerSafeToDelete() {
-  return g_connTask == nullptr || g_workerSafeToDelete.load(std::memory_order_acquire);
-}
-
-bool clientFullyDisconnected() {
-  if (g_client == nullptr) return true;
-  return g_disconnectObserved.load(std::memory_order_acquire) &&
-         NimBLEDevice::getDisconnectedClient() == g_client;
-}
-
-void cancelActiveClient() {
-  NimBLEClient* client = g_client;
-  if (client == nullptr) return;
-  if (g_connecting.load(std::memory_order_acquire)) client->cancelConnect();
-  if (client->isConnected()) client->disconnect();
-}
-
-uint32_t remainingBudget(uint32_t startMs, uint32_t budgetMs) {
-  const uint32_t elapsed = millis() - startMs;
-  return elapsed >= budgetMs ? 0 : budgetMs - elapsed;
-}
-
-bool waitForWorkerSafe(uint32_t timeoutMs) {
-  if (workerSafeToDelete()) return true;
-  if (timeoutMs == 0) return false;
-  const uint32_t startMs = millis();
-  while (!workerSafeToDelete()) {
-    // Repeat the cancellation while waiting. This closes the small race where the
-    // worker passes its stop check just as end() sends the first GAP cancel.
-    cancelActiveClient();
-    // A worker that finished its attempt after the first wake went idle unwoken.
-    notifyIdleConnectionWorker();
-    const uint32_t remaining = remainingBudget(startMs, timeoutMs);
-    if (remaining == 0) break;
-    vTaskDelay(pdMS_TO_TICKS(remaining < kTeardownPollMs ? remaining : kTeardownPollMs));
-  }
-  return workerSafeToDelete();
-}
-
-bool waitForClientDisconnected(uint32_t timeoutMs) {
-  if (clientFullyDisconnected()) return true;
-  if (timeoutMs == 0) return false;
-  const uint32_t startMs = millis();
-  while (!clientFullyDisconnected()) {
-    if (g_client->isConnected()) g_client->disconnect();
-    const uint32_t remaining = remainingBudget(startMs, timeoutMs);
-    if (remaining == 0) break;
-    vTaskDelay(pdMS_TO_TICKS(remaining < kTeardownPollMs ? remaining : kTeardownPollMs));
-  }
-  return clientFullyDisconnected();
-}
-
-// Report id of the characteristic that just notified, or 0xFFFF when unknown.
-uint16_t reportIdForCharHandle(uint16_t handle) {
-  for (uint8_t i = 0; i < g_inputCharCount; ++i) {
-    if (g_inputChars[i].handle == handle) return g_inputChars[i].reportId;
-  }
-  return 0xFFFF;
-}
-
-// Pick a representative "primary" code from a report that the parsed map could not
-// decode at all (no readable Report Map, an unknown report id, a descriptor past
-// the parse ceilings). Prefers the first mapped key byte, else the first meaningful
-// non-zero byte. Returns 0 when the report carries no code (a release frame).
 // True when `usage` is still one of the keys the report says are down. Usage 0 is
-// "nothing owed", which is never held.
-bool hidReportHoldsUsage(const uint8_t* keys, size_t count, uint8_t usage) {
+// "nothing owed", which is never released.
+bool reportHoldsUsage(const uint8_t* keys, size_t count, uint8_t usage) {
   if (usage == 0) return true;
   for (size_t i = 0; i < count; ++i) {
     if (keys[i] == usage) return true;
@@ -233,6 +182,17 @@ bool hidReportHoldsUsage(const uint8_t* keys, size_t count, uint8_t usage) {
   return false;
 }
 
+// The client can be deleted: its disconnect callback ran and NimBLE reports it
+// DISCONNECTED. deleteClient() on a CONNECTED or DISCONNECTING client only
+// defers the delete, and a deinit() after that leaks NimBLE's client slot.
+bool clientReleased() {
+  return g_disconnectObserved.load() && NimBLEDevice::getDisconnectedClient() == g_client;
+}
+
+// Pick a representative "primary" code from a report that the parsed map could not
+// decode at all (no readable Report Map, an unknown report id, a descriptor past the
+// parse ceilings). Prefers the first mapped key byte, else the first meaningful
+// non-zero byte. Returns 0 when the report carries no code (a release frame).
 uint8_t extractPrimaryCode(const uint8_t* p, size_t n, size_t* codeIdx = nullptr) {
   const size_t lim = n < 8 ? n : 8;
   // NOTE: do NOT skip 0x01 here. In a keyboard report 0x01 is ErrorRollOver, but in
@@ -280,9 +240,10 @@ void printPayloadHex(const NimBLEAdvertisedDevice* dev) {
 #endif
 
 void onHidNotify(NimBLERemoteCharacteristic* chr, uint8_t* data, size_t len, bool) {
-  if (!callbacksAllowed()) return;
-  // The characteristic identifies the report when the payload itself does not.
-  g_notifyReportId = chr ? reportIdForCharHandle(chr->getHandle()) : 0xFFFF;
+  g_notifyReportId = 0xFFFF;  // the characteristic names the report when the payload does not
+  for (uint8_t i = 0; i < g_inputCharCount; ++i) {
+    if (g_inputChars[i].chr == chr) g_notifyReportId = g_inputChars[i].reportId;
+  }
   self().onReportIngest(data, len);
 }
 
@@ -297,12 +258,11 @@ bool setupHid(NimBLEClient* client) {
     proto->writeValue(&mode, 1, false);
   }
 
-  // Parse the HID Report Map item by item: it is the only source of truth for
-  // where each report keeps its modifier bits and key usages, and for how many
-  // reports the device has (report ids).
+  // Parse the HID Report Map item by item: it is the only source of truth for where
+  // each report keeps its modifier bits and key usages, and for how many reports the
+  // device has (report ids).
   g_hidMap = HidReportMap();
   g_lastGenericCode = 0;
-  g_inputCharCount = 0;
   g_notifyReportId = 0xFFFF;
   if (NimBLERemoteCharacteristic* rmap = hid->getCharacteristic(NimBLEUUID(kCharReportMap))) {
     if (rmap->canRead()) {
@@ -329,13 +289,13 @@ bool setupHid(NimBLEClient* client) {
   }
 
   bool subscribed = false;
+  g_inputCharCount = 0;
   const std::vector<NimBLERemoteCharacteristic*>& chars = hid->getCharacteristics(true);
   for (NimBLERemoteCharacteristic* c : chars) {
     if (!c) continue;
     if (c->getUUID() != NimBLEUUID(kCharReport) || !c->canNotify()) continue;
     // Report Reference descriptor (0x2908): byte[0] is the report id, byte[1] the
-    // report type (1 = Input). Both are kept: the id identifies which layout the
-    // notifications on this characteristic belong to.
+    // report type (1 = Input).
     bool isInput = true;
     uint16_t reportId = 0xFFFF;
     NimBLERemoteDescriptor* ref = c->getDescriptor(NimBLEUUID(kDescReportReference));
@@ -344,14 +304,9 @@ bool setupHid(NimBLEClient* client) {
       if (v.size() >= 2 && v[1] != 0x01) isInput = false;
       if (v.size() >= 1) reportId = v[0];
     }
-    if (!isInput) continue;
-    if (c->subscribe(true, onHidNotify)) {
+    if (isInput && c->subscribe(true, onHidNotify)) {
       subscribed = true;
-      if (g_inputCharCount < kMaxInputReportChars) {
-        g_inputChars[g_inputCharCount].handle = c->getHandle();
-        g_inputChars[g_inputCharCount].reportId = reportId;
-        g_inputCharCount++;
-      }
+      if (g_inputCharCount < kMaxInputReportChars) g_inputChars[g_inputCharCount++] = {c, reportId};
     }
   }
 
@@ -359,40 +314,51 @@ bool setupHid(NimBLEClient* client) {
     NimBLERemoteCharacteristic* boot = hid->getCharacteristic(NimBLEUUID(kCharBootKbdInput));
     if (boot && boot->canNotify() && boot->subscribe(true, onHidNotify)) {
       subscribed = true;
-      if (g_inputCharCount < kMaxInputReportChars) {
-        g_inputChars[g_inputCharCount].handle = boot->getHandle();
-        g_inputChars[g_inputCharCount].reportId = 0xFFFF;  // boot report: layout id 0
-        g_inputCharCount++;
-      }
+      if (g_inputCharCount < kMaxInputReportChars) g_inputChars[g_inputCharCount++] = {boot, 0xFFFF};  // boot layout
     }
   }
   return subscribed;
 }
 
 bool hasHidService(NimBLEClient* client) {
-  return client && client->getService(NimBLEUUID(kHidService)) != nullptr;
+  if (!client) return false;
+  const NimBLEUUID hid(kHidService);
+  if (client->getService(hid)) return true;
+  // Some peripherals (Flic) return nothing for a search for one service UUID (ATT
+  // Find By Type Value). Android and BlueZ list every service instead; do that too.
+  // setupHid's getService() then finds HID in that list.
+  for (const NimBLERemoteService* svc : client->getServices(true)) {
+    if (svc->getUUID() == hid) return true;
+  }
+  return false;
 }
 
-void doConnect(const char* addrStr, uint8_t type, bool tryAltType) {
-  if (operationCancelled()) return;
+// Ends an in-flight connection attempt at whatever stage it has reached.
+// cancelConnect() stops only the GAP connect. Once the link is up the worker
+// waits inside NimBLE for pairing or GATT discovery, and only a disconnect ends
+// that wait. Deleting the worker there leaves NimBLE holding its task handle.
+void cancelPendingConnect() {
+  if (!g_client) return;
+  g_client->cancelConnect();
+  if (g_client->isConnected()) g_client->disconnect();
+}
+
+void doConnect(const char* addrStr, uint8_t type) {
+  if (operationCancelled()) return;  // cancelled while queued: never touch NimBLE
   if (!g_client) {
-    if (!operationCancelled()) self().onConnectFailed("BLE client unavailable");
+    self().onConnectFailed("BLE client unavailable");
     return;
   }
-  if (operationCancelled()) return;
   NimBLEDevice::getScan()->stop();
   NimBLEAddress addr(std::string(addrStr), type);
-  if (operationCancelled()) return;
-  g_disconnectObserved.store(false, std::memory_order_release);
+  g_disconnectObserved.store(false);
   if (!g_client->connect(addr)) {
-    g_disconnectObserved.store(true, std::memory_order_release);
+    g_disconnectObserved.store(true);
 #if FREEINK_BLE_HID_SCAN_DEBUG
     Serial.printf("[BleHid] connect failed: %s type=%u err=%d\n", addrStr, type, g_client->getLastError());
 #endif
-    if (!tryAltType || operationCancelled()) {
-      if (!operationCancelled()) {
-        self().onConnectFailed(g_client->getLastError() == BLE_HS_ETIMEOUT ? "Connect timeout" : "Connection failed");
-      }
+    if (!g_targetTryAltType || operationCancelled()) {
+      self().onConnectFailed(g_client->getLastError() == BLE_HS_ETIMEOUT ? "Connect timeout" : "Connection failed");
       return;
     }
     type = type == 0 ? 1 : 0;
@@ -400,29 +366,28 @@ void doConnect(const char* addrStr, uint8_t type, bool tryAltType) {
     Serial.printf("[BleHid] retry connect: %s type=%u\n", addrStr, type);
 #endif
     addr = NimBLEAddress(std::string(addrStr), type);
-    if (operationCancelled()) return;
-    g_disconnectObserved.store(false, std::memory_order_release);
+    g_disconnectObserved.store(false);
     if (!g_client->connect(addr)) {
-      g_disconnectObserved.store(true, std::memory_order_release);
+      g_disconnectObserved.store(true);
 #if FREEINK_BLE_HID_SCAN_DEBUG
       Serial.printf("[BleHid] connect failed: %s type=%u err=%d\n", addrStr, type, g_client->getLastError());
 #endif
-      if (!operationCancelled()) {
-        self().onConnectFailed(g_client->getLastError() == BLE_HS_ETIMEOUT ? "Connect timeout" : "Connection failed");
-      }
+      self().onConnectFailed(g_client->getLastError() == BLE_HS_ETIMEOUT ? "Connect timeout" : "Connection failed");
       return;
     }
   }
+  // Each stage below blocks inside NimBLE. A cancellation that arrived during the one
+  // before ends the attempt here, with the link closed, instead of starting the next.
   if (operationCancelled()) {
     if (g_client->isConnected()) g_client->disconnect();
     return;
   }
   if (!hasHidService(g_client)) {
 #if FREEINK_BLE_HID_SCAN_DEBUG
-    Serial.printf("[BleHid] no HID service: %s (err=%d)\n", addrStr, g_client->getLastError());
+    Serial.printf("[BleHid] no HID service: %s\n", addrStr);
 #endif
     if (g_client->isConnected()) g_client->disconnect();
-    if (!operationCancelled()) self().onConnectFailed("Not a HID device");
+    self().onConnectFailed("Not a HID device");
     return;
   }
   if (operationCancelled()) {
@@ -434,7 +399,7 @@ void doConnect(const char* addrStr, uint8_t type, bool tryAltType) {
     Serial.printf("[BleHid] security failed: %s err=%d\n", addrStr, g_client->getLastError());
 #endif
     if (g_client->isConnected()) g_client->disconnect();
-    if (!operationCancelled()) self().onConnectFailed("Pairing failed");
+    self().onConnectFailed("Pairing failed");
     return;
   }
   if (operationCancelled()) {
@@ -446,7 +411,7 @@ void doConnect(const char* addrStr, uint8_t type, bool tryAltType) {
     Serial.printf("[BleHid] HID setup failed: %s\n", addrStr);
 #endif
     if (g_client->isConnected()) g_client->disconnect();
-    if (!operationCancelled()) self().onConnectFailed("No HID input report");
+    self().onConnectFailed("No HID input report");
     return;
   }
   if (operationCancelled()) {
@@ -460,49 +425,20 @@ void doConnect(const char* addrStr, uint8_t type, bool tryAltType) {
 void connTaskFn(void*) {
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    if (stopRequested()) break;
-    if (!g_connecting.load(std::memory_order_acquire)) continue;  // stale wake
-
-    char addr[sizeof(g_targetAddr)];
-    uint8_t type = 0;
-    bool tryAltType = false;
-    portENTER_CRITICAL(&g_mux);
-    strncpy(addr, g_targetAddr, sizeof(addr) - 1);
-    addr[sizeof(addr) - 1] = '\0';
-    type = g_targetType;
-    tryAltType = g_targetTryAltType;
-    portEXIT_CRITICAL(&g_mux);
-
-    // doConnect() also checks a scan cancellation that arrives after the target
-    // snapshot. Let the normal cleanup below return this worker to its idle wait.
-    if (stopRequested()) break;
-    g_disconnectObserved.store(true, std::memory_order_release);
-    doConnect(addr, type, tryAltType);
-    if (stopRequested()) break;
-    if (g_connectCancelRequested.load(std::memory_order_acquire)) self().onLinkDown();
-    // startScan() cancels only this connection attempt. Clear the operation
-    // cancellation before returning to the normal idle wait.
-    // Serialize the final result with poll(), which may be servicing the same
-    // deadline. The nested onConnectFailed() critical section uses this mutex.
+    doConnect(g_targetAddr, g_targetType);
+    // poll() cancelled the attempt at its deadline: whatever failure the cancelled
+    // stage reported, the reason is the timeout. Serialized with poll() through the
+    // same lock; the nested onConnectFailed() critical section uses it too.
+    if (g_connectCancelRequested.load(std::memory_order_acquire)) self().onLinkDown();  // plain state only
     portENTER_CRITICAL(&g_mux);
     g_connectCancelRequested.store(false, std::memory_order_release);
-    if (g_connectTimedOut) self().onConnectFailed("Connect timeout");
+    if (g_connectTimedOut && !self().isConnected()) self().onConnectFailed("Connect timeout");
     g_connectTimedOut = false;
-    // Publish idle after cancellation cleanup, so startScan()/connect() cannot
-    // start a fresh operation while this worker still clears the previous one.
-    g_connecting.store(false, std::memory_order_release);
+    // Idle is published after the cancellation is cleared, so a new attempt cannot
+    // start while this worker is still finishing the previous one.
+    g_connecting = false;
     portEXIT_CRITICAL(&g_mux);
   }
-
-  g_connecting.store(false, std::memory_order_release);
-  // This only clears plain host state. User-visible link-up/failure callbacks have
-  // already been suppressed by operationCancelled().
-  self().onLinkDown();
-  g_workerSafeToDelete.store(true, std::memory_order_release);
-
-  // Keep the task parked after it leaves every NimBLE call. end() can now delete it
-  // safely from the outside; a blocked NimBLE waiter is never force-deleted.
-  for (;;) ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 }
 
 class ScanCB : public NimBLEScanCallbacks {
@@ -516,7 +452,7 @@ class ScanCB : public NimBLEScanCallbacks {
     portENTER_CRITICAL(&g_mux);
     const bool bondedReconnect = g_bondedReconnectArmed;
     portEXIT_CRITICAL(&g_mux);
-    if (bondedReconnect) {
+    if (bondedReconnect) {  // only the saved remotes matter: no names, no table
       self().onScanResultIngest(a.c_str(), nullptr, 0, dev->getAddress().getType(), false, dev->isConnectable());
       return;
     }
@@ -549,13 +485,8 @@ class ScanCB : public NimBLEScanCallbacks {
 
 class ClientCB : public NimBLEClientCallbacks {
   void onDisconnect(NimBLEClient*, int) override {
-    // NimBLE invokes this before it changes DISCONNECTING to DISCONNECTED. The
-    // acknowledgement lets end() wait for that transition before deleteClient().
-    g_disconnectObserved.store(true, std::memory_order_release);
-    // A teardown callback is intentionally silent; connTaskFn clears plain host
-    // state after it has left the blocking NimBLE call. Scan cancellation remains
-    // a normal host operation and may clear the link state immediately.
-    if (!stopRequested()) self().onLinkDown();
+    g_disconnectObserved.store(true);
+    self().onLinkDown();
   }
   void onPassKeyEntry(NimBLEConnInfo& connInfo) override {
     if (operationCancelled()) return;
@@ -587,26 +518,19 @@ ClientCB g_clientCb;
 // --- Lifecycle ---------------------------------------------------------------
 bool BleKeyboardHost::begin(const char* hostName) {
   if (begun_) return true;
-
-  // A timed-out end() deliberately leaves the NimBLE client and worker alive.
-  // Reject a new begin before any self-heal/deinit path can touch that live state.
-  if (g_teardownPending.load(std::memory_order_acquire) || g_stopRequested.load(std::memory_order_acquire) ||
-      g_connTask != nullptr || g_connecting.load(std::memory_order_acquire) || g_client != nullptr) {
-    Serial.println("[BleHid] begin: teardown or worker still pending");
-    return false;
-  }
-
-  g_workerSafeToDelete.store(false, std::memory_order_release);
-  g_disconnectObserved.store(true, std::memory_order_release);
-  g_connectCancelRequested.store(false, std::memory_order_release);
-  g_connectTimedOut = false;
-  g_userDisconnect = false;
+  // An unfinished end() left the connection task, the client or the stack in
+  // place: re-initializing now would pull NimBLE out from under them.
+  if (g_teardownPending.load()) return false;
   portENTER_CRITICAL(&g_mux);
+  clearSelectedPlanLocked();
   cancelBondedReconnect();
-  portEXIT_CRITICAL(&g_mux);
+  g_connectTimedOut = false;
+  g_connectCancelRequested.store(false, std::memory_order_release);
+  g_userDisconnect = false;
   g_reconnectTriedMask = 0;
   g_autoReconnect = true;
   g_lastReconnectMs = millis();
+  portEXIT_CRITICAL(&g_mux);
 
 #if FREEINK_BLE_HID_SCAN_DEBUG
   Serial.printf("[BleHid] begin: host='%s' bonds=%u\n", hostName ? hostName : "FreeInk", bondCount_);
@@ -666,9 +590,9 @@ bool BleKeyboardHost::begin(const char* hostName) {
   // device shows up nameless or not at all. This (plus the windowed interval
   // below and the no-filter onResult) keeps scan response and extended adv data.
   scan->setScanCallbacks(&g_scanCb, true);
-  // The callback copies candidates into our fixed 24-entry table. NimBLE's
-  // default also retains every advertiser (including filtered beacons) on the
-  // heap. Callback-only mode releases each completed result after delivery.
+  // onResult() copies what the UI needs into devices_, and nothing reads NimBLE's
+  // own result list. Callback-only mode frees each advertiser once it has been
+  // reported instead of keeping every one heard on the heap until the next scan.
   scan->setMaxResults(0);
   scan->setActiveScan(true);  // send scan requests -> receive scan responses (names)
   // CONTINUOUS listening (window == interval, 100% duty; values are ms).
@@ -710,25 +634,17 @@ bool BleKeyboardHost::begin(const char* hostName) {
   g_client->setClientCallbacks(&g_clientCb, false);
 
   // Task creation is the final resource acquisition in begin(). If it fails,
-  // leaving NimBLE initialized would make the UI report a running host that
-  // can never process connect() notifications, and the next begin() would
-  // inherit the live client/stack.
+  // leaving NimBLE initialized would make the UI report a running host that can
+  // never process connect() notifications, and the next begin() would inherit the
+  // live client/stack.
   g_connTask = nullptr;
   const BaseType_t taskResult = xTaskCreate(connTaskFn, "ble-conn", 4096, nullptr, 3, &g_connTask);
   if (taskResult != pdTRUE || g_connTask == nullptr) {
     Serial.println("[BleHid] begin: connection task create failed");
-    if (g_client != nullptr) {
-      NimBLEDevice::deleteClient(g_client);
-      g_client = nullptr;
-    }
+    NimBLEDevice::deleteClient(g_client);
+    g_client = nullptr;
     NimBLEDevice::deinit(true);
     g_connTask = nullptr;
-    g_connecting.store(false, std::memory_order_release);
-    g_stopRequested.store(false, std::memory_order_release);
-    g_connectCancelRequested.store(false, std::memory_order_release);
-    g_workerSafeToDelete.store(false, std::memory_order_release);
-    g_teardownPending.store(false, std::memory_order_release);
-    begun_ = false;
     return false;
   }
   begun_ = true;
@@ -739,80 +655,61 @@ bool BleKeyboardHost::begin(const char* hostName) {
 }
 
 bool BleKeyboardHost::end(uint32_t timeoutMs) {
+  if (g_endBusy.exchange(true)) return false;
+  struct EndBusyRelease {
+    ~EndBusyRelease() { g_endBusy.store(false); }
+  } endBusyRelease;
+  // Read under g_endBusy: no other end() can be between its begun_ and
+  // g_teardownPending writes, so "both false" really means stopped.
+  if (!begun_ && !g_teardownPending.load()) return true;
   const uint32_t budgetMs = timeoutMs > kMaxTeardownTimeoutMs ? kMaxTeardownTimeoutMs : timeoutMs;
-
-  // A fully idle, already-deinitialized host is idempotent. This also keeps the
-  // capability-off and failed-begin paths cheap.
-  if (!begun_ && !g_teardownPending.load(std::memory_order_acquire) && g_connTask == nullptr && g_client == nullptr &&
-      !NimBLEDevice::isInitialized()) {
-    return true;
-  }
-
-  g_stopRequested.store(true, std::memory_order_release);
-  g_connectCancelRequested.store(true, std::memory_order_release);
-  g_teardownPending.store(true, std::memory_order_release);
-  begun_ = false;
   const uint32_t startMs = millis();
-
-  // Stop scanner callbacks before asking the worker to leave. The scan object is
-  // still owned by NimBLE and remains alive until a successful final teardown.
-  if (NimBLEDevice::isInitialized()) {
+  portENTER_CRITICAL(&g_mux);
+  clearSelectedPlanLocked();
+  portEXIT_CRITICAL(&g_mux);
+  if (begun_) {
+    // Stopping before not-running: an observer of isRunning()/isStopping() never
+    // sees both false while the stack is still up.
+    g_teardownPending.store(true);
+    begun_ = false;
     NimBLEScan* scan = NimBLEDevice::getScan();
     if (scan && scan->isScanning()) scan->stop();
   }
 
-  // Both calls are intentional. cancelConnect() wakes GAP connect(), while
-  // disconnect() wakes secureConnection()/GATT discovery once a link exists.
-  cancelActiveClient();
-  notifyIdleConnectionWorker();
-
-  if (!waitForWorkerSafe(remainingBudget(startMs, budgetMs))) {
-    if (budgetMs != 0) {
-      Serial.printf("[BleHid] end: worker pending (%lu ms)\n", static_cast<unsigned long>(budgetMs));
-    }
-    return false;
+  // If the connection task is inside a connect, pairing or GATT wait, do not
+  // delete it or deinit NimBLE under it: killing it there leaves NimBLE holding a
+  // dead task and can crash on Bluetooth-off, sleep, or the next begin(). Cancel
+  // on every pass: the task can bring the link up after the first cancel.
+  while (g_connecting) {
+    cancelPendingConnect();
+    if (millis() - startMs >= budgetMs) return false;
+    vTaskDelay(pdMS_TO_TICKS(kTeardownPollMs));
   }
-
-  // The worker is parked outside every NimBLE call. It is now safe to delete and
-  // join it; a worker blocked in NimBLE never reaches this branch.
-  if (g_connTask != nullptr) {
+  if (g_connTask) {
     vTaskDelete(g_connTask);
     g_connTask = nullptr;
   }
-  g_connecting.store(false, std::memory_order_release);
 
-  // NimBLE's client status remains DISCONNECTING until the GAP callback finishes.
-  // Keep the client and stack intact if that callback does not arrive within the
-  // remaining budget so a later end() can retry the same teardown safely.
-  if (g_client != nullptr) {
-    if (!clientFullyDisconnected()) {
-      cancelActiveClient();
-      if (!waitForClientDisconnected(remainingBudget(startMs, budgetMs))) {
-        Serial.printf("[BleHid] end: client disconnect pending (%lu ms)\n", static_cast<unsigned long>(budgetMs));
-        return false;
-      }
+  // Close the link and delete the client BEFORE deinit. NimBLE keeps a fixed-size
+  // client array that survives deinit/init, and deleteClient() only DEFERS the
+  // delete while the client is CONNECTED/DISCONNECTING. deinit() would then tear
+  // the host down before that deferred delete runs, the slot leaks, and the next
+  // begin()'s createClient() returns null for good.
+  if (g_client) {
+    while (!clientReleased()) {
+      if (g_client->isConnected()) g_client->disconnect();
+      if (millis() - startMs >= budgetMs) return false;
+      vTaskDelay(pdMS_TO_TICKS(kTeardownPollMs));
     }
-    if (!clientFullyDisconnected() || !NimBLEDevice::deleteClient(g_client)) {
-      Serial.println("[BleHid] end: client delete deferred");
-      return false;
-    }
+    NimBLEDevice::deleteClient(g_client);
     g_client = nullptr;
   }
 
-  if (NimBLEDevice::isInitialized()) {
-    NimBLEDevice::deinit(true);
-    if (NimBLEDevice::isInitialized()) {
-      Serial.println("[BleHid] end: NimBLE deinit pending");
-      return false;
-    }
-  }
-
-  g_connecting.store(false, std::memory_order_release);
-  g_workerSafeToDelete.store(false, std::memory_order_release);
-  g_disconnectObserved.store(true, std::memory_order_release);
-  g_connectCancelRequested.store(false, std::memory_order_release);
-  g_stopRequested.store(false, std::memory_order_release);
-  g_teardownPending.store(false, std::memory_order_release);
+  // Free the NimBLE host + BT controller memory back to the heap. Bonds live in
+  // NVS and survive this. A deinit that did not complete is retried by the next
+  // end(), so the next begin() never inherits a half-initialized stack.
+  NimBLEDevice::deinit(true);
+  if (NimBLEDevice::isInitialized()) return false;
   g_lastGenericCode = 0;
   g_lastReportMs = 0;
   memset(prevKeys_, 0, sizeof(prevKeys_));  // no key survives a teardown
@@ -827,44 +724,43 @@ bool BleKeyboardHost::end(uint32_t timeoutMs) {
   deviceCount_ = 0;
   ringHead_ = 0;
   ringTail_ = 0;
+  heldUsage_ = 0;
+  owedUsage_ = 0;
+  reportsSincePress_ = 0;
+  clearSelectedPlanLocked();
   rawHead_ = 0;
   rawTail_ = 0;
   rawCode_ = 0;
   rawReports_ = 0;
   rawDropped_ = false;
-  rawRestCount_ = 0;
-  heldUsage_ = 0;
-  owedUsage_ = 0;
-  reportsSincePress_ = 0;
   portEXIT_CRITICAL(&g_mux);
+  rawRestCount_ = 0;
   connAddr_[0] = '\0';
+  g_teardownPending.store(false);
   return true;
 }
 
-bool BleKeyboardHost::isStopping() const {
-  return g_teardownPending.load(std::memory_order_acquire);
-}
+bool BleKeyboardHost::isStopping() const { return g_teardownPending.load(); }
 
 void BleKeyboardHost::poll() {
-  if (!begun_ || stopRequested()) return;
+  if (!begun_) return;
 
   // Reflect the live scanner state.
   scanning_ = NimBLEDevice::getScan()->isScanning();
 
-  // NimBLE's GAP timeout does not bound security or GATT waits. Request their
-  // existing cancellation path at the overall deadline, without deleting the
-  // worker/client. Retry cancellation until the worker has left NimBLE, closing
-  // the race where it entered a blocking stage just after the first cancel.
+  // NimBLE's GAP timeout does not bound security or GATT waits. Cancel the whole
+  // attempt at its deadline through the same path end() uses, without deleting the
+  // worker or the client. Retried every pass until the worker has left NimBLE: it may
+  // have entered a blocking stage just after the first cancel.
   bool cancelAttempt = false;
   portENTER_CRITICAL(&g_mux);
-  if (g_connecting.load(std::memory_order_acquire) && !connected_ &&
-      static_cast<uint32_t>(millis() - g_connectStartedMs) >= kConnectAttemptTimeoutMs) {
+  if (g_connecting && !connected_ && static_cast<uint32_t>(millis() - g_connectStartedMs) >= kConnectAttemptTimeoutMs) {
     g_connectTimedOut = true;
     g_connectCancelRequested.store(true, std::memory_order_release);
     cancelAttempt = true;
   }
   portEXIT_CRITICAL(&g_mux);
-  if (cancelAttempt) cancelActiveClient();
+  if (cancelAttempt) cancelPendingConnect();
 
   // Held-key release. Page-turner remotes stream a held key (and many omit a clean
   // release frame), so we do NOT synthesize host-side auto-repeat - that turned one
@@ -892,8 +788,9 @@ void BleKeyboardHost::poll() {
   portEXIT_CRITICAL(&g_mux);
   if (streamed && (millis() - g_lastReportMs) > kReleaseTimeoutMs) payOwedRelease();
 
-  // Same rule for the raw edge: silence ends a button only on a remote that was
-  // streaming it. The release is dated by the last frame, which is when it came up.
+  // Silence ends a raw button only on a remote that was streaming it; one that
+  // sends a frame per edge is still holding and sends its own release. The
+  // release is dated by the last frame, which is when the button came up.
   portENTER_CRITICAL(&g_mux);
   if (rawCode_ != 0 && rawReports_ > 1 && (millis() - g_lastReportMs) > kReleaseTimeoutMs) {
     if (!rawDropped_) pushRawLocked(rawCode_, false, g_lastReportMs, 0, 0, 0);
@@ -903,48 +800,61 @@ void BleKeyboardHost::poll() {
   }
   portEXIT_CRITICAL(&g_mux);
 
-  char reconnectAddr[18] = {};
+  // Auto-reconnect to a bonded HID peripheral. In order of precedence: the selected
+  // one while a plan is armed (never another bond); the saved remotes that advertise
+  // while armBondedReconnect() is armed; otherwise each saved bond once per
+  // disconnected episode.
+  char target[sizeof(g_selectedAddr)] = {0};
+  ConnectOrigin origin = ConnectOrigin::Auto;
   bool bondedScan = false;
-  bool bondedReconnect = false;
   portENTER_CRITICAL(&g_mux);
-  bondedReconnect = g_bondedReconnectArmed;
-  if (bondedReconnect && !connected_ && !g_connecting.load(std::memory_order_acquire)) {
-    if (g_candidateAddr[0] &&
-        (g_candidateReady || static_cast<uint32_t>(millis() - g_candidateFirstMs) >= kPriorityWaitMs)) {
-      g_candidateReady = true;
-      memcpy(reconnectAddr, g_candidateAddr, sizeof reconnectAddr);
-    } else {
-      bondedScan = !scanning_;
+  const bool planArmed = g_selectedAddr[0] != '\0';
+  if (planArmed) {
+    if (g_selectedAttemptsLeft > 0 && millis() - g_selectedStartedMs < kSelectedReconnectWindowMs &&
+        millis() - g_lastReconnectMs >= kReconnectBackoffMs && !connected_ && !g_connecting && !scanning_) {
+      memcpy(target, g_selectedAddr, sizeof(target));
+      origin = ConnectOrigin::Plan;
+      --g_selectedAttemptsLeft;
     }
-  }
-  if (!bondedReconnect && !connected_ && !g_connecting && !scanning_ && g_autoReconnect &&
-      static_cast<uint32_t>(millis() - g_lastReconnectMs) >= kReconnectBackoffMs) {
+  } else if (g_bondedReconnectArmed) {
+    origin = ConnectOrigin::Picked;
+    if (!connected_ && !g_connecting) {
+      if (g_candidateAddr[0] &&
+          (g_candidateReady || static_cast<uint32_t>(millis() - g_candidateFirstMs) >= kPriorityWaitMs)) {
+        g_candidateReady = true;
+        memcpy(target, g_candidateAddr, sizeof(target));
+      } else {
+        bondedScan = !scanning_;
+      }
+    }
+  } else if (g_autoReconnect && !connected_ && !g_connecting && !scanning_ &&
+             static_cast<uint32_t>(millis() - g_lastReconnectMs) >= kReconnectBackoffMs) {
     for (uint8_t i = 0; i < bondCount_; ++i) {
       if (g_reconnectTriedMask & (1u << i)) continue;
-      memcpy(reconnectAddr, bonds_[i].addr, sizeof reconnectAddr);
+      memcpy(target, bonds_[i].addr, sizeof(target));
       break;
     }
   }
   portEXIT_CRITICAL(&g_mux);
-  if (bondedScan && clientFullyDisconnected()) {
+  if (bondedScan && clientReleased()) {
     NimBLEScan* scan = NimBLEDevice::getScan();
     scan->start(5000, false, true);
     scanning_ = scan->isScanning();
   }
-  if (reconnectAddr[0]) {
-    if (bondedReconnect) {
+  if (target[0]) {
+    if (origin == ConnectOrigin::Picked) {
       stopScan();
 #if FREEINK_BLE_HID_SCAN_DEBUG
-      Serial.printf("[BleHid] bonded pick: %s\n", reconnectAddr);
+      Serial.printf("[BleHid] bonded pick: %s\n", target);
 #endif
     }
-    connectInternal(reconnectAddr, /*explicitRequest=*/false);
+    connectInternal(target, origin);
   }
 }
 
 // --- Discovery ---------------------------------------------------------------
 void BleKeyboardHost::startScan(uint32_t ms) {
-  if (!begun_ || stopRequested()) {
+  if (!begun_) {
 #if FREEINK_BLE_HID_SCAN_DEBUG
     Serial.println("[BleHid] scan start ignored: host not begun");
 #endif
@@ -955,13 +865,14 @@ void BleKeyboardHost::startScan(uint32_t ms) {
     Serial.println("[BleHid] scan start: cancelling pending reconnect");
 #endif
     g_connectCancelRequested.store(true, std::memory_order_release);
-    g_client->cancelConnect();
-    if (g_client->isConnected()) g_client->disconnect();
     const uint32_t waitStart = millis();
-    while (g_connecting.load(std::memory_order_acquire) && millis() - waitStart < kScanCancelWaitMs) {
+    while (g_connecting && millis() - waitStart < kScanCancelWaitMs) {
+      cancelPendingConnect();
       vTaskDelay(pdMS_TO_TICKS(kTeardownPollMs));
     }
-    if (g_connecting.load(std::memory_order_acquire) || stopRequested()) return;
+    // A worker still inside NimBLE after the wait keeps the cancellation: it ends the
+    // attempt at its next stage, and the app asks for the scan again.
+    if (g_connecting || g_teardownPending.load()) return;
     g_connectCancelRequested.store(false, std::memory_order_release);
   }
   portENTER_CRITICAL(&g_mux);
@@ -1004,21 +915,18 @@ void BleKeyboardHost::releaseScanResults() {
 }
 
 // --- Connection --------------------------------------------------------------
-bool BleKeyboardHost::connect(const char* addr) {
-  return connectInternal(addr, /*explicitRequest=*/true);
-}
+bool BleKeyboardHost::connect(const char* addr) { return connectInternal(addr, ConnectOrigin::Explicit); }
 
 BleKeyboardHost::ReconnectActivity BleKeyboardHost::reconnectActivity() const {
   portENTER_CRITICAL(&g_mux);
-  const ReconnectActivity activity{g_connecting.load(std::memory_order_acquire) || g_candidateAddr[0] != '\0',
-                                   g_bondedAdvertisements};
+  const ReconnectActivity activity{g_connecting || g_candidateAddr[0] != '\0', g_bondedAdvertisements};
   portEXIT_CRITICAL(&g_mux);
   return activity;
 }
 
 bool BleKeyboardHost::armBondedReconnect(PickPolicy policy, const char* priorityAddr) {
   portENTER_CRITICAL(&g_mux);
-  if (!begun_ || stopRequested() || g_connTask == nullptr) {
+  if (!begun_ || !g_connTask) {
     portEXIT_CRITICAL(&g_mux);
     return false;
   }
@@ -1042,18 +950,38 @@ bool BleKeyboardHost::armBondedReconnect(PickPolicy policy, const char* priority
   g_pickPolicy = pick;
   g_bondedReconnectArmed = true;
   g_userDisconnect = false;
+  clearSelectedPlanLocked();
   deviceCount_ = 0;
   portEXIT_CRITICAL(&g_mux);
   return true;
 }
 
-bool BleKeyboardHost::connectInternal(const char* addr, const bool explicitRequest) {
-  if (!begun_ || stopRequested() || !addr || g_connecting.load(std::memory_order_acquire) || g_connTask == nullptr) {
-    return false;
+bool BleKeyboardHost::armSelectedPeerReconnect(const char* addr) {
+  if (!addr || strnlen(addr, sizeof(g_selectedAddr)) != sizeof(g_selectedAddr) - 1) return false;
+  if (!begun_ || !g_connTask || connected_ || g_connecting || scanning_) return false;
+  bool bonded = false;
+  for (uint8_t i = 0; i < bondCount_; ++i) {
+    if (strncmp(bonds_[i].addr, addr, sizeof(bonds_[i].addr)) == 0) bonded = true;
   }
-  // GAP may acknowledge cancellation before NimBLE leaves DISCONNECTING. The
-  // previous attempt must release the client before a new worker uses it.
-  if (!clientFullyDisconnected()) return false;
+  if (!bonded) return false;
+  portENTER_CRITICAL(&g_mux);
+  const bool armed = g_selectedAddr[0] == '\0';
+  if (armed) {
+    cancelBondedReconnect();
+    memcpy(g_selectedAddr, addr, sizeof(g_selectedAddr));
+    g_selectedAttemptsLeft = kSelectedReconnectAttempts;
+    g_selectedStartedMs = millis();
+    g_lastReconnectMs = g_selectedStartedMs - kReconnectBackoffMs;  // the first poll tries at once
+  }
+  portEXIT_CRITICAL(&g_mux);
+  return armed;
+}
+
+bool BleKeyboardHost::connectInternal(const char* addr, const ConnectOrigin origin) {
+  if (!begun_ || !addr || g_connecting) return false;
+  // The previous attempt must let go of the client before a new one uses it: GAP
+  // may acknowledge a cancellation before NimBLE leaves DISCONNECTING.
+  if (g_client && !clientReleased()) return false;
 
   uint8_t type = 0;
   bool knownType = false;
@@ -1072,65 +1000,63 @@ bool BleKeyboardHost::connectInternal(const char* addr, const bool explicitReque
     }
   }
 
-  TaskHandle_t task = nullptr;
   portENTER_CRITICAL(&g_mux);
-  if (!begun_ || stopRequested() || g_connecting.load(std::memory_order_acquire) || g_connTask == nullptr) {
+  if (!begun_ || g_connecting) {
     portEXIT_CRITICAL(&g_mux);
     return false;
   }
-  // poll snapshots a target outside this lock. Recheck the policy here so a
-  // disconnect or exhausted plan cannot queue an extra attempt afterwards.
-  if (!explicitRequest && g_bondedReconnectArmed) {
-    if (!g_candidateReady || strcmp(g_candidateAddr, addr) != 0 || connected_) {
+  // poll() snapshots a target outside this lock. Recheck the policy here so a
+  // disconnect or an exhausted plan cannot queue an extra attempt afterwards.
+  if (origin == ConnectOrigin::Picked) {
+    if (!g_bondedReconnectArmed || !g_candidateReady || strcmp(g_candidateAddr, addr) != 0 || connected_) {
       portEXIT_CRITICAL(&g_mux);
       return false;
     }
     type = g_candidateType;
     knownType = true;
-  } else if (!explicitRequest && !g_autoReconnect) {
+  } else if (origin == ConnectOrigin::Auto && (!g_autoReconnect || g_bondedReconnectArmed || g_selectedAddr[0])) {
     portEXIT_CRITICAL(&g_mux);
     return false;
   }
-  strncpy(g_targetAddr, addr, sizeof(g_targetAddr) - 1);
-  g_targetAddr[sizeof(g_targetAddr) - 1] = '\0';
-  g_targetType = type;
-  g_targetTryAltType = !knownType;
-  if (explicitRequest) {
+  if (origin == ConnectOrigin::Explicit) {
+    clearSelectedPlanLocked();
     cancelBondedReconnect();
     g_reconnectTriedMask = 0;
     g_autoReconnect = true;
   }
   for (uint8_t i = 0; i < bondCount_; ++i) {
-    if (strncmp(bonds_[i].addr, addr, sizeof bonds_[i].addr) == 0) g_reconnectTriedMask |= 1u << i;
+    if (strncmp(bonds_[i].addr, addr, sizeof(bonds_[i].addr)) == 0) g_reconnectTriedMask |= 1u << i;
   }
+  strncpy(g_targetAddr, addr, sizeof(g_targetAddr) - 1);
+  g_targetAddr[sizeof(g_targetAddr) - 1] = '\0';
+  g_targetType = type;
+  g_targetTryAltType = !knownType;
   g_connectStartedMs = millis();
   g_lastReconnectMs = g_connectStartedMs;
   g_connectTimedOut = false;
   g_userDisconnect = false;
-  g_connectCancelRequested.store(false, std::memory_order_release);
-  g_disconnectObserved.store(true, std::memory_order_release);
-  g_connecting.store(true, std::memory_order_release);
+  g_connecting = true;
   connecting_ = true;
   connectFailed_ = false;
   pairingPasskeyReady_ = false;
   connectFailure_[0] = '\0';
-  task = g_connTask;
   portEXIT_CRITICAL(&g_mux);
-  if (task != nullptr) xTaskNotifyGive(task);
+  if (g_connTask) xTaskNotifyGive(g_connTask);
   return true;
 }
 
 void BleKeyboardHost::disconnect() {
   portENTER_CRITICAL(&g_mux);
   g_autoReconnect = false;
-  cancelBondedReconnect();
   g_userDisconnect = true;
-  const bool connecting = g_connecting.load(std::memory_order_acquire);
+  clearSelectedPlanLocked();
+  cancelBondedReconnect();
+  const bool connecting = g_connecting;
   if (connecting) g_connectCancelRequested.store(true, std::memory_order_release);
   portEXIT_CRITICAL(&g_mux);
   if (begun_) stopScan();
   if (connecting) {
-    cancelActiveClient();
+    cancelPendingConnect();  // a link still being set up: end that attempt at its stage
   } else if (g_client && g_client->isConnected()) {
     g_client->disconnect();
   }
@@ -1152,16 +1078,17 @@ void BleKeyboardHost::forget(const char* addr) {
     if (strncmp(bonds_[i].addr, addr, sizeof(bonds_[i].addr)) != 0) continue;
     type = bonds_[i].addrType;
     memcpy(forgottenAddr, bonds_[i].addr, sizeof forgottenAddr);
+    if (strncmp(g_selectedAddr, addr, sizeof(g_selectedAddr)) == 0) clearSelectedPlanLocked();
     for (uint8_t j = i + 1; j < bondCount_; ++j) bonds_[j - 1] = bonds_[j];
     bondCount_--;
     if (strcmp(g_candidateAddr, forgottenAddr) == 0) clearBondedCandidate();
-    if (strcmp(g_priorityAddr, forgottenAddr) == 0) {
+    if (strcmp(g_priorityAddr, forgottenAddr) == 0) {  // the chosen remote is gone: take the first one heard
       g_priorityAddr[0] = '\0';
       g_pickPolicy = PickPolicy::First;
       g_candidateReady = g_candidateAddr[0] != '\0';
     }
-    g_reconnectTriedMask = (g_reconnectTriedMask & ((1u << i) - 1u)) |
-                           ((g_reconnectTriedMask >> (i + 1)) << i);
+    // The tried set is by bond index: close the gap the removed bond leaves.
+    g_reconnectTriedMask = (g_reconnectTriedMask & ((1u << i) - 1u)) | ((g_reconnectTriedMask >> (i + 1)) << i);
     forgotten = true;
     break;
   }
@@ -1205,7 +1132,6 @@ bool BleKeyboardHost::pushRawLocked(const uint32_t code, const bool pressed, con
     if (pressed && rawOverflow_ < 0xFFFF) ++rawOverflow_;
     return false;
   }
-  const uint8_t next = static_cast<uint8_t>((rawHead_ + 1) % kRawQueueLen);
   RawButtonEvent& e = rawRing_[rawHead_];
   e.value = static_cast<uint8_t>(code);
   e.byteIndex = static_cast<uint8_t>(code >> 8);
@@ -1215,24 +1141,13 @@ bool BleKeyboardHost::pushRawLocked(const uint32_t code, const bool pressed, con
   e.mods = mods;
   e.wasRest = wasRest;
   e.atMs = atMs;
-  rawHead_ = next;
+  rawHead_ = static_cast<uint8_t>((rawHead_ + 1) % kRawQueueLen);
   return true;
 }
 
-bool BleKeyboardHost::reportStreamFresh() const {
-  if (!begun_.load(std::memory_order_acquire) || !connected_) return false;
-  const uint32_t last = g_lastReportMs;
-  if (last == 0) return false;
-  return static_cast<uint32_t>(millis() - last) <= kReleaseTimeoutMs;
-}
-
 void BleKeyboardHost::enqueue(const KeyEvent& ev) {
-  if (stopRequested()) return;
+  if (g_teardownPending.load(std::memory_order_acquire)) return;
   portENTER_CRITICAL(&g_mux);
-  if (stopRequested()) {
-    portEXIT_CRITICAL(&g_mux);
-    return;
-  }
   const uint8_t next = static_cast<uint8_t>((ringHead_ + 1) % kKeyQueueLen);
   if (next != ringTail_) {  // drop on overflow rather than block
     ring_[ringHead_] = ev;
@@ -1256,7 +1171,7 @@ void BleKeyboardHost::emitUsage(uint8_t usage, uint8_t mods, bool pressed) {
   ev.special = special;
   ev.pressed = pressed;
   if (pressed) {
-    if (framePressUsage_ == 0) {
+    if (framePressUsage_ == 0) {  // the key a raw press of this frame carries
       framePressUsage_ = usage;
       framePressMods_ = mods;
     }
@@ -1291,108 +1206,21 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
   if (!data || len == 0 || !callbacksAllowed()) return;
   const uint32_t now = millis();
   const uint32_t lastMs = g_lastReportMs;
+  g_lastReportMs = now;  // freshness for the stale-release timeout in poll()
+  // Reports arriving after the press are what tells a remote that STREAMS a held key
+  // from one that says nothing until it sends its release frame. poll() needs that
+  // to decide whether silence means the button came up.
+  portENTER_CRITICAL(&g_mux);
+  if (owedUsage_ != 0 && reportsSincePress_ < 255) reportsSincePress_ = static_cast<uint8_t>(reportsSincePress_ + 1);
+  portEXIT_CRITICAL(&g_mux);
   framePressUsage_ = 0;
   framePressMods_ = 0;
   frameAxisPad_ = false;
   decodeReport(data, len);
-
-  // The raw identity is read from the bytes, so nothing the map decode drops (a
-  // bitmap past its field ceiling, a usage cut to 8 bits) is lost to it. It is read
-  // against the report's rest frame: a frame that only clears bits of the one before
-  // is a release and becomes the rest; and when the first frame of a report is
-  // followed by one that only adds bits, that first frame was the rest state.
-  HidRawFrame f;
-  hidRawFrame(g_hidMap, data, len, g_notifyReportId, f);
-  uint8_t slot = 0;
-  while (slot < rawRestCount_ && rawRest_[slot].id != f.id) ++slot;
-  if (slot == rawRestCount_) {
-    if (rawRestCount_ < 4) ++rawRestCount_;
-    slot = rawRestCount_ - 1;
-    rawRest_[slot] = RawRest{};
-    rawRest_[slot].id = f.id;
-  }
-  RawRest& r = rawRest_[slot];
-  uint8_t adds = 0;
-  uint8_t clears = 0;
-  for (uint8_t i = 0; i < 8; ++i) {
-    adds |= f.bytes[i] & ~r.prev[i];
-    clears |= r.prev[i] & ~f.bytes[i];
-  }
-  if (clears && !adds) {
-    memcpy(r.rest, f.bytes, sizeof r.rest);
-    r.known = true;
-  }
-  if (adds && !clears && r.frames == 1) {
-    memcpy(r.rest, r.prev, sizeof r.rest);
-    r.known = true;
-  }
-  memcpy(r.prev, f.bytes, sizeof r.prev);
-  if (r.frames < 2) ++r.frames;
-  // An axis-pair gamepad names its button only through the zones the decoder reads;
-  // its bytes ramp while held and would read as a new button on every frame.
-  const uint32_t code = frameAxisPad_ ? 0 : hidRawButtonCode(f, r.rest);
-
-#if FREEINK_BLE_HID_REPORT_DEBUG
-  Serial.printf("[BleHid] raw=%u:%u=%02X overflow=%u\n", (unsigned)(code >> 16), (unsigned)((code >> 8) & 0xFF),
-                (unsigned)(code & 0xFF), (unsigned)rawOverflow_);
-#endif
-
-  if (stopRequested()) return;
-  portENTER_CRITICAL(&g_mux);
-  bool pressSent = false;
-  bool pressTried = false;
-  if (code != rawCode_) {
-    // Release before press, so a swap of one button for another reads in that order.
-    // The button held until now was read against the zero guess: if the rest known now
-    // carries the same byte, it was the rest frame, not a button.
-    bool heldWasRest = false;
-    for (uint8_t i = 0; rawCode_ != 0 && rawGuessed_ && i < rawRestCount_; ++i) {
-      if (rawRest_[i].id != static_cast<uint8_t>(rawCode_ >> 16)) continue;
-      const uint8_t at = static_cast<uint8_t>(rawCode_ >> 8);
-      heldWasRest = at < 8 && rawRest_[i].known && rawRest_[i].rest[at] == static_cast<uint8_t>(rawCode_);
-      break;
-    }
-    if (rawCode_ != 0 && !rawDropped_) pushRawLocked(rawCode_, false, now, 0, 0, 0, heldWasRest);
-    pressTried = code != 0;
-    rawDropped_ = pressTried && !(pressSent = pushRawLocked(code, true, now, framePressUsage_, framePressMods_, 1));
-    rawCode_ = code;
-    rawGuessed_ = !r.known;
-    rawReports_ = 1;
-  } else if (code != 0) {
-    if (now - lastMs > kReleaseTimeoutMs) {
-      // The same frame after silence, with no release frame between: a remote that
-      // only reports presses. Each such frame is a new press; the one before it is
-      // settled first so every press keeps exactly one release.
-      if (!rawDropped_) pushRawLocked(code, false, lastMs, 0, 0, 0);
-      pressTried = true;
-      rawDropped_ = !(pressSent = pushRawLocked(code, true, now, framePressUsage_, framePressMods_, 1));
-      rawReports_ = 1;
-    } else if (rawReports_ < 255) {
-      rawReports_ = static_cast<uint8_t>(rawReports_ + 1);
-    }
-  }
-  if (framePressUsage_ != 0 && !pressTried) {
-    // The decoder read a key that no byte edge carries (the zone of an axis gamepad, a
-    // key added while another is held). It gets an identity of its own, byte index
-    // 0xFF (never a payload byte), as one tap: an app routing raw edges still sees it.
-    const uint8_t open = rawCode_ != 0 && !rawDropped_ ? 1 : 0;
-    const uint32_t k = 0xFFFF00u | framePressUsage_;
-    if (pushRawLocked(k, true, now, framePressUsage_, framePressMods_, static_cast<uint8_t>(1 + open))) {
-      pushRawLocked(k, false, now, 0, 0, open);
-    }
-  }
-  portEXIT_CRITICAL(&g_mux);
+  ingestRawEdge(data, len, now, lastMs);
 }
 
 void BleKeyboardHost::decodeReport(const uint8_t* data, size_t len) {
-  g_lastReportMs = millis();  // freshness for the stale-release timeout in poll()
-  portENTER_CRITICAL(&g_mux);
-  // Reports arriving after the press are what tells a remote that STREAMS a held key
-  // from one that says nothing until it sends its release frame. poll() needs that to
-  // decide whether silence means the button came up.
-  if (owedUsage_ != 0 && reportsSincePress_ < 255) reportsSincePress_ = static_cast<uint8_t>(reportsSincePress_ + 1);
-  portEXIT_CRITICAL(&g_mux);
-
 #if FREEINK_BLE_HID_REPORT_DEBUG
   {
     char buf[64];
@@ -1414,7 +1242,7 @@ void BleKeyboardHost::decodeReport(const uint8_t* data, size_t len) {
   if (decodeHidReport(g_hidMap, data, len, view, g_notifyReportId)) {
     // A usage that owed a release and is no longer in the report has come up. Settle
     // it BEFORE the presses so a swap of one button for another reads in that order.
-    if (!hidReportHoldsUsage(view.keys, view.keyCount, owedUsage_)) payOwedRelease();
+    if (!reportHoldsUsage(view.keys, view.keyCount, owedUsage_)) payOwedRelease();
 
     // Emit a press for every usage newly present versus the previous report.
     for (uint8_t i = 0; i < view.keyCount; ++i) {
@@ -1481,7 +1309,7 @@ void BleKeyboardHost::decodeReport(const uint8_t* data, size_t len) {
 
   bool emittedKb = false;
   if (keyboardShaped) {
-    if (!hidReportHoldsUsage(keys, 6, owedUsage_)) payOwedRelease();
+    if (!reportHoldsUsage(keys, 6, owedUsage_)) payOwedRelease();
     for (int i = 0; i < 6; ++i) {
       const uint8_t k = keys[i];
       if (k == 0 || k == 0x01 /*ErrorRollOver*/) continue;
@@ -1579,12 +1407,94 @@ void BleKeyboardHost::decodeReport(const uint8_t* data, size_t len) {
   }
 }
 
+void BleKeyboardHost::ingestRawEdge(const uint8_t* data, size_t len, const uint32_t now, const uint32_t lastMs) {
+  // Each report id is read against its rest frame. A frame that only clears bits
+  // of the one before is a release and becomes the rest; when the first frame of
+  // a report is followed by one that only adds bits, that first frame was the rest.
+  HidRawFrame f;
+  hidRawFrame(g_hidMap, data, len, g_notifyReportId, f);
+  uint8_t slot = 0;
+  while (slot < rawRestCount_ && rawRest_[slot].id != f.id) ++slot;
+  if (slot == rawRestCount_) {
+    if (rawRestCount_ < 4) ++rawRestCount_;
+    slot = rawRestCount_ - 1;
+    rawRest_[slot] = RawRest{};
+    rawRest_[slot].id = f.id;
+  }
+  RawRest& r = rawRest_[slot];
+  uint8_t adds = 0;
+  uint8_t clears = 0;
+  for (uint8_t i = 0; i < 8; ++i) {
+    adds |= f.bytes[i] & ~r.prev[i];
+    clears |= r.prev[i] & ~f.bytes[i];
+  }
+  if (clears && !adds) {
+    memcpy(r.rest, f.bytes, sizeof(r.rest));
+    r.known = true;
+  }
+  if (adds && !clears && r.frames == 1) {
+    memcpy(r.rest, r.prev, sizeof(r.rest));
+    r.known = true;
+  }
+  memcpy(r.prev, f.bytes, sizeof(r.prev));
+  if (r.frames < 2) ++r.frames;
+  // An axis-pair gamepad names its button only through the zone the decoder reads;
+  // its axis bytes ramp while held and would read as a new button on every frame.
+  const uint32_t code = frameAxisPad_ ? 0 : hidRawButtonCode(f, r.rest);
+
+  portENTER_CRITICAL(&g_mux);
+  bool pressTried = false;
+  if (code != rawCode_) {
+    // Release before press, so a swap of one button for another reads in that
+    // order. A button held until now that was read against the zero guess, whose
+    // byte the rest learned since carries, was the rest frame, not a button.
+    bool heldWasRest = false;
+    for (uint8_t i = 0; rawCode_ != 0 && rawGuessed_ && i < rawRestCount_; ++i) {
+      if (rawRest_[i].id != static_cast<uint8_t>(rawCode_ >> 16)) continue;
+      const uint8_t at = static_cast<uint8_t>(rawCode_ >> 8);
+      heldWasRest = at < 8 && rawRest_[i].known && rawRest_[i].rest[at] == static_cast<uint8_t>(rawCode_);
+      break;
+    }
+    if (rawCode_ != 0 && !rawDropped_) pushRawLocked(rawCode_, false, now, 0, 0, 0, heldWasRest);
+    pressTried = code != 0;
+    rawDropped_ = pressTried && !pushRawLocked(code, true, now, framePressUsage_, framePressMods_, 1);
+    rawCode_ = code;
+    rawGuessed_ = !r.known;
+    rawReports_ = 1;
+  } else if (code != 0) {
+    if (now - lastMs > kReleaseTimeoutMs) {
+      // The same frame after silence, with no release frame between: a remote that
+      // only reports presses. Each such frame is a new press; the one before it is
+      // settled first so every press keeps exactly one release.
+      if (!rawDropped_) pushRawLocked(code, false, lastMs, 0, 0, 0);
+      pressTried = true;
+      rawDropped_ = !pushRawLocked(code, true, now, framePressUsage_, framePressMods_, 1);
+      rawReports_ = 1;
+    } else if (rawReports_ < 255) {
+      ++rawReports_;
+    }
+  }
+  if (framePressUsage_ != 0 && !pressTried) {
+    // The decoder read a key that no byte edge carries (the zone of an axis gamepad,
+    // a key added while another is held). It gets an identity of its own, byte index
+    // 0xFF (never a payload byte), as one tap.
+    const uint8_t open = rawCode_ != 0 && !rawDropped_ ? 1 : 0;
+    const uint32_t k = 0xFFFF00u | framePressUsage_;
+    if (pushRawLocked(k, true, now, framePressUsage_, framePressMods_, static_cast<uint8_t>(1 + open))) {
+      pushRawLocked(k, false, now, 0, 0, open);
+    }
+  }
+  portEXIT_CRITICAL(&g_mux);
+}
+
 void BleKeyboardHost::onScanResultIngest(const char* addr, const char* name, int rssi, uint8_t type, bool hid,
                                          bool connectable) {
   if (!addr || !callbacksAllowed()) return;
   portENTER_CRITICAL(&g_mux);
   if (g_bondedReconnectArmed) {
-    if (callbacksAllowed() && !connected_ && !g_connecting.load(std::memory_order_acquire) && connectable) {
+    // armBondedReconnect(): only a saved, connectable remote counts. It becomes the
+    // candidate (the policy decides which one), and nothing enters the pairing table.
+    if (!connected_ && !g_connecting && connectable) {
       for (uint8_t index = 0; index < bondCount_; ++index) {
         if (strncmp(bonds_[index].addr, addr, sizeof bonds_[index].addr) != 0) continue;
         ++g_bondedAdvertisements;
@@ -1607,9 +1517,9 @@ void BleKeyboardHost::onScanResultIngest(const char* addr, const char* name, int
   // the address on a later primary-only advertisement.
   const bool realName = name && name[0] && strcmp(name, addr) != 0;
 #if !FREEINK_BLE_HID_SHOW_UNNAMED_DEVICES
-  // Only peers that advertise the HID service or a keyboard appearance are
-  // listed. A named sensor (a radar module was picked on 18/09/2026) connects,
-  // fails the HID check and, on the C3, took the controller down with it.
+  // Only peers that advertise the HID service or a keyboard appearance are listed.
+  // A named sensor (a radar module was picked on 18/09/2026) connects, fails the HID
+  // check and, on the C3, took the controller down with it.
   if (!hid) {
 #if FREEINK_BLE_HID_SCAN_DEBUG
     Serial.printf("[BleHid] scan filtered: %s name='%s' rssi=%d hid=%d conn=%d type=%u\n", addr, name ? name : "",
@@ -1619,11 +1529,6 @@ void BleKeyboardHost::onScanResultIngest(const char* addr, const char* name, int
   }
 #endif
   portENTER_CRITICAL(&g_mux);
-
-  if (!callbacksAllowed() || g_bondedReconnectArmed) {
-    portEXIT_CRITICAL(&g_mux);
-    return;
-  }
 
   // Upsert by address.
   uint8_t idx = deviceCount_;
@@ -1720,9 +1625,6 @@ void BleKeyboardHost::onLinkUp(const char* addr, const char* name, uint8_t type)
   }
 
   // Persist the pairing if new.
-  if (!callbacksAllowed()) return;
-  bool changedBond = false;
-  portENTER_CRITICAL(&g_mux);
   if (addr) {
     bool known = false;
     for (uint8_t i = 0; i < bondCount_; ++i) {
@@ -1731,7 +1633,7 @@ void BleKeyboardHost::onLinkUp(const char* addr, const char* name, uint8_t type)
           strncpy(bonds_[i].name, resolved, sizeof(bonds_[i].name) - 1);
           bonds_[i].name[sizeof(bonds_[i].name) - 1] = '\0';
           bonds_[i].addrType = type;
-          changedBond = true;
+          persistBonds();
         }
         known = true;
         break;
@@ -1747,13 +1649,10 @@ void BleKeyboardHost::onLinkUp(const char* addr, const char* name, uint8_t type)
         b.name[sizeof(b.name) - 1] = '\0';
       }
       b.addrType = type;
-      changedBond = true;
+      persistBonds();
     }
   }
-  portEXIT_CRITICAL(&g_mux);
-  if (changedBond) persistBonds();
 
-  if (!callbacksAllowed()) return;
   portENTER_CRITICAL(&g_mux);
   if (!callbacksAllowed()) {
     portEXIT_CRITICAL(&g_mux);
@@ -1761,13 +1660,22 @@ void BleKeyboardHost::onLinkUp(const char* addr, const char* name, uint8_t type)
   }
   connecting_ = false;
   connected_ = true;
-  g_autoReconnect = false;
+  g_autoReconnect = false;  // up again: the next episode starts when this link drops
   portEXIT_CRITICAL(&g_mux);
 }
 
 void BleKeyboardHost::onLinkDown() {
   portENTER_CRITICAL(&g_mux);
+  // The selected peer's link dropped on its own (disconnect() clears the plan
+  // first): a fresh bounded plan brings it back.
+  if (connected_ && g_selectedAddr[0] && strncmp(g_selectedAddr, connAddr_, sizeof(g_selectedAddr)) == 0) {
+    g_selectedAttemptsLeft = kSelectedReconnectAttempts;
+    g_selectedStartedMs = millis();
+    g_lastReconnectMs = g_selectedStartedMs;
+  }
   if (g_bondedReconnectArmed) clearBondedCandidate();
+  // A link the peer dropped (not one the app closed) opens a new episode: every saved
+  // bond gets one more try.
   if (connected_ && !g_userDisconnect && !operationCancelled()) {
     g_reconnectTriedMask = 0;
     g_autoReconnect = true;
@@ -1776,32 +1684,29 @@ void BleKeyboardHost::onLinkDown() {
   g_userDisconnect = false;
   connected_ = false;
   connecting_ = false;
+  connAddr_[0] = '\0';
   heldUsage_ = 0;
   // A release owed across a dropped link is never paid: the app resets its own hold
   // state on disconnect, and a phantom release would land in the next session.
   owedUsage_ = 0;
   reportsSincePress_ = 0;
+  // No button is held across a link drop, and the next remote may rest on other bytes.
   rawCode_ = 0;
   rawReports_ = 0;
   rawDropped_ = false;
   portEXIT_CRITICAL(&g_mux);
-  rawRestCount_ = 0;  // the next remote may rest on other bytes
-  connAddr_[0] = '\0';
-  // No key is held across a link drop: the next session's first press of the same
-  // key must read as a press, not as a continuation of a hold that never ended.
+  rawRestCount_ = 0;
+  // A link that drops while a key is down never delivers its release. Forget the
+  // key, so its first press on the next link reads as a press.
   memset(prevKeys_, 0, sizeof(prevKeys_));
   g_lastGenericCode = 0;
 }
 
 void BleKeyboardHost::onConnectFailed(const char* reason) {
   if (!callbacksAllowed()) return;
-  portENTER_CRITICAL(&g_mux);
-  if (!callbacksAllowed()) {
-    portEXIT_CRITICAL(&g_mux);
-    return;
-  }
   connected_ = false;
   connecting_ = false;
+  portENTER_CRITICAL(&g_mux);
   strncpy(connectFailure_, reason && reason[0] ? reason : "Connection failed", sizeof(connectFailure_) - 1);
   connectFailure_[sizeof(connectFailure_) - 1] = '\0';
   connectFailed_ = true;
@@ -1809,6 +1714,7 @@ void BleKeyboardHost::onConnectFailed(const char* reason) {
   heldUsage_ = 0;
   owedUsage_ = 0;
   reportsSincePress_ = 0;
+  if (g_selectedAddr[0]) g_lastReconnectMs = millis();  // the next attempt waits from the failure
   portEXIT_CRITICAL(&g_mux);
 }
 
@@ -1829,10 +1735,6 @@ bool BleKeyboardHost::takeConnectFailure(char* out, size_t outLen) {
 void BleKeyboardHost::onPairingPasskey(uint32_t passkey) {
   if (!callbacksAllowed()) return;
   portENTER_CRITICAL(&g_mux);
-  if (!callbacksAllowed()) {
-    portEXIT_CRITICAL(&g_mux);
-    return;
-  }
   pairingPasskey_ = passkey;
   pairingPasskeyReady_ = true;
   portEXIT_CRITICAL(&g_mux);
@@ -1871,8 +1773,7 @@ void BleKeyboardHost::loadBonds() {
     bool validAddress = bond.addr[17] == '\0' && bond.addrType <= 3;
     for (size_t j = 0; j < 17 && validAddress; ++j) {
       const char c = bond.addr[j];
-      validAddress = j % 3 == 2 ? c == ':' :
-          ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
+      validAddress = j % 3 == 2 ? c == ':' : ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
     }
     if (!validAddress) {
       cleaned = true;
@@ -1910,9 +1811,7 @@ namespace freeink {
 bool BleKeyboardHost::begin(const char*) { return false; }
 bool BleKeyboardHost::end(uint32_t) { return true; }
 bool BleKeyboardHost::isStopping() const { return false; }
-BleKeyboardHost::ReconnectActivity BleKeyboardHost::reconnectActivity() const { return {false, 0}; }
 void BleKeyboardHost::poll() {}
-bool BleKeyboardHost::reportStreamFresh() const { return false; }
 void BleKeyboardHost::startScan(uint32_t) {}
 void BleKeyboardHost::stopScan() {}
 const DiscoveredDevice& BleKeyboardHost::device(uint8_t) const {
@@ -1921,7 +1820,9 @@ const DiscoveredDevice& BleKeyboardHost::device(uint8_t) const {
 }
 void BleKeyboardHost::releaseScanResults() {}
 bool BleKeyboardHost::connect(const char*) { return false; }
+bool BleKeyboardHost::armSelectedPeerReconnect(const char*) { return false; }
 bool BleKeyboardHost::armBondedReconnect(PickPolicy, const char*) { return false; }
+BleKeyboardHost::ReconnectActivity BleKeyboardHost::reconnectActivity() const { return {false, 0}; }
 void BleKeyboardHost::disconnect() {}
 const PairedHidDevice& BleKeyboardHost::paired(uint8_t) const {
   static const PairedHidDevice kEmpty{};
@@ -1939,7 +1840,8 @@ bool BleKeyboardHost::takeConnectFailure(char*, size_t) { return false; }
 void BleKeyboardHost::onPairingPasskey(uint32_t) {}
 bool BleKeyboardHost::takePairingPasskey(uint32_t&) { return false; }
 void BleKeyboardHost::enqueue(const KeyEvent&) {}
-void BleKeyboardHost::emitUsage(uint8_t, uint8_t) {}
+void BleKeyboardHost::emitUsage(uint8_t, uint8_t, bool) {}
+bool BleKeyboardHost::payOwedRelease() { return false; }
 void BleKeyboardHost::persistBonds() {}
 void BleKeyboardHost::loadBonds() {}
 

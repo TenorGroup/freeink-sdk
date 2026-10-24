@@ -22,14 +22,14 @@ with tempfile.TemporaryDirectory(prefix="freeink-pro-test-") as directory:
     shutil.copy2(LIB / "include/GrayscaleCapabilities.h", root / "include/GrayscaleCapabilities.h")
     for name in ("Ssd1677Luts.h", "Uc8279X3Luts.h", "UltraChipDirectGrayLuts.h"):
         shutil.copy2(LIB / f"src/lut/{name}", root / f"src/lut/{name}")
-    for name in ("Arduino.h", "BoardConfig.h", "SPI.h", "esp_heap_caps.h"):
+    for name in ("Arduino.h", "BoardConfig.h", "SPI.h", "esp_heap_caps.h", "sdkconfig.h"):
         shutil.copy2(HERE / "pro_stubs" / name, root / name)
     shutil.copy2(HERE / "pro_stubs/EpdBus.h", root / "src/bus/EpdBus.h")
     for single, probe in ((False, False), (True, False), (False, True), (True, True)):
         exe = root / ("single" if single else "dual")
         command = [os.environ.get("CXX", "c++"), "-std=c++17", "-Wall", "-Wextra",
-                   "-Wno-unused-parameter", "-Wno-unused-function", "-DBOARD_HAS_PSRAM=1",
-                   "-DARDUINO=1", "-I"+str(root), "-I"+str(root / "include")]
+                   "-Wno-unused-parameter", "-Wno-unused-function", "-Wno-unused-variable", "-DBOARD_HAS_PSRAM=1",
+                   "-DARDUINO=1", "-DFREEINK_DEVICE_METALIO_EINK4=1", "-I"+str(root), "-I"+str(root / "include")]
         if probe:
             command += ["-DTENOR_PRESS_PROBE=1"]
         command += ["-Werror"]
@@ -38,17 +38,14 @@ with tempfile.TemporaryDirectory(prefix="freeink-pro-test-") as directory:
         command += [str(HERE / "test_pro.cpp"), str(root / "src/FreeInkDisplay.cpp")]
         command += [str(root / f"src/driver/{name}Driver.cpp") for name in drivers]
         subprocess.run(command + ["-o", str(exe)], check=True)
-        result = subprocess.run([str(exe)], capture_output=True, text=True)
-        if result.returncode:
-            print(result.stdout, end="")
-            print(result.stderr, end="")
-            result.check_returncode()
+        result = subprocess.run([str(exe)], check=True, capture_output=True, text=True)
         if probe:
             for marker in ("WINDOW_BEGIN", "WINDOW_PTL", "WINDOW_BYTES dtm1=600 dtm2=600 DRF=1",
-                           "WINDOW_FALLBACK reason=gray_limit", "WINDOW_FALLBACK reason=missing_plane",
+                           "WINDOW_FALLBACK reason=old_plane", "WINDOW_FALLBACK reason=bounds_or_inversion",
                            "WINDOW_END free=131072 largest=65536"):
                 assert marker in result.stdout, marker
         else:
             assert b"WINDOW_BEGIN" not in exe.read_bytes()
         print(result.stdout, end="")
         subprocess.run([str(exe), "sticky"], check=True)
+        subprocess.run([str(exe), "metalio"], check=True)

@@ -343,23 +343,6 @@ TEST_F(IngestTest, StaleReleaseTimeoutPaysTheOwedReleaseForAStreamingRemote) {
   expectEmptyRing();
 }
 
-TEST_F(IngestTest, ReportStreamFreshFollowsTheRemoteNotifications) {
-  // What the app needs to tell "the button is still down and the remote keeps
-  // saying so" from "the remote went quiet".
-  serveReportMap(hidtest::kBootKeyboard, sizeof hidtest::kBootKeyboard);
-  const int input = serveInputReport(nullptr, 0);
-  EXPECT_FALSE(fakeble::host().reportStreamFresh());  // not even running
-  ASSERT_TRUE(beginAndConnect());
-  EXPECT_FALSE(fakeble::host().reportStreamFresh());  // connected, nothing said yet
-
-  deliver(input, bootReport(0, {0x4E}));
-  EXPECT_TRUE(fakeble::host().reportStreamFresh());
-  fakeble::advanceMillis(100);
-  EXPECT_TRUE(fakeble::host().reportStreamFresh());
-  fakeble::advanceMillis(100);
-  EXPECT_FALSE(fakeble::host().reportStreamFresh());
-}
-
 // --- Report ids, multiple characteristics, Report Reference ------------------
 
 TEST_F(IngestTest, MultiReportDeviceResolvesLayoutsByReportReference) {

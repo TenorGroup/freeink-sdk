@@ -594,6 +594,11 @@ NimBLERemoteService* NimBLEClient::getService(const NimBLEUUID& uuid) {
   return &fakeble::state().service;
 }
 
+const std::vector<NimBLERemoteService*>& NimBLEClient::getServices(bool) {
+  static const std::vector<NimBLERemoteService*> none;
+  return none;
+}
+
 void NimBLEClient::setConnectTimeout(uint32_t timeoutMs) { connectTimeoutMs_ = timeoutMs; }
 
 void NimBLEClient::setConnectionParams(uint16_t minInterval, uint16_t maxInterval, uint16_t latency, uint16_t timeout) {

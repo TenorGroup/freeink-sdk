@@ -336,6 +336,9 @@ void addDecodedKey(HidReportView& view, const HidField& f, uint32_t usage) {
       (usage == kUsageErrorRollOver || (usage >= kUsageModifierMin && usage <= kUsageModifierMax))) {
     return;
   }
+  // The Keyboard page ends at 0xFF: a 16-bit slot above that holds no key (a slot whose
+  // high byte is set), and keeping its low byte would invent one.
+  if (f.page == kPageKeyboard && usage > 0xFF) return;
   if (view.keyCount >= kHidMaxKeysPerReport) return;  // ceiling: extra keys dropped
   for (uint8_t i = 0; i < view.keyCount; ++i) {
     if (view.keys[i] == static_cast<uint8_t>(usage)) return;  // same usage twice in one report

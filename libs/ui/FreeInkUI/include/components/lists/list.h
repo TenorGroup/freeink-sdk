@@ -5,6 +5,9 @@
 
 #include <atomic>
 #include <array>
+#if __has_include(<BoardConfig.h>)
+#include <BoardConfig.h>
+#endif
 
 namespace freeink {
 namespace ui {
@@ -56,6 +59,13 @@ struct ListItem {
 
 struct ListNav;
 
+struct ListRevealAction {
+  int16_t index = -1;
+  ActionId action = NO_ACTION;
+  BitmapRef icon{};
+  int16_t width = 0;
+};
+
 enum class SelectionMarker : uint8_t {
   None,      // selection shown by the row's selected BoxStyle
   Underline, // thin line under the selected row's content
@@ -103,6 +113,8 @@ struct ListProps {
   int16_t selectedIndex = -1;
   ActionId action = NO_ACTION;
   uint16_t inputMask = InputDefault | InputPrev | InputNext;
+  // Optional trailing action exposed for one row after a completed swipe.
+  const ListRevealAction *reveal = nullptr;
   TextStyle labelText{};
   TextStyle subtitleText{};
   TextStyle valueText{};
@@ -114,6 +126,9 @@ struct ListProps {
   int16_t rowHeight = 0;
   int16_t rowGap = -1;
   uint8_t rowRadius = 0;
+  // A 1px rule between visible rows, inset to the content edges. None
+  // inherits Screen's theme; raw list() draws no separators by default.
+  Paint separatorPaint = Paint::none();
   int16_t sidePadding = -1;
   int16_t textGap = 10;
   int16_t iconSize = 0;
@@ -154,10 +169,6 @@ struct ListProps {
   // Inward offset of the scroll track from the band edge (for panels recessed
   // behind a bezel). -1 = inherit the theme's listScrollInset.
   int16_t scrollIndicatorInset = -1;
-  // Corner radius of a round frame whose ends the list's rect shares (a sheet drawn with that radius): the
-  // track stops where the frame's corner curve would cut it. 0 = the track runs the rect's full height.
-  // Track and thumb always have round ends.
-  int16_t scrollIndicatorFrameRadius = 0;
   bool centerSingleLine = false;
   // Mirrors row layout for RTL languages: icon and label move to the
   // trailing (right) edge, value/toggle move to the leading (left) edge --
@@ -192,6 +203,7 @@ struct ListProps {
   Paint markerPaint = Paint::solid(Color::Black);
   int16_t markerInset = 0;     // x offset of the marker / underline start
   int16_t markerThickness = 2; // underline thickness
+  bool underlineFitsText = false; // label width plus 4px on each side
   // Glyph for SelectionMarker::Bitmap, drawn vertically centered at the
   // selected row's left edge (markerInset offset). Direct bitmap wins;
   // otherwise the asset resolves through the frame's AssetResolver.
@@ -216,6 +228,8 @@ struct ListProps {
   // Ascent of the label font: a label picture's baseline then stands on the text baseline of the line it replaces.
   // 0 centres the picture in the label band.
   int16_t labelAscent = 0;
+  // Draw toggle rows as outlined boxes with an inset fill when checked.
+  bool toggleCheckbox = false;
 };
 
 // Stateful companion to the immediate-mode list helpers in FreeInkUICore.h:
@@ -458,28 +472,16 @@ inline void drawListScrollIndicator(DrawTarget &target, const Rect rect,
                                     const uint32_t top,
                                     const int16_t width = 3,
                                     const uint8_t side = 0,
-                                    const int16_t inset = 0,
-                                    const int16_t frameRadius = 0) {
+                                    const int16_t inset = 0) {
   if (count <= visible || visible == 0 || width <= 0)
     return;
 
-  // Inside a round frame: the column nearest the frame's side (inset px in) meets the corner curve this
-  // far from the frame's end, plus the frame's 2 px ring and 2 px of air.
-  int16_t clear = 0;
-  if (frameRadius > inset) {
-    const int32_t dx = frameRadius - inset;
-    int32_t root = 0;
-    while ((root + 1) * (root + 1) <= static_cast<int32_t>(frameRadius) * frameRadius - dx * dx) ++root;
-    clear = static_cast<int16_t>(frameRadius - root + 4);
-  }
+  // Track and thumb always have round ends.
   const uint8_t cap = static_cast<uint8_t>(width / 2);
   const bool left = side == 1;
   const Rect track{left ? static_cast<int16_t>(rect.x + inset)
                         : static_cast<int16_t>(rect.right() - width - inset),
-                   static_cast<int16_t>(rect.y + clear), width,
-                   static_cast<int16_t>(rect.height - 2 * clear)};
-  if (track.height <= 0)
-    return;
+                   rect.y, width, rect.height};
   target.fill(track, Paint::dither(Color::LightGray), cap);
   int16_t thumbH = static_cast<int16_t>(
       (static_cast<int32_t>(track.height) * visible) / count);
@@ -765,6 +767,35 @@ inline ListRowLayout measureListRow(const DrawTarget &target, AssetResolver *ass
   return result;
 }
 
+// Measure only until the viewport is full; virtualized windows that omit rows cannot be centered.
+inline int listContentHeight(const DrawTarget& target, AssetResolver* assets, Rect rect, const ListProps& props) {
+  const int gap = props.rowGap > 0 ? props.rowGap : 0;
+  const int inset = props.rowInset > 0 ? props.rowInset : 0;
+  int width = rect.width - 2 * inset;
+  if (props.scrollIndicator && props.scrollIndicatorWidth > 0) {
+    const int strip = props.scrollIndicatorWidth + (props.scrollIndicatorInset > 0 ? props.scrollIndicatorInset : 0) + 2;
+    if (inset < strip) width -= strip - inset;
+  }
+  if (width <= 0) return rect.height;
+  const int headerH = props.headerRowHeight > 0 ? props.headerRowHeight : target.lineHeight(props.headerText.font) + 4;
+  int height = 0;
+  for (uint16_t i = 0; i < props.count && height < rect.height; ++i) {
+    if (!props.rowProvider && (!props.items || i < props.itemsWindowFirst ||
+        (props.itemsWindowCount && i - props.itemsWindowFirst >= props.itemsWindowCount))) return rect.height;
+    ListItem scratch;
+    if (props.rowProvider) props.rowProvider(props.rowProviderCtx, i, scratch);
+    const ListItem& item = props.rowProvider ? scratch : props.items[i - props.itemsWindowFirst];
+    if (i) height += gap;
+    if (item.isHeader) {
+      height += headerH + (i ? props.sectionGap : 0);
+    } else {
+      if (item.sectionHeading && item.sectionHeading[0]) height += headerH + gap + (i ? props.sectionGap : 0);
+      height += measureListRow(target, assets, static_cast<int16_t>(width), props, item).height;
+    }
+  }
+  return height;
+}
+
 template <size_t MaxInteractions>
 void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
   if ((!props.items && !props.rowProvider) || props.count == 0)
@@ -903,6 +934,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
   // Touch: the interaction index of the row just above the one being laid out, -1 unless that row registered
   // a hit and no heading or header stands between the two (they are one group).
   int32_t rowAboveHit = -1;
+  bool previousWasRow = false;
   for (uint16_t i = top; i < props.count; ++i) {
     const int32_t adjacentHit = rowAboveHit;
     rowAboveHit = -1;
@@ -923,6 +955,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
     const ListItem &item =
         props.rowProvider ? scratch : props.items[i - props.itemsWindowFirst];
     if (item.isHeader) {
+      previousWasRow = false;
       const int16_t pad = i != top ? props.sectionGap : 0;
       if (static_cast<int16_t>(cursorY + pad + headerH) > rowArea.bottom())
         break;
@@ -1002,6 +1035,14 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
         selectedDrawn = true;
     }
     Rect row{rowArea.x, cursorY, rowArea.width, itemH};
+    if (previousWasRow && !hasSectionHeading && props.separatorPaint.kind != PaintKind::None &&
+        rowArea.width > sidePad * 2) {
+      frame.target().fill(
+          Rect{static_cast<int16_t>(rowArea.x + sidePad), static_cast<int16_t>(row.y - (rowGap > 1 ? rowGap / 2 : 1)),
+               static_cast<int16_t>(rowArea.width - sidePad * 2), 1},
+          props.separatorPaint);
+    }
+    previousWasRow = true;
     cursorY = static_cast<int16_t>(cursorY + itemH + rowGap);
     if (props.hugContents && (item.label || item.labelImage)) {
       // Hug-content rows shrink to the label width plus padding so the
@@ -1010,6 +1051,20 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       const int16_t hugW = static_cast<int16_t>(labelW + sidePad * 2);
       if (hugW < row.width)
         row.width = hugW;
+    }
+    const ListRevealAction *reveal = props.reveal;
+#if defined(FREEINK_CAP_TOUCH) && !FREEINK_CAP_TOUCH
+    constexpr bool revealed = false;
+#else
+    const bool revealed = !partial && reveal && reveal->index == i;
+#endif
+    Rect actionRect{};
+    if (revealed) {
+      const int16_t actionW = reveal->width < row.width / 2
+                                  ? reveal->width
+                                  : static_cast<int16_t>(row.width / 2);
+      actionRect = Rect{static_cast<int16_t>(row.right() - actionW), row.y,
+                        actionW, row.height};
     }
     State state = partial ? static_cast<State>(item.state & ~(StateSelected | StateFocused | StateActive))
                           : item.state;
@@ -1056,6 +1111,9 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
           frame.padHit(static_cast<size_t>(adjacentHit), 0, static_cast<uint8_t>(rowGap - lower));
         }
       }
+      if (revealed)
+        frame.hit(actionRect, reveal->action, item.actionValue,
+                  InputTouch, StateNormal);
     }
     if (!partial)
       state = frame.stateFor(props.action, item.actionValue, state);
@@ -1166,8 +1224,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       // The switch draws in row-foreground ink with the foreground's opposite
       // as "paper", so it inverts along with the row when selected.
       const Paint fg = style.foreground;
-      const bool fgWhite =
-          fg.kind == PaintKind::Solid && fg.color == Color::White;
+      const bool fgWhite = fg.kind == PaintKind::Solid && fg.color == Color::White;
       const Paint paper = Paint::solid(fgWhite ? Color::Black : Color::White);
       ToggleProps sw;
       sw.checked = item.toggleChecked;
@@ -1198,16 +1255,23 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
           frame.target().fill(boxRect, paper, radius);
           frame.target().stroke(boxRect, fg, props.toggleBorderWidth ? props.toggleBorderWidth : 2, radius);
         }
+      } else if (props.toggleCheckbox) {
+        const int16_t size = static_cast<int16_t>((togW < togH ? togW : togH) - 6);
+        const Rect box{static_cast<int16_t>(toggleRect.right() - size - 3),
+                       static_cast<int16_t>(toggleRect.y + (togH - size) / 2), size, size};
+        frame.target().stroke(box, fg, 2, 2);
+        if (item.toggleChecked) {
+          const int16_t inset = static_cast<int16_t>(size / 4);
+          const Rect inner = box.inset(Insets{inset, inset, inset, inset});
+          frame.target().fill(inner, fg, 2);
+        }
       } else {
         toggle(frame, toggleRect, sw);
       }
-      availW = static_cast<int16_t>(availW - togW - props.valueInset -
-                                    props.textGap);
-      if (props.rtl)
-        labelX = static_cast<int16_t>(band.x + band.width - availW);
+      availW = static_cast<int16_t>(availW - togW - props.valueInset - props.textGap);
+      if (props.rtl) labelX = static_cast<int16_t>(band.x + band.width - availW);
     } else if (item.value) {
-      TextStyle valueStyle =
-          textStyleWithForeground(props.valueText, style.foreground);
+      TextStyle valueStyle = textStyleWithForeground(props.valueText, style.foreground);
       valueStyle.align = props.rtl ? TextAlign::Left : TextAlign::Right;
       valueStyle.maxLines = layout.valueLines;
       const int16_t valueW = layout.valueWidth;
@@ -1281,14 +1345,23 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       if (props.selectionMarker == SelectionMarker::Underline) {
         // RTL mirrors which edge carries markerInset's extra gap, matching
         // the label's own trailing/leading swap above.
-        const int16_t underlineX = props.rtl
+        int16_t underlineX = props.rtl
             ? static_cast<int16_t>(row.x + sidePad)
             : static_cast<int16_t>(row.x + sidePad + props.markerInset);
+        int16_t underlineWidth = static_cast<int16_t>(row.width - sidePad * 2 - props.markerInset);
+        if (props.underlineFitsText && item.label && availW > 0) {
+          const int16_t textWidth = measureWrappedText(frame.target(), item.label, labelStyle, availW).width;
+          int textX = labelX;
+          if (labelStyle.align == TextAlign::Center) textX += (availW - textWidth) / 2;
+          else if (labelStyle.align == TextAlign::Right) textX += availW - textWidth;
+          underlineX = static_cast<int16_t>(textX - 4 > row.x ? textX - 4 : row.x);
+          const int right = textX + textWidth + 4 < row.right() ? textX + textWidth + 4 : row.right();
+          underlineWidth = static_cast<int16_t>(right - underlineX);
+        }
         frame.target().fill(
             Rect{underlineX,
                  static_cast<int16_t>(row.bottom() - props.markerThickness),
-                 static_cast<int16_t>(row.width - sidePad * 2 -
-                                      props.markerInset),
+                 underlineWidth,
                  props.markerThickness},
             props.markerPaint);
       } else if (props.selectionMarker == SelectionMarker::Bitmap) {
@@ -1316,6 +1389,16 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
                                 props.markerPaint);
       }
     }
+    if (revealed) {
+      const int16_t inset = sidePad / 2;
+      const Rect button = actionRect.inset(Insets{inset, inset, inset, inset});
+      frame.target().fill(button, Paint::solid(Color::White), props.rowRadius);
+      frame.target().stroke(button, Paint::solid(Color::Black), 1, props.rowRadius);
+      if (reveal->icon)
+        frame.target().bitmap(centeredRect(button, Size{static_cast<int16_t>(reveal->icon.width),
+                                                       static_cast<int16_t>(reveal->icon.height)}),
+                              reveal->icon, BitmapMode::Contain, Paint::solid(Color::Black));
+    }
     // A preview uses the same row geometry and paint path, clipped at the fold.
     if (partial) {
       frame.target().setClipRect(previousClip);
@@ -1326,8 +1409,7 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
   if (props.scrollIndicator && consumedIndexes > 0 &&
       (top > 0 || consumedIndexes < props.count)) {
     drawListScrollIndicator(frame.target(), rect, props.count, consumedIndexes, top,
-                            scrollW, scrollLeft ? 1 : 0, scrollInset,
-                            props.scrollIndicatorFrameRadius);
+                            scrollW, scrollLeft ? 1 : 0, scrollInset);
   }
 
   if (props.nav) {

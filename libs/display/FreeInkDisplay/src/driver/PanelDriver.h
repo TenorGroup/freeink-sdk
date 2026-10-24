@@ -132,14 +132,6 @@ class PanelDriver {
     display(bus, fb, nullptr, fallback, turnOff);
   }
 
-  // Absolute selectors use full-frame row stride. False means no gray refresh was issued.
-  virtual bool displayGrayscaleWindow(EpdBus& bus, const uint8_t* bw, const uint8_t* lsb, const uint8_t* msb,
-                                      uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOff) {
-    return false;
-  }
-
-  virtual void endGrayscaleWindowSession() {}
-
   // Mode is fixed before uploads; drivers may adapt the common host encoding.
   virtual void beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode mode, RefreshMode fallback, bool turnOff) {
     (void)mode;

@@ -122,6 +122,7 @@ class NimBLERemoteCharacteristic {
 
 class NimBLERemoteService {
  public:
+  NimBLEUUID getUUID() const { return NimBLEUUID(static_cast<uint16_t>(0x1812)); }
   NimBLERemoteCharacteristic* getCharacteristic(const NimBLEUUID& uuid) const;
   const std::vector<NimBLERemoteCharacteristic*>& getCharacteristics(bool refresh = false) const;
 };
@@ -139,6 +140,9 @@ class NimBLEClient {
   bool cancelConnect();
   int getLastError() const;
   NimBLERemoteService* getService(const NimBLEUUID& uuid);
+  // Every service of the peer, for the peripherals whose search by one UUID returns
+  // nothing. The fake peer has no service of its own beyond HID, so the list is empty.
+  const std::vector<NimBLERemoteService*>& getServices(bool refresh = false);
   void setConnectTimeout(uint32_t timeoutMs);
   void setConnectionParams(uint16_t minInterval, uint16_t maxInterval, uint16_t latency, uint16_t timeout);
   void setClientCallbacks(NimBLEClientCallbacks* callbacks, bool deleteOnDisconnect = true);

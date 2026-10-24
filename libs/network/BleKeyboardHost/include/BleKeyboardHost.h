@@ -25,12 +25,15 @@
 #ifdef __cplusplus
 
 #include <Arduino.h>
-#include <atomic>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <atomic>
+
 namespace freeink {
 
+// How armBondedReconnect() picks among the saved remotes that advertise: Priority
+// waits a short while for the chosen one before taking another, First takes the first.
 enum class PickPolicy : uint8_t { Priority = 0, First = 1 };
 
 // Non-character keys an editor/UI cares about. Printable keys arrive as `ch`.
@@ -64,14 +67,15 @@ struct KeyEvent {
   bool pressed = true;
 };
 
-// One button edge read from the report BYTES, before the Report Map decode. The
-// identity is where the first non-zero byte sits: the report id (the id byte when
-// the frame carries one, else the Report Reference of the characteristic, else 0),
-// the payload byte index and its value. It survives what the decoder cannot see: a
-// bitmap past the parser's field ceiling, a 16-bit usage cut to 8 bits, two pages
-// that share a low byte. `keycode`/`mods` are what the decoder read from the same
-// frame (0 when it read no new key), so an app that routes raw edges can still fall
-// back to its keycode bindings for a button it has not learned.
+// One button edge read from the report BYTES, next to the key decode. Its
+// identity is where the report first differs from its rest frame (the frame the
+// remote sends with nothing pressed): the report id (the id byte of a 9-byte
+// frame, else the Report Reference id of the characteristic, else 0), the payload
+// byte index and the byte's value. It keeps apart what the key decode folds
+// together or drops: a button on a byte the decoder does not read, two reports
+// that share a code. `keycode`/`mods` on a press are the key the decoder read from
+// the same frame (0 when none), so an app that routes raw edges can fall back to
+// key bindings for a button it has not learned.
 struct RawButtonEvent {
   uint8_t reportId = 0;
   uint8_t byteIndex = 0;
@@ -79,12 +83,14 @@ struct RawButtonEvent {
   bool pressed = false;
   uint8_t keycode = 0;
   uint8_t mods = 0;
-  // Release only: the press it ends was read before the report's rest frame was known,
-  // and the rest frame learned since is that press's own byte, so the "press" was the
-  // remote idling on a non-zero status byte, not a button. A learning screen drops it.
+  // Release only: the press it ends was read before the report's rest frame was
+  // known, and the rest learned since holds that very byte, so the "press" was the
+  // remote idling on a non-zero status byte. A button-learning screen drops it.
   bool wasRest = false;
   uint32_t atMs = 0;  // millis() when the frame arrived, for hold timing
-  // value | byteIndex << 8 | reportId << 16; never 0 for an edge.
+  // value | byteIndex << 8 | reportId << 16; never 0 for an edge. A key the decoder
+  // read that no byte edge carries (an axis gamepad's zone) comes as one tap with
+  // byteIndex 0xFF and reportId 0xFF.
   uint32_t code() const {
     return static_cast<uint32_t>(value) | static_cast<uint32_t>(byteIndex) << 8 |
            static_cast<uint32_t>(reportId) << 16;
@@ -115,8 +121,8 @@ class BleKeyboardHost {
   static constexpr uint8_t kMaxDiscovered = 24;
   static constexpr uint8_t kMaxBonds = 4;
   static constexpr uint8_t kKeyQueueLen = 16;
-  // Eight presses with their releases, plus the slot that tells a full ring from an
-  // empty one: a burst of taps while the reader lays out a page loses none.
+  // Eight presses with their releases, plus the slot that tells a full ring from
+  // an empty one.
   static constexpr uint8_t kRawQueueLen = 17;
 
   static BleKeyboardHost& getInstance();
@@ -126,25 +132,34 @@ class BleKeyboardHost {
   // capability is compiled out.
   bool begin(const char* hostName = "FreeInk");
 
-  // Request a complete BLE teardown and return true only after the worker, client,
-  // and NimBLE stack are fully stopped. A timeout leaves the worker/client/stack
-  // intact and marks teardown pending, so a later end() can retry safely. The
-  // default budget is 1 second and is capped at 2 seconds. end(0) only services
-  // an already-safe teardown and never waits.
+  // Fully tear down the BLE stack: stop scanning, drop the link, delete the
+  // connection task, and NimBLEDevice::deinit() so the NimBLE host + controller
+  // RAM (tens of KB) is returned to the heap. Use this - not disconnect() - when
+  // the user turns Bluetooth off, so memory-hungry work (e.g. EPUB inflate) can
+  // allocate again. Bonds persist in NVS; begin() re-inits cleanly afterwards.
+  // Must run at normal CPU frequency (controller deinit), like begin().
+  //
+  // Returns true once the stack is down. It waits at most timeoutMs (capped at
+  // 2 s) for the connection task to leave a connect, pairing or discovery wait
+  // and for the link to finish closing. When that takes longer, nothing is
+  // deleted under NimBLE: end() returns false, isStopping() stays true and a
+  // later end() carries on from there. end(0) never waits. Safe to call from
+  // more than one task: while one end() runs, another returns false at once
+  // (still stopping) instead of tearing down alongside it.
   bool end(uint32_t timeoutMs = 1000);
 
-  // True after end() requested teardown but before every worker/client/stack
-  // resource has been released. begin() rejects while this is true.
+  // True from an end() that returned false until one returns true. begin() is
+  // refused meanwhile.
   bool isStopping() const;
 
-  // Pump per main-loop iteration: drives bounded auto-reconnect and held-key expiry.
-  // Cheap; never blocks.
+  // Pump per main-loop iteration: drives the connect deadline, bounded
+  // auto-reconnect and held-key expiry. Cheap; never blocks.
   void poll();
 
   // True while the NimBLE stack is initialized (between a successful begin() and
   // end()). Lets the app gate CPU-frequency and lifecycle decisions on whether BLE
   // is actually resident, independent of the user's on/off preference.
-  bool isRunning() const { return begun_.load(std::memory_order_acquire); }
+  bool isRunning() const { return begun_; }
 
   // --- Discovery -------------------------------------------------------------
   void startScan(uint32_t ms = 5000);
@@ -158,21 +173,46 @@ class BleKeyboardHost {
   // --- Connection ------------------------------------------------------------
   // Begin an async connect to a scanned/bonded address. isConnected() flips once
   // the link is encrypted and the HID input report is subscribed. Each complete
-  // attempt has a 15-second deadline serviced by poll(). Explicit connect rearms
-  // one pass through saved bonds; disconnect suppresses automatic reconnection.
+  // attempt (GAP connect, pairing and GATT setup) has a 15-second deadline serviced
+  // by poll(). An explicit connect rearms one pass through the saved bonds after a
+  // link loss; automatic reconnect tries each saved bond once per disconnected
+  // episode and then stops. disconnect() suppresses it until the next connect().
   bool connect(const char* addr);
+  // Reconnect the saved remotes that advertise, without a pairing table: scan for
+  // them, and connect to the one `policy` picks. Priority waits up to three seconds
+  // for `priorityAddr` (a saved remote) before taking another one that advertises;
+  // First takes the first one heard (an unsaved or absent priority acts as First).
+  // Arming again with the same arguments changes nothing. connect(), startScan(),
+  // disconnect(), end() and begin() cancel it. Refused (false) before begin().
   bool armBondedReconnect(PickPolicy policy, const char* priorityAddr);
-  void disconnect();
+  // What the reconnect machinery is doing: a connection attempt or a picked remote
+  // in flight (`busy`), and how many advertisements of saved, connectable remotes
+  // were heard (a running count: only its changes matter). An app that stops an idle
+  // radio counts only these.
   struct ReconnectActivity {
     bool busy;
     uint32_t advertisements;
   };
   ReconnectActivity reconnectActivity() const;
+  // Reconnect to one bonded peer only, for a bounded time: at most six attempts,
+  // each four seconds after the last one failed, none started later than 120
+  // seconds after arming, and no fallback to the other bonds. For an app that
+  // knows which remote it wants and should not spend the radio on the others.
+  // Refused (false) for an address that is not bonded, before begin(), while
+  // scanning, connecting or connected, or while a plan is already armed.
+  // connect(), disconnect(), end(), and forget() of that peer cancel the plan; a
+  // link to the peer that later drops on its own starts a fresh one. It dials the
+  // peer blind; armBondedReconnect() below waits for it to advertise. Arming one
+  // cancels the other.
+  bool armSelectedPeerReconnect(const char* addr);
+  // Drop the link and pause auto-reconnect until the next connect() or begin().
+  void disconnect();
   bool isConnected() const { return connected_; }
   bool isConnecting() const { return connecting_; }
   const char* connectedName() const { return connName_; }
-  // Address of the peer on the live link ("" when none). Settings keyed by remote
-  // must use this, not the saved choice: auto-reconnect can bring up another bond.
+  // Address of the peer on the live link ("" when none). Settings kept per remote
+  // must use this rather than the address the app asked for: auto-reconnect can
+  // bring up another bonded peer.
   const char* connectedAddr() const { return connAddr_; }
   bool takeConnectFailure(char* out, size_t outLen);
   bool takePairingPasskey(uint32_t& out);
@@ -185,18 +225,14 @@ class BleKeyboardHost {
   // --- Translated input ------------------------------------------------------
   // Pop the next key event. Returns false when the queue is empty.
   bool popKey(KeyEvent& out);
-  // Pop the next raw button edge (see RawButtonEvent). Filled from the same frames
-  // as popKey(), in its own ring, so an app that ignores it sees no change.
+  // Pop the next raw button edge (see RawButtonEvent). Filled from the same
+  // reports as popKey(), in a ring of its own, so an app that never calls it sees
+  // no change. A press only goes in with room left for its release; when the
+  // ring is full the whole press is dropped, never a release alone.
   bool popRawButton(RawButtonEvent& out);
   // Raw presses dropped because the ring was full (a burst nobody drained). A press
   // is dropped whole: one that got in always keeps a slot for its release.
   uint16_t rawOverflows() const { return rawOverflow_; }
-
-  // True while the peer is still streaming input reports - one arrived inside the
-  // host's own stale-release window. Lets an app tell "the button is still down and
-  // the remote keeps saying so" from "the remote went quiet", which is the only way
-  // to time a button HOLD on a remote that streams instead of sending a release frame.
-  bool reportStreamFresh() const;
 
   // --- Internal: called by the NimBLE backend (not for app use). These keep the
   // public header free of NimBLE types - the .cpp translates BLE objects into
@@ -209,16 +245,20 @@ class BleKeyboardHost {
   void onPairingPasskey(uint32_t passkey);
 
  private:
-  bool connectInternal(const char* addr, bool explicitRequest);
+  // Who asks for the connection: the app (Explicit), the selected-peer plan, the
+  // default one-pass auto-reconnect, or armBondedReconnect()'s picked remote. Each
+  // origin is re-checked against its own state under the lock.
+  enum class ConnectOrigin : uint8_t { Explicit, Plan, Auto, Picked };
+  bool connectInternal(const char* addr, ConnectOrigin origin);
+  // Raw ring push; the caller holds the ring lock. Refused (false) unless `keep`
+  // slots stay free after it: a press keeps one for its own release.
+  bool pushRawLocked(uint32_t code, bool pressed, uint32_t atMs, uint8_t keycode, uint8_t mods, uint8_t keep,
+                     bool wasRest = false);
+  void ingestRawEdge(const uint8_t* data, size_t len, uint32_t now, uint32_t lastMs);
   void enqueue(const KeyEvent& ev);    // ring push (spinlock-guarded)
   void emitUsage(uint8_t usage, uint8_t mods, bool pressed);  // translate + enqueue
   bool payOwedRelease();               // emit the release a recorded press still owes
   void decodeReport(const uint8_t* data, size_t len);  // map decode -> key events
-  // Raw edge ring push; the caller holds the ring lock. Refused (false) unless `keep`
-  // slots stay free after it: a press keeps one for its own release, so no release
-  // of a press that got in is ever dropped. `wasRest`: see RawButtonEvent.
-  bool pushRawLocked(uint32_t code, bool pressed, uint32_t atMs, uint8_t keycode, uint8_t mods, uint8_t keep,
-                     bool wasRest = false);
   void persistBonds();
   void loadBonds();
   BleKeyboardHost() = default;
@@ -244,6 +284,8 @@ class BleKeyboardHost {
   volatile bool connectFailed_ = false;
   volatile bool pairingPasskeyReady_ = false;
   volatile bool scanning_ = false;
+  // Atomic: read from other tasks (isRunning) while end() clears it after
+  // raising the stopping flag.
   std::atomic<bool> begun_{false};
 
   // Key auto-repeat: HID delivers one report per state change, so holding a key
@@ -258,17 +300,17 @@ class BleKeyboardHost {
   // The release a press still owes. emitUsage() records it on the press edge and
   // payOwedRelease() settles it - when the usage leaves the report, or (only for a
   // remote that was streaming) when the reports stop. It deliberately outlives the
-  // stale-release timeout below: a remote that sends one frame per edge can hold a
-  // button far longer than that window, and capping the release there would cap
-  // every hold at 150 ms.
+  // stale-release timeout: a remote that sends one frame per edge can hold a button
+  // far longer than that window, and capping the release there would cap every hold
+  // at 150 ms.
   volatile uint8_t owedUsage_ = 0;
   volatile uint8_t owedMods_ = 0;
   volatile uint8_t reportsSincePress_ = 0;  // 1 = press only, >1 = the remote streams
 
   // Raw button edges (RawButtonEvent), their own ring. rawCode_ is the button the
   // last frame held (0 = none); rawReports_ counts frames that repeated it, which
-  // is what tells a streaming remote (silence = release) from one that sends one
-  // frame per edge (silence = still held). Both are guarded by the ring lock.
+  // tells a remote that streams a held button (silence = release) from one that
+  // sends one frame per edge (silence = still held). Guarded by the ring lock.
   RawButtonEvent rawRing_[kRawQueueLen];
   volatile uint8_t rawHead_ = 0;
   volatile uint8_t rawTail_ = 0;
@@ -277,8 +319,7 @@ class BleKeyboardHost {
   uint16_t rawOverflow_ = 0;
   bool rawDropped_ = false;  // rawCode_'s press was dropped: its release is not sent either
   bool rawGuessed_ = false;  // rawCode_ was read against the all-zero guess, its rest not yet known
-  // The rest frame (nothing pressed) and the last frame of each report id, so a
-  // button is read as what changed against rest. Backend task only.
+  // The rest frame and the last frame of each report id. Backend task only.
   struct RawRest {
     uint8_t id;
     uint8_t frames;  // frames seen, capped at 2: the first one may itself be the rest state
@@ -288,8 +329,8 @@ class BleKeyboardHost {
   };
   RawRest rawRest_[4];
   uint8_t rawRestCount_ = 0;
-  bool frameAxisPad_ = false;  // the decoder read this frame as an axis-pair gamepad
-  // First key the decoder pressed in the frame being ingested (backend task only).
+  // What the key decode read from the frame being ingested. Backend task only.
+  bool frameAxisPad_ = false;
   uint8_t framePressUsage_ = 0;
   uint8_t framePressMods_ = 0;
 };

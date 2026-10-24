@@ -245,6 +245,16 @@ TEST_F(BondedReconnectTest, RepeatedArmAndPollNeverQueueDuplicateAttempt) {
   expectOnly(kB);
 }
 
+TEST_F(BondedReconnectTest, ArmingScanSelectionCancelsASelectedPeerPlan) {
+  // The plan would dial kB at once on the next poll; the scan-based selection replaces it.
+  ASSERT_TRUE(fakeble::host().armSelectedPeerReconnect(kB));
+  arm(PickPolicy::First, kA);  // arm() checks no connect was dialled and the scan runs
+  EXPECT_EQ(fakeble::state().connectCalls, 0u);
+  ingest(kC);
+  poll();
+  expectOnly(kC);
+}
+
 TEST_F(BondedReconnectTest, PriorityWaitSurvivesMillisWrap) {
   fakeble::advanceMillis(UINT32_MAX - fakeble::clockMs() - 1000);
   arm(PickPolicy::Priority, kA);

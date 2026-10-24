@@ -110,8 +110,9 @@ const uint8_t kXtfPreBwMid[5][PREBW_LUT_LEN + 1] = {
 const GrayLut* selectAaLuts() {
   // LUT_VER stored by the boot probe. Stock's panel LUT registry (X4 Pro
   // 260917 build, table @0x3c1adbd4 + hardcoded bank selects in its UC8279
-  // refresh) keys 0x02/0x03 to the QY bank and 0x68/0x69 to the ZHX bank;
-  // anything else unknown keeps the existing fallback to the ZHX bytes. 0x67
+  // refresh) keys 0x02/0x03 to the QY bank and 0x68/0x69 to the ZHX bank; X4C
+  // V7.1.21 points BOE 4.28 D/E (0x41/0x42) at the ZHX bank as well. Anything
+  // else unknown keeps the existing fallback to the ZHX bytes. 0x67
   // never reaches this: grayscaleCapabilities() reports unsupported for it
   // (stock ships no external-LUT tables for that id).
   const uint8_t v = BoardConfig::ACTIVE.displayControllerVariant;
@@ -314,8 +315,6 @@ void Uc8279X4Driver::initController(EpdBus& bus) {
 }
 
 void Uc8279X4Driver::begin(EpdBus& bus) {
-  _grayWindowCount = 0;
-  _grayWindowActive = _grayWindowValid = false;
   _directGrayOnPanel = false;
   _grayImagePass = false;
   _absoluteInput = false;
@@ -377,21 +376,13 @@ void Uc8279X4Driver::openWindow(EpdBus& bus, const Window& window) {
   bus.data(ptl, sizeof(ptl));
 }
 
-void Uc8279X4Driver::streamWindow(EpdBus& bus, uint8_t command, const uint8_t* fb, const Window& window, bool invert) {
-  uint8_t row[100];
+void Uc8279X4Driver::streamWindow(EpdBus& bus, uint8_t command, const uint8_t* fb, const Window& window) {
   const uint16_t first = window.xs / 8, count = (window.xe - window.xs + 1) / 8;
   bus.cmd(command);
-  bus.beginTxn();
-  for (uint16_t y = window.ys; y <= window.ye; ++y) {
-    const auto* source = fb + static_cast<uint32_t>(y) * _wb + first;
-    if (invert) {
-      for (uint16_t i = 0; i < count; ++i) row[i] = static_cast<uint8_t>(~source[i]);
-      bus.rawWriteBytes(row, count);
-    } else {
-      bus.rawWriteBytes(source, count);
-    }
-  }
-  bus.endTxn();
+  auto txn = bus.beginTxn();
+  for (uint16_t y = window.ys; y <= window.ye; ++y)
+    txn.writeBytes(fb + static_cast<uint32_t>(y) * _wb + first, count);
+  txn.end();
 #ifdef TENOR_PRESS_PROBE
   traceWindowPlane(command, uint32_t(count) * (window.ye - window.ys + 1));
 #endif
@@ -447,10 +438,10 @@ void Uc8279X4Driver::streamPlane(EpdBus& bus, uint8_t ramCmd, const uint8_t* fb,
   bus.cmd(ramCmd);
   // The OEM driver keeps CS asserted across a plane upload. Preserve our validated
   // gate offset/orientation, but avoid a new SPI transaction for every row.
-  bus.beginTxn();
+  auto txn = bus.beginTxn();
   // Gates before the visible window (the 120-gate offset): white.
   memset(row, 0xFF, wb);
-  for (uint16_t y = 0; y < _cfg.gateOffset; y++) bus.rawWriteBytes(row, wb);
+  for (uint16_t y = 0; y < _cfg.gateOffset; y++) txn.writeBytes(row, wb);
   // Visible rows, stock convention (hardware-confirmed upright): forward order,
   // bytes as-is. The ROWREV/XMIRROR switches (row reversal / reversed byte order
   // + reversed bits) exist for future panel sub-variants whose scan differs.
@@ -469,12 +460,12 @@ void Uc8279X4Driver::streamPlane(EpdBus& bus, uint8_t ramCmd, const uint8_t* fb,
       }
       row[i] = invert ? static_cast<uint8_t>(~b) : b;
     }
-    bus.rawWriteBytes(row, wb);
+    txn.writeBytes(row, wb);
   }
   // Gates after the visible window: white, up to the addressed gate count.
   memset(row, 0xFF, wb);
-  for (uint16_t y = _cfg.gateOffset + _h; y < _tresH; y++) bus.rawWriteBytes(row, wb);
-  bus.endTxn();
+  for (uint16_t y = _cfg.gateOffset + _h; y < _tresH; y++) txn.writeBytes(row, wb);
+  txn.end();
 #ifdef TENOR_PRESS_PROBE
   traceWindowPlane(ramCmd, uint32_t(_tresH) * wb);
 #endif
@@ -485,9 +476,9 @@ void Uc8279X4Driver::streamPlaneXor(EpdBus& bus, uint8_t ramCmd, const uint8_t* 
   uint8_t row[128];
   const uint16_t wb = _wb <= sizeof(row) ? _wb : sizeof(row);
   bus.cmd(ramCmd);
-  bus.beginTxn();
+  auto txn = bus.beginTxn();
   memset(row, 0xFF, wb);
-  for (uint16_t y = 0; y < _cfg.gateOffset; y++) bus.rawWriteBytes(row, wb);
+  for (uint16_t y = 0; y < _cfg.gateOffset; y++) txn.writeBytes(row, wb);
   static const uint8_t kBitRev[16] = {0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE, 0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF};
   for (uint16_t n = 0; n < _h; n++) {
     const uint16_t y = FREEINK_UC8279X4_ROWREV ? static_cast<uint16_t>(_h - 1 - n) : n;
@@ -503,11 +494,11 @@ void Uc8279X4Driver::streamPlaneXor(EpdBus& bus, uint8_t ramCmd, const uint8_t* 
       }
       row[i] = invert ? static_cast<uint8_t>(~b) : b;
     }
-    bus.rawWriteBytes(row, wb);
+    txn.writeBytes(row, wb);
   }
   memset(row, 0xFF, wb);
-  for (uint16_t y = _cfg.gateOffset + _h; y < _tresH; y++) bus.rawWriteBytes(row, wb);
-  bus.endTxn();
+  for (uint16_t y = _cfg.gateOffset + _h; y < _tresH; y++) txn.writeBytes(row, wb);
+  txn.end();
 #ifdef TENOR_PRESS_PROBE
   traceWindowPlane(ramCmd, uint32_t(_tresH) * wb);
 #endif
@@ -521,7 +512,6 @@ void Uc8279X4Driver::powerOnIfNeeded(EpdBus& bus, const char* tag) {
 }
 
 bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
-  _grayWindowActive = _grayWindowValid = false;
   _windowGrayPending = false;
 #if defined(FREEINK_EPD_STAGE_TRACE) && FREEINK_EPD_STAGE_TRACE
   // Where the time before the refresh goes: the base copy, each plane, the trigger.
@@ -559,7 +549,6 @@ bool Uc8279X4Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t*
   // pages) AND the manual force-refresh; it MUST scrub, exactly like UC8179.
   const bool scrub = (mode == RefreshMode::Half);
   const bool fast = (mode == RefreshMode::Fast) && !_needFullClear && _oldPlaneValid;
-  if (!fast) _grayWindowCount = 0;
 
   if (paintDestination) {
     streamPlane(bus, CMD_DTM1, fb, true);
@@ -694,8 +683,6 @@ void Uc8279X4Driver::displayFinish(EpdBus& bus, const uint8_t* fb) {
 }
 
 void Uc8279X4Driver::requestResync(uint8_t settlePasses) {
-  _grayWindowCount = 0;
-  _grayWindowActive = _grayWindowValid = false;
   _grayImagePass = false;
   _absoluteInput = false;
   _directGrayPass = false;
@@ -706,8 +693,6 @@ void Uc8279X4Driver::requestResync(uint8_t settlePasses) {
 void Uc8279X4Driver::skipInitialResync() { _needFullClear = false; }
 
 void Uc8279X4Driver::deepSleep(EpdBus& bus) {
-  _grayWindowCount = 0;
-  _grayWindowActive = _grayWindowValid = false;
   _directGrayOnPanel = false;
   _grayImagePass = false;
   _absoluteInput = false;
@@ -730,7 +715,7 @@ void Uc8279X4Driver::deepSleep(EpdBus& bus) {
 GrayscaleCapabilities Uc8279X4Driver::grayscaleCapabilities(GrayscaleMode mode) const {
   // LUT_VER 0x67: stock's panel LUT registry (X4 Pro 260917 build) recognizes
   // the id but carries no external-LUT tables for it and excludes it from the
-  // ZHX fallback — that panel refreshes from OTP only, with no grayscale path.
+  // ZHX fallback - that panel refreshes from OTP only, with no grayscale path.
   // Report unsupported so callers render B/W instead of driving it with
   // another vendor's waveform.
   if (BoardConfig::ACTIVE.displayControllerVariant == 0x67) return {};
@@ -741,62 +726,8 @@ GrayscaleCapabilities Uc8279X4Driver::grayscaleCapabilities(GrayscaleMode mode) 
   return {GrayscaleEncoding::OverlayMasks, GrayscaleBase::Separate, false, false, false};
 }
 
-bool Uc8279X4Driver::displayGrayscaleWindow(EpdBus& bus, const uint8_t* bw, const uint8_t* lsb,
-                                           const uint8_t* msb, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                                           bool turnOff) {
-#ifdef TENOR_PRESS_PROBE
-  WindowTrace trace("AA", x, y, w, h);
-#endif
-  if (!bw || !lsb || !msb) {
-#ifdef TENOR_PRESS_PROBE
-    Serial.printf("WINDOW_FALLBACK reason=missing_plane\n");
-#endif
-    requestResync(1);
-    return false;
-  }
-  if (BoardConfig::ACTIVE.board != BoardConfig::Board::XteinkX4Pro ||
-      !grayscaleCapabilities(GrayscaleMode::Absolute).supported()) return false;
-  if (!_grayBase) {
-#ifdef TENOR_PRESS_PROBE
-    Serial.printf("WINDOW_FALLBACK reason=gray_base\n");
-#endif
-    display(bus, bw, nullptr, RefreshMode::Full, turnOff);
-    return false;
-  }
-  Window window;
-  const bool valid = makeWindow(window, x, y, w, h);
-  const bool moved = _grayWindowCount && (window.xs != _grayWindow.xs || window.xe != _grayWindow.xe ||
-                                        window.ys != _grayWindow.ys || window.ye != _grayWindow.ye);
-  if (!valid || _grayWindowCount >= 10 || moved || !_oldPlaneValid || _needFullClear || _windowGrayPending ||
-      _redriveAfterGray || _directGrayOnPanel || _pendingRefresh || !_grayBaseValid ||
-      memcmp(_grayBase, bw, _bufferSize) != 0) {
-#ifdef TENOR_PRESS_PROBE
-    Serial.printf("WINDOW_FALLBACK reason=%s\n", !valid ? "bounds_or_inversion" :
-                  _grayWindowCount >= 10 ? "gray_limit" : moved ? "window_changed" :
-                  !_oldPlaneValid ? "old_plane" : _needFullClear ? "full_clear" :
-                  _windowGrayPending || _redriveAfterGray || _directGrayOnPanel || _pendingRefresh ? "gray_or_pending" :
-                  !_grayBase || !_grayBaseValid ? "gray_base" : "base_changed");
-#endif
-    beginGrayscale(bus, bw, GrayscaleMode::Absolute, RefreshMode::Full, false);
-    copyGrayscaleLsb(bus, lsb);
-    copyGrayscaleMsb(bus, msb);
-    displayGray(bus, bw, turnOff, nullptr, true);
-    return true;
-  }
-  _grayWindow = window;
-  _grayWindowActive = _grayWindowValid = true;
-  _absoluteInput = true;
-  _windowGrayPending = true;
-  openWindow(bus, window);
-  streamWindow(bus, CMD_DTM1, lsb, window, true);
-  streamWindow(bus, CMD_DTM2, msb, window, true);
-  displayGray(bus, bw, turnOff, nullptr, true);
-  return true;
-}
-
 void Uc8279X4Driver::beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode mode, RefreshMode fallback,
                                     bool turnOff) {
-  _grayWindowActive = _grayWindowValid = false;
   _grayImagePass = false;
   _absoluteInput = false;
   _directGrayPass = false;
@@ -931,17 +862,6 @@ void Uc8279X4Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, c
   // stops a stale gray selector plane from being reused by a later refresh - the
   // core of why absolute planes de-ghost where raw delta planes did not.
   (void)fb;
-  if (_grayWindowActive) {
-    streamWindow(bus, CMD_DTM1, _grayBase, _grayWindow);
-    streamWindow(bus, CMD_DTM2, _grayBase, _grayWindow);
-    bus.cmd(CMD_PARTIAL_OUT);
-    _grayWindowActive = false;
-    ++_grayWindowCount;
-    _oldPlaneValid = true;
-    _needFullClear = false;
-    _absoluteInput = false;
-    return;
-  }
   if (_grayBaseValid && _grayBase != nullptr) {
     streamPlane(bus, CMD_DTM1, _grayBase);
     streamPlane(bus, CMD_DTM2, _grayBase);
@@ -1055,18 +975,6 @@ void Uc8279X4Driver::runGrayscalePrecondition(EpdBus& bus) {
 }
 
 void Uc8279X4Driver::cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) {
-  if (_grayWindowValid && bw) {
-#ifdef TENOR_PRESS_PROBE
-    WindowTrace trace("cleanup", _grayWindow.xs, _grayWindow.ys, _grayWindow.xe - _grayWindow.xs + 1,
-                      _grayWindow.ye - _grayWindow.ys + 1);
-#endif
-    openWindow(bus, _grayWindow);
-    streamWindow(bus, CMD_DTM1, bw, _grayWindow);
-    bus.cmd(CMD_PARTIAL_OUT);
-    _grayWindowValid = false;
-    return;
-  }
-  _grayWindowActive = _grayWindowValid = false;
   _windowGrayPending = false;
   _grayImagePass = false;
   _absoluteInput = false;

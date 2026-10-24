@@ -52,10 +52,8 @@ window to avoid the controller's native 800×600 stride.
 
 - B/W refreshes use recovered full (GC) and fast (DU) banks.
 - Overlay grayscale uses XTF_AA waveforms with a separate B/W conditioning pass.
-- Absolute and Direct four-tone images use the XTH4 bank with no separate B/W
-  base pass; after a Direct image the next B/W refresh first drives the panel to
-  its B/W target. All grayscale modes support
-  complete-plane and strip uploads; none advertises asynchronous grayscale
+- Absolute four-tone images use the XTH4 bank. Both grayscale modes support
+  complete-plane and strip uploads; neither advertises asynchronous grayscale
   conditioning or staging while busy.
 - Ordinary B/W refreshes support the split `displayStart()` / `displayFinish()`
   interface.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Máy chủ trình dựng màn hình FreeInkUI chạy cục bộ."""
+"""Local FreeInkUI screen builder server."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def render_inputs():
 def load_generator():
     spec = importlib.util.spec_from_file_location("freeink_gen_screen", GEN_SCREEN)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"không nạp được {GEN_SCREEN}")
+        raise RuntimeError(f"cannot load {GEN_SCREEN}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -52,7 +52,7 @@ def build_renderer(schema: dict) -> Path:
     safe_left = int(safe_area.get("left", 0) or 0)
     match = re.search(r"inline void\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", generated)
     if not match:
-        raise RuntimeError("không tìm thấy hàm màn hình đã sinh")
+        raise RuntimeError("generated screen function not found")
     function_name = match.group(1)
     max_match = re.search(r"freeink::ui::Screen<(\d+)>", generated)
     max_interactions = int(max_match.group(1)) if max_match else 64
@@ -264,7 +264,7 @@ def main() -> None:
     args = parser.parse_args()
 
     server = ThreadingHTTPServer((args.host, args.port), BuilderHandler)
-    print(f"Trình dựng FreeInkUI: http://{args.host}:{args.port}/")
+    print(f"FreeInkUI builder: http://{args.host}:{args.port}/")
     server.serve_forever()
 
 

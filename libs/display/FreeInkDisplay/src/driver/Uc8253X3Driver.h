@@ -71,10 +71,10 @@ class Uc8253X3Driver : public PanelDriver {
   GrayscaleCapabilities grayscaleCapabilities(
       GrayscaleMode mode = GrayscaleMode::Overlay) const override {
     if (mode == GrayscaleMode::Direct && !_cfg.directGray) return {};
-    // Absolute stays unadvertised here: callers that probe it keep the Overlay
-    // paths measured on X3 UC8253 panels. Direct is the one full-plane mode.
-    if (mode == GrayscaleMode::Direct)
-      return {GrayscaleEncoding::AbsolutePlanes, GrayscaleBase::Combined, true, false, false};
+    if (mode == GrayscaleMode::Absolute || mode == GrayscaleMode::Direct)
+      return {GrayscaleEncoding::AbsolutePlanes,
+              mode == GrayscaleMode::Direct ? GrayscaleBase::Combined : GrayscaleBase::Separate,
+              true, false, false};
     if (mode != GrayscaleMode::Overlay) return {};
     return {GrayscaleEncoding::OverlayMasks, GrayscaleBase::Separate, true,
             false, false};

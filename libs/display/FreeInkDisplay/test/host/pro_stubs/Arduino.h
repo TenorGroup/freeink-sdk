@@ -13,6 +13,7 @@ inline int digitalRead(int) { return 0; }
 
 #include <cassert>
 inline bool proSpiTransaction = false;
+#ifndef PRO_STUB_NO_SERIAL
 struct ProSerial {
   template<class... Args> void printf(const char* format, Args... args) {
     assert(!proSpiTransaction);
@@ -21,3 +22,4 @@ struct ProSerial {
   }
 };
 inline ProSerial Serial;
+#endif

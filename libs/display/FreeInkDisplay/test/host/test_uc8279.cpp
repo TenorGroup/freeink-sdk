@@ -12,8 +12,6 @@ int main() {
   Uc8279Driver driver;
   std::vector<uint8_t> bw(n, 0x88), lsb(n, 0xAA), msb(n, 0xCC);
   assert(driver.grayscaleCapabilities(GrayscaleMode::Absolute).supported());
-  // Absolute and Direct both stage complete planes: no separate B/W base pass.
-  assert(driver.grayscaleCapabilities(GrayscaleMode::Absolute).base == GrayscaleBase::Combined);
   assert(driver.grayscaleCapabilities(GrayscaleMode::Direct).base == GrayscaleBase::Combined);
   assert(driver.grayscaleCapabilities().stripUploads && !driver.grayscaleCapabilities().asyncBase);
   driver.begin(bus);
@@ -27,13 +25,10 @@ int main() {
   assert(bus.lastBank == std::vector<uint8_t>(kUc8279X3_XtfAa[0], kUc8279X3_XtfAa[0] + 49));
 
   for (bool turnOff : {false, true}) {
-    const auto before = bus.refreshes;
-    driver.beginGrayscale(bus, bw.data(), GrayscaleMode::Absolute, RefreshMode::Half, false);
-    assert(bus.refreshes == before);  // No visible B/W preview before the complete gray image.
+    driver.displayGrayscaleBase(bus, bw.data(), RefreshMode::Half, false);
     driver.copyGrayscaleLsb(bus, lsb.data());
     driver.copyGrayscaleMsb(bus, msb.data());
     driver.displayGray(bus, bw.data(), turnOff, nullptr, true);
-    assert(bus.refreshes == before + 1);
     assert(bus.rawRegisters == std::vector<uint8_t>({0x20, 0x24, 0x22, 0x23, 0x21}));
     assert(bus.lastBank == std::vector<uint8_t>(kUc8279X3_Xth4[0], kUc8279X3_Xth4[0] + 49));
     // Cleanup must not clear the required physical rebase after an absolute pass.

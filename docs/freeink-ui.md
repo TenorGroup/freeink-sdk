@@ -635,7 +635,8 @@ slot, such as a book page renderer or a cover image.
 The e-reader-specific components are still immediate-mode: every frame gets a
 props struct, draws into a rect, and registers semantic actions.
 
-Controls default to square corners. Pass a positive radius on the relevant
+The full keyboard components default to a 3px key radius; `keyGrid` and most
+other controls start square. Pass a positive radius on the relevant
 props (`ButtonProps::radius`, `SettingRowProps::radius`,
 `ToggleRowProps::radius`/`knobRadius`, `StepperRowProps::buttonRadius`,
 `CheckboxProps::radius`, `SliderProps::radius`, `DropdownProps::radius`,
@@ -731,28 +732,38 @@ qwertyKeyboard(ui, keyboardRect, keyboard);
 
 `Screen::keyboard` and `Screen::qwertyKeyboard` use the full safe-area width,
 including the space outside text-content side margins. Their automatic height
-allocates at least 64px per row, scaling to 80px on a 480px-wide screen: 348px
-for four rows, or 434px with a dedicated number row. On short screens the total
-is capped at 50% of the safe height plus the extra row spacing, and the remaining
-content space. An explicit
-height still overrides automatic sizing. Low-level calls with a `Rect` use that
-rectangle exactly; reserve `keyboardPreferredHeight(width, layout.rowCount)`
-pixels to get the same taller rows there.
+sizes each row to about 4/3 of a ten-key letter key's width, up to 56px. At
+480px or 800px wide, that gives 56px rows: 250px for the default four rows, or
+312px when `numberRow` is enabled. Narrower screens scale the row height down.
+On short screens, the keyboard is capped at two-thirds of the safe height so
+the entry field retains space. An explicit height still overrides automatic
+sizing. Low-level calls with a `Rect` use that rectangle exactly; reserve
+`keyboardPreferredHeight(width, layout.rowCount)` pixels for the same sizing.
 
-Keys are borderless by default, with a filled highlight when selected or pressed. Primary labels
+Keyboard keys default to white with a 1px black outline on a light gray dithered
+panel. The panel has 4px padding, keys have 6px gaps in both directions, and
+character keys share one width across rows. `keyGrid` uses the same outlined
+keys and 6px gaps; its caller supplies the panel background and padding. The
+outlined Space key has no inner glyph by default: set `spaceLabel` to `nullptr`
+for the rule glyph, or to text for a localized label. Apps can override these
+values through the keyboard props, including `background`, `keyStyles`,
+`padding`, `gap`, `rowGap`, and `uniformKeyWidth`. Set `uniformKeyWidth` to
+`false` for rows meant to stretch independently, such as wide URL shortcuts.
+
+Selected and pressed keys use a full-size filled highlight. Primary labels
 use the body font slot, with smaller alternate hints. Set `labelText.font` to a
 larger registered font and `controlText.font` to a smaller font for word labels
 such as Shift or localized OK text. The gallery uses 36px letters, 24px control
 labels, and 13px alternate hints on a 480×800 display, with the five-row keyboard
-occupying the lower 416px. Rows are separated by 6px (`rowGap`), while the
-horizontal key spacing remains 2px (`gap`). Selected and pressed highlights are
-about 20% shorter and centered on the labels, without reducing hit targets; alternate
-hints keep the same position and 10px right padding in every state, inside the
-highlight area. Selecting or pressing a key changes only the hint color. Keys with alternate
+occupying the lower 416px. Alternate hints keep the same position and 10px
+right padding in every state, inside the highlight area. Alternate hints change
+color with the key state without moving. Keys with alternate
 hints reserve 4px of extra headroom above the primary glyph, with matching
 clearance below so the highlight stays centered. Firmware can tune this geometry with
 `altHintRightPadding`, `altLabelGap`, and the signed `digitLabelOffsetX` on
-`KeyboardProps` or `QwertyKeyboardProps`; their defaults are 10px, 4px, and -4px.
+`KeyboardProps` or `QwertyKeyboardProps`. Both use 10px right padding and a
+4px label gap; the digit offset is -6px for `KeyboardProps` and -4px for
+`QwertyKeyboardProps`.
 Negative padding or gap values are treated as zero.
 
 The keyboard is stateless like every component: Shift and mode ("?123"/"ABC")
@@ -836,6 +847,31 @@ the active layout's UTF-8 output string. Visible glyph coverage depends on the
 active `DrawTarget` font asset, so devices shipping wider language support
 should include matching Noto Sans glyph ranges in their generated bitmap font or
 use a renderer with native text shaping.
+
+The Latin locale layouts follow their printed keyboards. QWERTZ German carries
+ä, ö, ü and ß as keys; AZERTY French keeps é as a key and reaches è, ê, à, ç, ù,
+î and ô by long-press, and Spanish reaches its acute vowels the same way. A key
+has a single long-press alternate, so letters beyond one per key (French â, û,
+ë, ï, œ) are not on the built-in layers.
+
+`builtinKeyboardLayout` keeps every layer of every built-in layout expanded in
+flash, about 16 KB on a 32-bit target. `buildKeyboardLayout` takes the same
+arguments and returns the same layout, key for key, but builds it from a
+compact description (about 2 KB for all layouts) into a `KeyboardLayoutBuffer`
+the app owns:
+
+```cpp
+// A member of the screen that shows the keyboard (~1.2 KB), rebuilt whenever
+// shift, the symbol pages or the script change.
+freeink::ui::KeyboardLayoutBuffer layoutBuffer;
+
+keyboard.layout = &freeink::ui::buildKeyboardLayout(layoutBuffer, freeink::ui::KeyboardLayoutId::CyrillicRu,
+                                                    shifted, symbols, /*numberRow=*/true, /*langKey=*/true);
+```
+
+A firmware that only ever builds its layers this way, and never reaches
+`builtinKeyboardLayout` (directly, or through `KeyboardEntry` or FreeInkApp's
+`qwertyKeyboard`), does not link the expanded tables.
 
 An app that reaches more than one script sets `builtinKeyboardLayout`'s
 `langKey` flag and a `KeyboardProps::langAction`, which puts a script-switch key
@@ -1626,3 +1662,25 @@ widest natural tab. Slot bounds include the tab insets, and touch targets and
 selection indicators follow the slots. A single tab is centered. If the slots
 and minimum `gap` do not fit, the bar falls back to equal-width slots.
 Existing default layouts are unchanged. Neither option allocates memory.
+
+
+### Runtime composition and compact style overrides
+
+`FreeInkUILayout.h` supports fixed/flexible linear containers and equal-track
+runtime grids. Set `LayoutNode::kind = LayoutKind::Grid`, `columns`, and `rows`;
+children carry zero-based `column`/`row` and positive spans. Spanned rectangles
+include internal gaps. Grid children may themselves be linear containers. Layout
+is allocation-free and uses 32-bit intermediate coordinates. Callers validate
+configuration; invalid/out-of-bounds placements produce no slot.
+
+`FreeInkUIComponentStyle.h` supplies compact text and state-box overrides with
+explicit presence masks. Applying false, zero, or transparent replaces the
+inherited value; absent fields preserve it. `Screen::setComponentStyle` borrows
+screen-lifetime storage, applies overrides to list typography/state styles and
+headers, and supports alignment of list blocks that fit the viewport (including wrapped rows).
+The style pointer defaults to null, preserving existing callers. Layout owners
+apply `padding` to their content bounds before routing and drawing.
+
+`fitCoverGrid` computes fitting cover/row dimensions from the existing grid
+properties, available rectangle, line height and maximum cover height. It leaves
+text line-count policy to the caller and allocates no buffers.

@@ -11,6 +11,8 @@ sh libs/ui/FreeInkUI/test/host/run.sh
 sh libs/book/FreeInkBook/test/host/run.sh
 sh libs/book/ContentProtection/test/host/run.sh
 sh libs/hardware/InputManager/test/host/run.sh
+sh libs/hardware/InputManager/test/host/run_metalio.sh
+sh libs/hardware/HapticManager/test/host/run.sh
 ```
 
 The book suite also needs `zip`. It uses `sips` or ImageMagick's `convert` for
@@ -18,6 +20,33 @@ JPEG fixtures and optionally Pillow for progressive JPEG fixtures; the related
 checks skip when those converters are unavailable. It builds layout tests for
 the default, SMALL, and LARGE memory profiles. Build outputs go under the system
 temporary directory.
+
+## Progressive JPEG
+
+```sh
+python3 libs/assets/ProgressiveJpeg/test/host/run.py
+```
+
+Needs Pillow, `cjpeg` and `djpeg`. Decodes generated progressive JPEGs (4:2:0,
+4:2:2, 4:4:4, grayscale, restart intervals, odd sizes) and compares the luma
+with `djpeg -grayscale`; also checks that baseline files are refused and that
+a truncated stream decodes without failing. Set `PJ_EXTRA_JPEGS` to a
+colon-separated list of files to check real-world images too.
+
+## Battery gauge
+
+```sh
+sh libs/hardware/BatteryMonitor/test/host/run.sh
+```
+
+Compiles `BatteryMonitor` and the real X3 board profile against a model BQ27220
+that holds the Design Capacity load to TRM SLUUBD4A 6.1: key timing, CONFIG
+UPDATE, checksummed Data Memory writes, and the X3's block re-select. Every
+refused I2C transaction must still leave the gauge out of CONFIG UPDATE and
+sealed, and the next start must finish the load. It also compiles the EEGO A4
+profile against a model CW2015: the battery-profile check and upload sequence,
+the voltage and percentage conversion, and the ADC fallback when no gauge
+answers.
 
 ## Fonts
 
@@ -36,16 +65,39 @@ bundled font: exact-value assertions for the five standard Latin ligatures,
 the codepoint-vs-glyph-ID contract boundary, deinit()/re-init cache
 invalidation, and a null-pointer safety check on `Gsub::LigatureGlyphId`.
 
+## BLE HID host
+
+```sh
+sh libs/network/BleKeyboardHost/test/host/run.sh
+```
+
+Compiles `BleKeyboardHost` with `FREEINK_CAP_BLE_HID_HOST=1` against a fake
+NimBLE and FreeRTOS layer, with the connection task on a real thread. Covers
+report decode into key events, auto-reconnect, scanning and teardown order.
+The fake has no radio, so pairing, link timing and memory use still need a
+device.
+
+`libs/network/BleKeyboardHost/tests` holds a second, gtest-based suite (report
+decode through the Report Map, key release edges, the connect deadline, bonded
+reconnect, teardown, raw button edges, `HidKeymap`). It has no runner of its own:
+the consumer project builds it from its CMake test tree (it needs GoogleTest, and
+`RuntimeIdleTest.cpp` also needs the consumer's page-turner runtime). Both suites
+build the same `BleKeyboardHost.cpp`.
+
 ## Display drivers
 
 ```sh
 python3 libs/display/FreeInkDisplay/test/host/run_pro.py
 python3 libs/display/FreeInkDisplay/test/host/run_uc8279.py
+python3 libs/display/FreeInkDisplay/test/host/run_uc8279c_a4.py
 python3 libs/display/FreeInkDisplay/test/host/run_uc8253_power.py
+python3 libs/display/FreeInkDisplay/test/host/run_picco.py
 ```
 
 These compile production drivers against recording buses. The Pro suite also
-compiles the facade in single- and dual-buffer modes. The checks cover transfer
+compiles the facade in single- and dual-buffer modes. The Picco suite builds the
+SSD1677/SSD2677 drivers as a Picco and as a Sticky, including each board's
+bit-banged panel probe. The checks cover transfer
 sequences, grayscale uploads, refresh lifecycle, and power-state behavior for
 the drivers included in each harness.
 

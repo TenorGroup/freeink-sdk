@@ -44,7 +44,9 @@ class SDCardManager {
   String readFile(const char* path);
   // Low-memory helpers:
   // Stream the file contents to a `Print` (e.g. `Serial`, or any `Print`-derived object).
-  // Returns true on success, false on failure.
+  // Returns true only when every byte is accepted by `out`. Retries positive
+  // short writes; returns false on a stalled write, read error, or premature EOF.
+  // On failure, `out` may already contain a prefix of the file.
   bool readFileToStream(const char* path, Print& out, size_t chunkSize = 256);
   // Read up to `bufferSize-1` bytes into `buffer`, null-terminating it. Returns bytes read.
   size_t readFileToBuffer(const char* path, char* buffer, size_t bufferSize, size_t maxBytes = 0);
@@ -60,6 +62,11 @@ class SDCardManager {
   bool remove(const char* path) { return vol().remove(path); }
   bool rmdir(const char* path) { return vol().rmdir(path); }
   bool rename(const char* path, const char* newPath) { return vol().rename(path, newPath); }
+  // Move a fully written temp file over `path`. FAT rename does not replace an
+  // existing file, so the old one is removed first.
+  bool replaceFile(const char* tmpPath, const char* path) {
+    return (!vol().exists(path) || vol().remove(path)) && vol().rename(tmpPath, path);
+  }
 
   bool openFileForRead(const char* moduleName, const char* path, FsFile& file);
   bool openFileForRead(const char* moduleName, const std::string& path, FsFile& file);
@@ -82,7 +89,7 @@ class SDCardManager {
   //
   // Both backends answer this: SDMMC boards hand back their native esp-idf
   // device, SPI boards hand back SdFat's own SdCard (SdCardInterface derives
-  // from FsBlockDeviceInterface, so the card object IS a block device — no
+  // from FsBlockDeviceInterface, so the card object IS a block device - no
   // second driver is needed for the SPI path).
   FsBlockDeviceInterface* rawBlockDevice();
   // End the FsVolume mount while keeping the block device alive for a raw

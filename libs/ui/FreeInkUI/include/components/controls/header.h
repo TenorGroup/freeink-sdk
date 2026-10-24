@@ -88,15 +88,21 @@ struct HeaderProps {
   int16_t trailingSize = 0;
   // Battery + clock status chrome drawn inside the band.
   HeaderStatusProps status{};
+  // How far the band's background and border extend past `rect` on each side,
+  // so the chrome can span the screen while the content stays inset.
+  Insets bleed{};
 };
 
 template <size_t MaxInteractions>
 void header(Frame<MaxInteractions>& frame, Rect rect, const HeaderProps& props) {
   StyleSet styles = props.styles.unset() ? defaultPopupStyles() : props.styles;
   const BoxStyle& style = styles.resolve(StateNormal);
-  frame.target().fill(rect, style.background, style.radius, style.corners);
+  const Rect chrome{static_cast<int16_t>(rect.x - props.bleed.left), static_cast<int16_t>(rect.y - props.bleed.top),
+                    static_cast<int16_t>(rect.width + props.bleed.left + props.bleed.right),
+                    static_cast<int16_t>(rect.height + props.bleed.top + props.bleed.bottom)};
+  frame.target().fill(chrome, style.background, style.radius, style.corners);
   if (style.border.kind != PaintKind::None && style.borderWidth > 0) {
-    drawBorderEdges(frame.target(), rect, style.border, style.borderWidth, style.radius, style.corners,
+    drawBorderEdges(frame.target(), chrome, style.border, style.borderWidth, style.radius, style.corners,
                     props.borderEdges);
   }
 
@@ -271,17 +277,18 @@ void header(Frame<MaxInteractions>& frame, Rect rect, const HeaderProps& props) 
     batteryIndicator(frame, Rect{batteryX, rect.y, batteryReserve, statusStripH}, status.battery);
   }
   if (clockWidth > 0) {
-    // Centered: on the band's midline with the rest of the chrome. Corner:
-    // in the headroom above the title row, top-aligned like the legacy
-    // status strips (its own line height, not the battery strip).
+    // Centered or in a corner, the clock's ink centers on the status strip,
+    // level with the battery glyph and its label (targets without glyph
+    // metrics center the line box instead).
     const int16_t clockLineH = frame.target().lineHeight(status.battery.text.font);
-    const int16_t clockH = status.clockCentered ? statusStripH : clockLineH;
+    const Rect ink = frame.target().inkBounds(status.battery.text.font, status.clockText, status.battery.text);
+    const int16_t clockY = static_cast<int16_t>(rect.y + (statusStripH - ink.height) / 2 - ink.y);
     const int16_t clockX = status.clockCentered
                                ? static_cast<int16_t>(rect.x + (rect.width - clockWidth) / 2)
                            : status.batteryLeft
                                ? static_cast<int16_t>(rect.right() - statusInset - clockWidth)
                                : static_cast<int16_t>(rect.x + statusInset);
-    frame.target().text(Rect{clockX, rect.y, clockWidth, clockH}, status.clockText, status.battery.text);
+    frame.target().text(Rect{clockX, clockY, clockWidth, clockLineH}, status.clockText, status.battery.text);
   }
 }
 

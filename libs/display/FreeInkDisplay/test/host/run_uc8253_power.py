@@ -69,9 +69,8 @@ public:
   void waitRefreshComplete(const char*) {}
   struct Pins { int8_t busy=0; };
   Pins pins() const { return {}; }
-  void beginTxn() {}
-  void endTxn() {}
-  void rawWriteBytes(const uint8_t*, size_t) {}
+  struct Transaction { void writeBytes(const uint8_t*, size_t) {} void end() {} };
+  Transaction beginTxn() { return {}; }
 };
 }
 ''')
@@ -85,7 +84,6 @@ int main() {
  freeink::EpdBus bus; freeink::Uc8253X3Driver d;
  const auto caps = d.grayscaleCapabilities();
  assert(caps.supported() && caps.stripUploads && !caps.asyncBase && !caps.stagingWhileBusy);
- assert(!d.grayscaleCapabilities(freeink::GrayscaleMode::Absolute).supported());
  assert(d.grayscaleCapabilities(freeink::GrayscaleMode::Direct).base == freeink::GrayscaleBase::Combined);
  std::vector<uint8_t> fb(792/8*528, 0xAA); d.begin(bus);
  d.display(bus,fb.data(),nullptr,freeink::RefreshMode::Full,false);

@@ -304,11 +304,11 @@ void Uc8279Driver::writeGrayscalePlaneStrip(EpdBus& bus, GrayPlane plane, const 
   bus.cmd(CMD_PARTIAL_IN);
   bus.cmdData(CMD_PARTIAL_WINDOW, win, 9);
   bus.cmd(ramCmd);
-  bus.beginTxn();
+  auto txn = bus.beginTxn();
   for (int r = static_cast<int>(numRows) - 1; r >= 0; r--) {
-    bus.rawWriteBytes(rows + static_cast<uint32_t>(r) * _wb, _wb);
+    txn.writeBytes(rows + static_cast<uint32_t>(r) * _wb, _wb);
   }
-  bus.endTxn();
+  txn.end();
   bus.cmd(CMD_PARTIAL_OUT);
   if (plane == GrayPlane::Lsb) {
     _lsbValid = true;
@@ -347,7 +347,8 @@ void Uc8279Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, con
   _directGrayPass = false;
 }
 
-void Uc8279Driver::beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode mode, RefreshMode fallback,
+void Uc8279Driver::beginGrayscale(EpdBus &bus, const uint8_t *fb,
+                                  GrayscaleMode mode, RefreshMode fallback,
                                   bool turnOff) {
   _directGrayPass = mode == GrayscaleMode::Direct;
   if (_directGrayPass) {
@@ -355,13 +356,6 @@ void Uc8279Driver::beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode 
     _oldPlaneValid = false;
     _inGrayscaleMode = false;
     _forceFullSyncNext = true;
-    return;
-  }
-  if (mode == GrayscaleMode::Absolute) {
-    // XTH4 supplies all four target levels in one waveform. Stage both planes
-    // before activation; the overlay's B/W and preconditioning passes are redundant.
-    _lsbValid = false;
-    _inGrayscaleMode = false;
     return;
   }
   displayGrayscaleBase(bus, fb, fallback, turnOff);

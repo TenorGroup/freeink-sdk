@@ -4,10 +4,12 @@
 
 #include <FreeInkApp.h>
 #include <FreeInkUI.h>
+#include <FreeInkUILayout.h>
 #include <FreeInkUIDisplayTarget.h>
 
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 #include <thread>
 
 namespace {
@@ -52,6 +54,7 @@ class FakeDrawTarget : public DrawTarget {
     Rotation rotation;
     FontId font = 0;
     TextAlign align = TextAlign::Left;
+    const uint8_t* bitmapData = nullptr;
   };
 
   Op ops[256]{};
@@ -91,8 +94,9 @@ class FakeDrawTarget : public DrawTarget {
       ops[opCount - 1].align = style.align;
     }
   }
-  void bitmap(Rect rect, BitmapRef, BitmapMode, Paint foreground, Rotation rotation) override {
+  void bitmap(Rect rect, BitmapRef bitmap, BitmapMode, Paint foreground, Rotation rotation) override {
     record(Op::Bitmap, rect, foreground, 0, CornersAll, rotation);
+    if (opCount) ops[opCount - 1].bitmapData = bitmap.data;
   }
 
   size_t countKind(Op::Kind kind) const {
@@ -718,6 +722,60 @@ void testListVirtualization() {
   CHECK(sawThumb);
 }
 
+void testListRevealActionTargetsOneRow() {
+  FakeDrawTarget draw;
+  DeviceContext device = makeDevice();
+  InputSnapshot input;
+  InteractionBuffer<8> hits;
+  Frame<8> frame(draw, device, input, hits);
+  ListItem items[3]{};
+  for (int i = 0; i < 3; ++i) {
+    items[i].label = "Book";
+    items[i].actionValue = static_cast<int16_t>(i);
+  }
+  static const uint8_t iconBits[72]{};
+  items[1].icon = BitmapRef{iconBits, 24, 24};
+  ListRevealAction reveal;
+  reveal.index = 1;
+  reveal.action = 9;
+  reveal.icon = items[1].icon;
+  reveal.width = 80;
+  ListProps props;
+  props.items = items;
+  props.count = 3;
+  props.action = 5;
+  props.inputMask = InputTouch;
+  props.rowHeight = 40;
+  props.rowRadius = 6;
+  props.scrollIndicator = false;
+  props.reveal = &reveal;
+  list(frame, Rect{0, 0, 160, 120}, props);
+
+  bool rowIconVisible = false;
+  bool roundedButton = false;
+  for (size_t i = 0; i < draw.opCount; ++i) {
+    const auto& op = draw.ops[i];
+    if (op.rect.y < 40 || op.rect.y >= 80) continue;
+    if (op.kind == FakeDrawTarget::Op::Bitmap && op.rect.x >= 0 && op.rect.x < 80) rowIconVisible = true;
+    if (op.kind == FakeDrawTarget::Op::Fill && op.rect.x >= 80 && op.radius == props.rowRadius) roundedButton = true;
+  }
+  CHECK(rowIconVisible);
+  CHECK(roundedButton);
+  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Text), 3u);
+  CHECK_EQ(hits.count(), 4u);
+  Interaction hit;
+  CHECK(hits.hitPublished(120, 60, 9, hit));
+  CHECK_EQ(hit.value, 1);
+  CHECK(!hits.hitPublished(120, 20, 9, hit));
+  InputSnapshot tap;
+  tap.touchReleased = true;
+  tap.touchX = 120;
+  tap.touchY = 60;
+  CHECK_EQ(hits.route(tap).action, 9);
+  tap.touchX = 20;
+  CHECK_EQ(hits.route(tap).action, 5);
+}
+
 void testListClampsBadTopIndex() {
   FakeDrawTarget draw;
   DeviceContext device = makeDevice();
@@ -844,7 +902,7 @@ void testListItemsWindowSkipsUnavailablePartialPreview() {
 // rowProvider resolves rows on demand into list()'s scratch slot: no ListItem
 // array exists at all, only the viewport's rows are ever requested, and
 // absolute indexing/interactions match the full-array form. The provider may
-// reuse one scratch buffer per call — each row is consumed before the next
+// reuse one scratch buffer per call - each row is consumed before the next
 // provider call.
 void testListRowProvider() {
   FakeDrawTarget draw;
@@ -2756,6 +2814,8 @@ void testReaderKeyboardComposition() {
   keyGrid(frame, Rect{0, 660, 480, 40}, bottomRow);
 
   CHECK_EQ(interactions.count(), 45u);
+  CHECK_EQ(charGrid.gap, 6);
+  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Stroke), interactions.count());
 
   // Touch on the bottom row resolves to the special keys, not the char grid.
   InputSnapshot tap;
@@ -3159,6 +3219,25 @@ void testThemePrimitiveParity() {
   }
   CHECK(sawUnderline);
 
+  menu.underlineFitsText = true;
+  for (const auto align : {TextAlign::Left, TextAlign::Center, TextAlign::Right}) {
+    FakeDrawTarget fitted;
+    Frame<16> fittedFrame(fitted, device, input, interactions);
+    menu.labelText.align = align;
+    list(fittedFrame, Rect{0, 0, 480, 100}, menu);
+    bool sawFitted = false;
+    for (size_t i = 0; i < fitted.opCount; ++i) {
+      const auto& op = fitted.ops[i];
+      if (op.kind != FakeDrawTarget::Op::Fill || op.rect.height != 3 || op.rect.bottom() != 80) continue;
+      CHECK_EQ(op.rect.width, 56);
+      CHECK_EQ(op.rect.x, align == TextAlign::Left ? 6 : align == TextAlign::Center ? 212 : 418);
+      sawFitted = true;
+    }
+    CHECK(sawFitted);
+  }
+  menu.underlineFitsText = false;
+  menu.labelText.align = TextAlign::Left;
+
   // Triangle selection marker (v1 Triangle style: 12x18 at the row edge).
   FakeDrawTarget draw2;
   Frame<16> frame2(draw2, device, input, interactions);
@@ -3460,6 +3539,37 @@ void testListWrappedLabelHeights() {
       if (op.kind == FakeDrawTarget::Op::Fill && op.rect.width == 480 && op.rect.y == 0) row0H = op.rect.height;
     }
     CHECK_EQ(row0H, 52);  // 12 label + 24 wrapped subtitle + 16 base padding
+  }
+
+  // File Transfer: the icon centers beside the title and wrapped description.
+  {
+    FakeDrawTarget draw;
+    draw.lineH = 27;
+    Frame<16> frame(draw, device, input, interactions);
+    static const uint8_t pixels[128]{};
+    ListItem item{};
+    item.label = "File Transfer";
+    item.subtitle = longLabel;
+    item.icon = {pixels, 32, 32, BitmapFormat::BW1, false};
+    ListProps props;
+    props.items = &item;
+    props.count = 1;
+    props.rowHeight = 64;
+    props.iconSize = 32;
+    props.subtitleText.maxLines = 2;
+    list(frame, Rect{0, 0, 480, 400}, props);
+    Rect icon{}, title{}, description{};
+    for (size_t i = 0; i < draw.opCount; ++i) {
+      const auto& op = draw.ops[i];
+      if (op.kind == FakeDrawTarget::Op::Bitmap) icon = op.rect;
+      if (op.kind == FakeDrawTarget::Op::Text) {
+        if (title.empty()) title = op.rect;
+        else description = op.rect;
+      }
+    }
+    CHECK_EQ(description.height, 54);
+    CHECK_EQ(icon.y, title.y + (title.height + description.height - icon.height) / 2);
+    CHECK_EQ(title.x, description.x);
   }
 
   // Touch-sized gate: without a subtitle, a 44px row already fits two 12px
@@ -3868,7 +3978,7 @@ void testStyleSetUnset() {
   CHECK(plain.normal.borderWidth == 0);
 }
 
-void testDefaultStylesAreBorderless() {
+void testDefaultStyles() {
   StyleSet button = defaultButtonStyles();
   CHECK(button.normal.border.kind == PaintKind::None);
   CHECK(button.selected.border.kind == PaintKind::None);
@@ -3884,6 +3994,14 @@ void testDefaultStylesAreBorderless() {
   StyleSet popup = defaultPopupStyles();
   CHECK(popup.normal.border.kind == PaintKind::None);
   CHECK(popup.selected.border.kind == PaintKind::None);
+
+  // Keyboard keys have outlines without changing ordinary buttons.
+  StyleSet key = defaultKeyStyles();
+  for (const BoxStyle* style : {&key.normal, &key.selected, &key.focused, &key.active, &key.disabled}) {
+    CHECK_EQ(style->border.kind, PaintKind::Solid);
+    CHECK_EQ(style->border.color, Color::Black);
+    CHECK_EQ(style->borderWidth, 1);
+  }
 }
 
 void testEReaderSettingsComponents() {
@@ -4012,29 +4130,75 @@ void testQwertyKeyboardComponent() {
 
   CHECK_EQ(interactions.count(), 31u);
   CHECK_EQ(interactions.data()[0].value, static_cast<int16_t>('q'));
-  CHECK_EQ(interactions.data()[28].action, 401);
-  CHECK_EQ(interactions.data()[26].action, 403);
+  CHECK_EQ(interactions.data()[19].action, 401);
+  CHECK_EQ(interactions.data()[27].action, 403);
   CHECK_EQ(interactions.data()[29].value, QWERTY_KEY_SPACE);
   CHECK_EQ(interactions.data()[30].action, 404);
-  // Full-width rows use 51px letter keys and include the 2px edge padding
-  // in their outer touch targets.
-  CHECK_EQ(interactions.data()[10].rect.x, 0);
-  CHECK_EQ(interactions.data()[10].rect.width, 53);
-  CHECK_EQ(interactions.data()[19].rect.x, 0);
-  CHECK_EQ(interactions.data()[19].rect.width, 53);
-  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Bitmap), 1u);
+  // Character keys share one width across rows; controls remain wider.
+  CHECK_EQ(interactions.data()[10].rect.width, interactions.data()[0].rect.width);
+  CHECK_EQ(interactions.data()[20].rect.width, interactions.data()[0].rect.width);
+  CHECK_EQ(interactions.data()[1].rect.x - interactions.data()[0].rect.right(), keyboard.gap);
+  CHECK(interactions.data()[10].rect.x > keyboard.padding.left);
+  CHECK(interactions.data()[19].rect.width > interactions.data()[20].rect.width);
+  CHECK_EQ(interactions.data()[19].rect.width, interactions.data()[27].rect.width);
+  Rect normalFill{};
+  Rect selectedFill{};
+  for (size_t i = 0; i < draw.opCount; ++i) {
+    if (draw.ops[i].kind != FakeDrawTarget::Op::Fill) continue;
+    if (draw.ops[i].color == Color::White && normalFill.empty()) normalFill = draw.ops[i].rect;
+    if (draw.ops[i].color == Color::Black && selectedFill.empty()) selectedFill = draw.ops[i].rect;
+  }
+  CHECK_EQ(draw.ops[0].kind, FakeDrawTarget::Op::Fill);
+  CHECK_EQ(draw.ops[0].paint, PaintKind::Dither);
+  CHECK_EQ(draw.ops[0].color, Color::LightGray);
+  CHECK_EQ(selectedFill.y, normalFill.y);
+  CHECK_EQ(selectedFill.width, normalFill.width);
+  CHECK_EQ(selectedFill.height, normalFill.height);
+  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Bitmap), 2u);
+  bool sawDelete = false;
+  bool sawShift = false;
   for (size_t i = 0; i < draw.opCount; ++i) {
     if (draw.ops[i].kind != FakeDrawTarget::Op::Bitmap) continue;
-    CHECK_EQ(draw.ops[i].rect.width, 28);
-    CHECK_EQ(draw.ops[i].rect.height, 28);
+    sawDelete |= draw.ops[i].rect.width == 28 && draw.ops[i].rect.height == 28;
+    sawShift |= draw.ops[i].rect.width == 24 && draw.ops[i].rect.height == 24;
   }
-  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Stroke), 0u);
+  CHECK(sawDelete);
+  CHECK(sawShift);
+  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Stroke), interactions.count());
+  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Line), 0u);  // Space has no rule inside its outline.
 
   InputSnapshot tap;
   tap.touchReleased = true;
   tap.touchX = 250;
   tap.touchY = 145;
   CHECK_EQ(interactions.route(tap).value, QWERTY_KEY_SPACE);
+
+  draw.opCount = 0;
+  interactions.clear();
+  keyboard.langKey = true;
+  keyboard.langAction = 405;
+  qwertyKeyboard(frame, Rect{0, 0, 480, 160}, keyboard);
+
+  CHECK_EQ(interactions.count(), 32u);
+  CHECK_EQ(interactions.data()[29].value, QWERTY_KEY_LANG);
+  CHECK_EQ(interactions.data()[29].action, 405);
+  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Bitmap), 3u);
+  size_t compactIconCount = 0;
+  bool sawGlobe = false;
+  const uint8_t* globeData = lucideGlobeIcon24().data;
+  for (size_t i = 0; i < draw.opCount; ++i) {
+    if (draw.ops[i].kind != FakeDrawTarget::Op::Bitmap) continue;
+    if (draw.ops[i].rect.width == 24 && draw.ops[i].rect.height == 24) ++compactIconCount;
+    sawGlobe |= draw.ops[i].bitmapData == globeData;
+  }
+  CHECK_EQ(compactIconCount, 2u);  // Shift and globe.
+  CHECK(sawGlobe);
+
+  draw.opCount = 0;
+  interactions.clear();
+  keyboard.spaceLabel = nullptr;
+  qwertyKeyboard(frame, Rect{0, 0, 480, 160}, keyboard);
+  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Line), 1u);  // Apps can restore the Space rule.
 }
 
 void testLocalizedKeyboardLayout() {
@@ -4055,9 +4219,339 @@ void testLocalizedKeyboardLayout() {
 
   CHECK_EQ(interactions.count(), 32u);
   CHECK_EQ(interactions.data()[19].value, 1201);  // Spanish ñ key has a stable non-ASCII key id.
-  CHECK_EQ(interactions.data()[27].action, 412);
+  CHECK_EQ(interactions.data()[28].action, 412);
   CHECK_EQ(interactions.data()[31].action, 413);
-  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Stroke), 0u);
+  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Stroke), interactions.count());
+}
+
+void testGermanAndFrenchLetters() {
+  // Null-safe: a missing key must read as a failed check, not a crash.
+  const auto same = [](const char* got, const char* want) { return got && std::strcmp(got, want) == 0; };
+
+  // German: every QWERTZ letter is a key, in its printed position, in all
+  // eight variants (shift x digit row x language key).
+  for (const bool shifted : {false, true}) {
+    for (const bool numbers : {false, true}) {
+      for (const bool lang : {false, true}) {
+        const KeyboardLayout& de = builtinKeyboardLayout(KeyboardLayoutId::QwertzDe, shifted, false, numbers, lang);
+        const uint8_t top = numbers ? 1 : 0;
+        CHECK_EQ(de.rows[top].count, 11);
+        CHECK_EQ(de.rows[top + 1].count, 11);
+        if (de.rows[top].count < 11 || de.rows[top + 1].count < 11) continue;  // keep a regression a failure, not a crash
+        CHECK_EQ(de.rows[top].keys[10].value, shifted ? 1151 : 1101);      // ü / Ü closes the top row
+        CHECK_EQ(de.rows[top + 1].keys[9].value, shifted ? 1153 : 1103);   // ö / Ö
+        CHECK_EQ(de.rows[top + 1].keys[10].value, shifted ? 1154 : 1104);  // ä / Ä
+        CHECK_EQ(de.rows[top + 2].keys[8].value, 1102);                    // ß has no uppercase
+        if (numbers) CHECK(de.rows[0].independentKeyWidth);
+      }
+    }
+  }
+  const KeyboardLayout& de = builtinKeyboardLayout(KeyboardLayoutId::QwertzDe);
+  const KeyboardLayout& deShift = builtinKeyboardLayout(KeyboardLayoutId::QwertzDe, true);
+  CHECK(same(keyboardOutputFor(de, 1103), "\xc3\xb6"));       // ö
+  CHECK(same(keyboardOutputFor(de, 1104), "\xc3\xa4"));       // ä
+  CHECK(same(keyboardOutputFor(deShift, 1153), "\xc3\x96"));  // Ö
+  CHECK(same(keyboardOutputFor(deShift, 1154), "\xc3\x84"));  // Ä
+
+  // Eleven letters are wider than ten digits: the digit row keeps full-size
+  // keys, as it does over the Cyrillic layouts, and the letters narrow.
+  {
+    DeviceContext device = makeDevice(480, 300);
+    InputSnapshot input;
+    FakeDrawTarget draw;
+    InteractionBuffer<64> interactions;
+    Frame<64> frame(draw, device, input, interactions);
+    KeyboardProps props;
+    props.layout = &builtinKeyboardLayout(KeyboardLayoutId::QwertzDe, false, false, true);
+    props.keyAction = 1;
+    props.padding = Insets{4, 4, 4, 4};
+    props.gap = 6;
+    props.uniformKeyWidth = true;
+    keyboard(frame, Rect{0, 0, 480, 300}, props);
+    CHECK_EQ(interactions.data()[0].rect.width, 40);   // digits: as in English
+    CHECK_EQ(interactions.data()[9].rect.width, 40);
+    CHECK_EQ(interactions.data()[10].rect.width, 36);  // q .. ü
+    CHECK_EQ(interactions.data()[20].rect.width, 36);
+    CHECK_EQ(interactions.data()[31].rect.width, 36);  // ä
+  }
+
+  // French: é keeps its key, the other accents long-press off their base
+  // letter, in both cases. Letters without an alternate still flip case.
+  const KeyboardLayout& fr = builtinKeyboardLayout(KeyboardLayoutId::AzertyFr);
+  const KeyboardLayout& frShift = builtinKeyboardLayout(KeyboardLayoutId::AzertyFr, true);
+  const struct {
+    int16_t lower, upper;
+    const char *alt, *altUpper;
+  } frenchAlts[] = {
+      {1001, 1051, "\xc3\xa8", "\xc3\x88"},  // é -> è, É -> È
+      {'e', 'E', "\xc3\xaa", "\xc3\x8a"},    // ê Ê
+      {'a', 'A', "\xc3\xa0", "\xc3\x80"},    // à À
+      {'c', 'C', "\xc3\xa7", "\xc3\x87"},    // ç Ç
+      {'u', 'U', "\xc3\xb9", "\xc3\x99"},    // ù Ù
+      {'i', 'I', "\xc3\xae", "\xc3\x8e"},    // î Î
+      {'o', 'O', "\xc3\xb4", "\xc3\x94"},    // ô Ô
+  };
+  for (const auto& a : frenchAlts) {
+    CHECK(same(keyboardAltOutputFor(fr, a.lower), a.alt));
+    CHECK(same(keyboardAltOutputFor(frShift, a.upper), a.altUpper));
+  }
+  CHECK(same(keyboardAltOutputFor(fr, 'z'), "Z"));
+
+  // Through KeyboardEntry, a long-press inserts the alternate's UTF-8 whole.
+  char buf[16] = "";
+  KeyboardEntry kb;
+  kb.layout = KeyboardLayoutId::AzertyFr;
+  kb.attach(buf, sizeof buf);
+  CHECK(kb.key('e', /*longPress=*/true));
+  CHECK(kb.key('t'));
+  CHECK(kb.key('r'));
+  CHECK(kb.key('e'));
+  CHECK(std::strcmp(buf, "\xc3\xaatre") == 0);  // être
+}
+
+void testCompactLayoutsMatchBuiltin() {
+  // buildKeyboardLayout() must be builtinKeyboardLayout() without the tables:
+  // every layer of every layout, one id past the last as the unknown-id path,
+  // compared field by field. This is what keeps the compact strings and the
+  // expanded tables from drifting apart.
+  const auto sameText = [](const char* a, const char* b) {
+    return a == b || (a && b && std::strcmp(a, b) == 0);
+  };
+  KeyboardLayoutBuffer buffer;
+  size_t keysCompared = 0;
+  for (uint8_t raw = 0; raw <= static_cast<uint8_t>(KeyboardLayoutId::ArabicAr) + 1; ++raw) {
+    const auto id = static_cast<KeyboardLayoutId>(raw);
+    for (uint8_t flags = 0; flags < 16; ++flags) {
+      const bool shifted = flags & 1, symbols = flags & 2, numbers = flags & 4, lang = flags & 8;
+      const KeyboardLayout& want = builtinKeyboardLayout(id, shifted, symbols, numbers, lang);
+      const KeyboardLayout& got = buildKeyboardLayout(buffer, id, shifted, symbols, numbers, lang);
+      CHECK_EQ(got.rowCount, want.rowCount);
+      if (got.rowCount != want.rowCount) continue;
+      for (uint8_t r = 0; r < want.rowCount; ++r) {
+        const KeyboardRow& wr = want.rows[r];
+        const KeyboardRow& gr = got.rows[r];
+        CHECK_EQ(gr.count, wr.count);
+        CHECK_EQ(gr.insetUnits, wr.insetUnits);
+        CHECK_EQ(gr.independentKeyWidth, wr.independentKeyWidth);
+        if (gr.count != wr.count) continue;
+        for (uint8_t c = 0; c < wr.count; ++c) {
+          const KeyboardKey& w = wr.keys[c];
+          const KeyboardKey& g = gr.keys[c];
+          CHECK(sameText(g.label, w.label));
+          CHECK(sameText(g.output, w.output));
+          CHECK(sameText(g.alt, w.alt));
+          CHECK(g.kind == w.kind);
+          CHECK_EQ(g.state, w.state);
+          CHECK_EQ(g.value, w.value);
+          CHECK_EQ(g.widthUnits, w.widthUnits);
+          CHECK_EQ(g.enabled, w.enabled);
+          ++keysCompared;
+        }
+      }
+    }
+  }
+  CHECK(keysCompared > 6000);  // the loops above really ran over every layer
+
+  // Each build owns its buffer: a second buffer leaves the first one's layout
+  // untouched, and building into the same buffer again reuses it in place.
+  KeyboardLayoutBuffer other;
+  const KeyboardLayout& ru = buildKeyboardLayout(buffer, KeyboardLayoutId::CyrillicRu, false, false, true);
+  buildKeyboardLayout(other, KeyboardLayoutId::QwertzDe, true);
+  CHECK(sameText(keyboardOutputFor(ru, 0x439), "\xd0\xb9"));  // й
+  CHECK(sameText(keyboardAltOutputFor(ru, 0x435), "\xd1\x91"));  // е -> ё
+  CHECK(&buildKeyboardLayout(buffer, KeyboardLayoutId::QwertyEn) == &buffer.layout);
+}
+
+void testKeyboardUniformRowWidths() {
+  DeviceContext device = makeDevice(800, 480);
+  InputSnapshot input;
+  {
+    FakeDrawTarget draw;
+    InteractionBuffer<1> interactions;
+    Frame<1> frame(draw, device, input, interactions);
+    KeyboardKey keys[10];
+    for (int16_t i = 0; i < 10; ++i) keys[i].value = i;
+    const KeyboardRow row{keys, 10, 0};
+    const KeyboardLayout layout{&row, 1};
+    KeyboardProps props;
+    props.layout = &layout;
+    props.padding = Insets{};
+    props.gap = 6;
+    props.background = Paint::none();
+    props.keyStyles = defaultButtonStyles();
+    props.uniformKeyWidth = false;
+
+    keyboard(frame, Rect{0, 0, 101, 60}, props);
+
+    CHECK_EQ(draw.ops[0].rect.x, 0);
+    CHECK_EQ(draw.ops[0].rect.width, 4);
+    CHECK_EQ(draw.ops[9].rect.width, 11);
+    CHECK_EQ(draw.ops[9].rect.right(), 101);
+  }
+
+  {
+    FakeDrawTarget draw;
+    InteractionBuffer<1> interactions;
+    Frame<1> frame(draw, device, input, interactions);
+    KeyboardKey keys[10];
+    for (int16_t i = 0; i < 10; ++i) keys[i].value = i;
+    const KeyboardRow row{keys, 10, 0};
+    const KeyboardLayout layout{&row, 1};
+    KeyboardProps props;
+    props.layout = &layout;
+    props.padding = Insets{};
+    props.gap = 6;
+    props.background = Paint::none();
+    props.keyStyles = defaultButtonStyles();
+    props.uniformKeyWidth = true;
+
+    keyboard(frame, Rect{0, 0, 101, 60}, props);
+
+    CHECK_EQ(draw.ops[0].rect.x, 3);
+    for (size_t i = 1; i < 10; ++i) {
+      CHECK_EQ(draw.ops[i].rect.width, draw.ops[0].rect.width);
+    }
+    CHECK_EQ(draw.ops[9].rect.right(), 97);
+  }
+
+  {
+    FakeDrawTarget draw;
+    InteractionBuffer<64> interactions;
+    Frame<64> frame(draw, device, input, interactions);
+    KeyboardProps props;
+    props.layout = &builtinKeyboardLayout(KeyboardLayoutId::QwertyEn, false, false, true);
+    props.keyAction = 1;
+    props.padding = Insets{};
+    props.gap = 6;
+    props.minTouchSize = 28;
+    props.uniformKeyWidth = true;
+
+    keyboard(frame, Rect{100, 0, 600, 300}, props);
+
+    const int16_t characterWidth = interactions.data()[0].rect.width;
+    CHECK_EQ(interactions.data()[9].rect.width, characterWidth);   // 0
+    CHECK_EQ(interactions.data()[10].rect.width, characterWidth);  // q
+    CHECK_EQ(interactions.data()[19].rect.width, characterWidth);  // p
+    CHECK_EQ(interactions.data()[20].rect.width, characterWidth);  // a
+    CHECK_EQ(interactions.data()[28].rect.width, characterWidth);  // l
+    CHECK(interactions.data()[29].rect.width > characterWidth);   // Shift
+    CHECK_EQ(interactions.data()[30].rect.width, characterWidth);  // z
+    CHECK_EQ(interactions.data()[36].rect.width, characterWidth);  // m
+    CHECK_EQ(interactions.data()[37].rect.width, interactions.data()[29].rect.width);  // Delete
+  }
+}
+
+void testKeyboardOuterControlAlignment() {
+  for (const int16_t width : {320, 480, 601, 800}) {
+    for (const bool shifted : {false, true}) {
+      for (const bool langKey : {false, true}) {
+        FakeDrawTarget draw;
+        DeviceContext device = makeDevice(width, 400);
+        InputSnapshot input;
+        InteractionBuffer<64> interactions;
+        Frame<64> frame(draw, device, input, interactions);
+        KeyboardProps props;
+        props.layout = &builtinKeyboardLayout(KeyboardLayoutId::QwertyEn, shifted, false, true, langKey);
+        props.keyAction = 1;
+        keyboard(frame, Rect{0, 0, width, 350}, props);
+
+        Rect keys[42]{};
+        size_t count = 0;
+        for (size_t i = 0; i < draw.opCount; ++i) {
+          if (draw.ops[i].kind == FakeDrawTarget::Op::Stroke && count < 42) keys[count++] = draw.ops[i].rect;
+        }
+        CHECK_EQ(count, langKey ? 42u : 41u);
+        CHECK_EQ(keys[29].x, keys[0].x);                    // Shift / 1
+        CHECK_EQ(keys[37].right(), keys[9].right());        // Delete / 0
+        CHECK_EQ(keys[38].x, keys[0].x);                    // Mode / 1
+        CHECK_EQ(keys[count - 1].right(), keys[9].right()); // OK / 0
+        CHECK_EQ(keys[30].x - keys[29].right(), props.gap);
+        CHECK_EQ(keys[37].x - keys[36].right(), props.gap);
+        CHECK_EQ(keys[39].x - keys[38].right(), props.gap);
+        CHECK_EQ(keys[count - 1].x - keys[count - 2].right(), props.gap);
+        for (size_t i = 30; i <= 36; ++i) CHECK_EQ(keys[i].width, keys[0].width);
+      }
+    }
+  }
+}
+
+void testWideScriptNumberRowWidth() {
+  DeviceContext device = makeDevice(480, 300);
+  InputSnapshot input;
+  for (const KeyboardLayoutId id : {KeyboardLayoutId::CyrillicRu, KeyboardLayoutId::CyrillicUk,
+                                    KeyboardLayoutId::CyrillicBe, KeyboardLayoutId::CyrillicKk,
+                                    KeyboardLayoutId::ArabicAr}) {
+    FakeDrawTarget draw;
+    InteractionBuffer<64> interactions;
+    Frame<64> frame(draw, device, input, interactions);
+    KeyboardProps props;
+    props.layout = &builtinKeyboardLayout(id, false, false, true);
+    props.keyAction = 1;
+    props.padding = Insets{4, 4, 4, 4};
+    props.gap = 6;
+    props.uniformKeyWidth = true;
+
+    keyboard(frame, Rect{0, 0, 480, 300}, props);
+
+    CHECK_EQ(interactions.data()[0].rect.width, 40);   // Ten digits fill the width, like English.
+    CHECK_EQ(interactions.data()[9].rect.width, 40);
+    CHECK_EQ(interactions.data()[10].rect.width, 32);  // Twelve letters still fit uniformly.
+    CHECK_EQ(interactions.data()[21].rect.width, 32);
+    CHECK_EQ(interactions.data()[0].rect.x, 13);
+    CHECK_EQ(interactions.data()[9].rect.right(), 467);
+  }
+}
+
+void testKeyboardBackground() {
+  FakeDrawTarget draw;
+  DeviceContext device = makeDevice();
+  InputSnapshot input;
+  InteractionBuffer<4> interactions;
+  Frame<4> frame(draw, device, input, interactions);
+  const KeyboardKey key{"A", "A", KeyKind::Normal, StateNormal, 'A'};
+  const KeyboardRow row{&key, 1, 0};
+  const KeyboardLayout layout{&row, 1};
+  KeyboardProps props;
+  props.layout = &layout;
+  props.keyAction = 1;
+  CHECK_EQ(props.padding.top, 4);
+  CHECK_EQ(props.padding.left, 4);
+  CHECK_EQ(props.gap, 6);
+  CHECK_EQ(props.rowGap, 6);
+  CHECK(props.uniformKeyWidth);
+  CHECK(props.spaceLabel && props.spaceLabel[0] == '\0');
+
+  const Rect panel{10, 20, 100, 60};
+  keyboard(frame, panel, props);
+  CHECK_EQ(draw.ops[0].kind, FakeDrawTarget::Op::Fill);
+  CHECK_EQ(draw.ops[0].paint, PaintKind::Dither);
+  CHECK_EQ(draw.ops[0].color, Color::LightGray);
+  CHECK_EQ(draw.ops[0].rect.x, panel.x);
+  CHECK_EQ(draw.ops[1].color, Color::White);
+  CHECK_EQ(draw.ops[1].rect.x, panel.x + props.padding.left);
+
+  draw.opCount = 0;
+  props.background = Paint::none();
+  keyboard(frame, panel, props);
+
+  CHECK_EQ(draw.ops[0].kind, FakeDrawTarget::Op::Fill);
+  CHECK_EQ(draw.ops[0].rect.x, panel.x + props.padding.left);
+  CHECK_EQ(draw.ops[0].color, Color::White);
+
+  FakeDrawTarget qwertyDraw;
+  InteractionBuffer<40> qwertyInteractions;
+  Frame<40> qwertyFrame(qwertyDraw, device, input, qwertyInteractions);
+  QwertyKeyboardProps qwertyProps;
+  qwertyProps.keyAction = 1;
+  CHECK_EQ(qwertyProps.padding.top, 4);
+  CHECK_EQ(qwertyProps.gap, 6);
+  CHECK(qwertyProps.uniformKeyWidth);
+  CHECK(qwertyProps.spaceLabel && qwertyProps.spaceLabel[0] == '\0');
+  qwertyKeyboard(qwertyFrame, panel, qwertyProps);
+  CHECK_EQ(qwertyDraw.ops[0].kind, FakeDrawTarget::Op::Fill);
+  CHECK_EQ(qwertyDraw.ops[0].rect.x, panel.x);
+  CHECK_EQ(qwertyDraw.ops[0].rect.y, panel.y);
+  CHECK_EQ(qwertyDraw.ops[0].color, Color::LightGray);
 }
 
 void testSymbolKeyboardPages() {
@@ -4145,10 +4639,23 @@ void testKeyboardLayoutVariants() {
             CHECK(nav.syncToValue(layout, key.value));
             CHECK_EQ(nav.logicalIndex(layout), static_cast<int16_t>(index)); // also catches duplicate IDs
             if (key.kind == KeyKind::Shift) {
-              CHECK_EQ(row, layout.rowCount - 1);
+              CHECK_EQ(row, symbols ? layout.rowCount - 1 : layout.rowCount - 2);
+              if (!symbols) {
+                CHECK(hasCase);
+                CHECK_EQ(col, 0);
+                CHECK_EQ(key.widthUnits, 3);
+              } else {
+                CHECK_EQ(key.widthUnits, 4);
+              }
               CHECK_EQ(hit.action, 401);
             }
-            if (key.kind == KeyKind::Lang) CHECK_EQ(hit.action, 403);
+            if (key.kind == KeyKind::Lang) {
+              CHECK_EQ(row, layout.rowCount - 1);
+              CHECK_EQ(col, 1);
+              CHECK_EQ(hit.action, 403);
+            }
+            if (key.kind == KeyKind::Delete) CHECK_EQ(key.widthUnits, 3);
+            if (key.kind == KeyKind::Normal) CHECK_EQ(key.widthUnits, 2);
             if (key.kind == KeyKind::Normal || key.kind == KeyKind::Space) {
               char buffer[32] = {};
               KeyboardEntry entry;
@@ -4477,10 +4984,11 @@ void testKeyboardStackedAlternates() {
   props.stackAlternates = true;
   props.selectedIndex = 0;  // the "1" key, alternate "!"
   keyboard(frame, Rect{0, 0, 480, 400}, props);
-  // Keys paint in order: "1" (selected) first, then "2" (unselected).
+  // Keys paint in order: "1" (selected) first, then "2" (unselected). The keyboard's own backdrop fill spans the
+  // whole rect and is not a key.
   const FakeDrawTarget::Op* fills[2] = {nullptr, nullptr};
   for (size_t i = 0, n = 0; i < draw.opCount && n < 2; ++i)
-    if (draw.ops[i].kind == FakeDrawTarget::Op::Fill) fills[n++] = &draw.ops[i];
+    if (draw.ops[i].kind == FakeDrawTarget::Op::Fill && draw.ops[i].rect.height < 400) fills[n++] = &draw.ops[i];
   CHECK(fills[0] != nullptr && fills[1] != nullptr);
   if (!fills[0] || !fills[1]) return;
   const Rect one = fills[0]->rect;
@@ -4570,12 +5078,24 @@ void testScreenKeyboardUsesResponsiveHeight() {
   screen.qwertyKeyboard(keyboard, 0, LayoutAnchor::Bottom);
 
   CHECK_EQ(interactions.count(), 31u);
-  CHECK(interactions.data()[0].rect.y >= 228);
-  CHECK(interactions.data()[0].rect.y < 243);
+  CHECK_EQ(interactions.data()[0].rect.y, 234);
+  CHECK_EQ(interactions.data()[0].rect.height, 56);
   CHECK(interactions.data()[30].rect.bottom() <= device.height);
+
+  FakeDrawTarget numberDraw;
+  InteractionBuffer<64> numberInteractions;
+  Frame<64> numberFrame(numberDraw, device, input, numberInteractions);
+  Screen<64> numberScreen(numberFrame, theme);
+  QwertyKeyboardProps numberKeyboard;
+  numberKeyboard.keyAction = 400;
+  numberKeyboard.numberRow = true;
+  numberScreen.qwertyKeyboard(numberKeyboard, 0, LayoutAnchor::Bottom);
+  CHECK_EQ(numberInteractions.count(), 41u);
+  CHECK_EQ(numberInteractions.data()[0].rect.y, 172);
+  CHECK_EQ(numberInteractions.data()[0].rect.height, 56);
 }
 
-void testKeyboardHighlightPadding() {
+void testKeyboardFullSizeHighlight() {
   FakeDrawTarget draw;
   DeviceContext device = makeDevice(480, 800);
   InputSnapshot input;
@@ -4589,6 +5109,7 @@ void testKeyboardHighlightPadding() {
   props.keyAction = 1;
   props.padding = Insets{};
   props.selectedIndex = -1;
+  props.background = Paint::none();
   const Rect keyRect{100, 100, 100, 80};
   Rect normalHint{};
   Rect primaryLabel{};
@@ -4610,8 +5131,8 @@ void testKeyboardHighlightPadding() {
     CHECK_EQ(interactions.data()[0].rect.height, 80);
     CHECK_EQ(draw.ops[0].kind, FakeDrawTarget::Op::Fill);
     CHECK_EQ(draw.ops[0].color, phase == 0 ? Color::White : Color::Black);
-    CHECK_EQ(draw.ops[0].rect.height, phase == 0 ? 80 : 72);
-    CHECK_EQ(draw.ops[0].rect.y, keyRect.y + (phase == 0 ? 0 : 4));
+    CHECK_EQ(draw.ops[0].rect.height, 80);
+    CHECK_EQ(draw.ops[0].rect.y, keyRect.y);
     CHECK_EQ(draw.ops[0].rect.y + draw.ops[0].rect.height / 2, keyRect.y + keyRect.height / 2);
     CHECK_EQ(draw.ops[0].rect.width, 100);
     int labels = 0;
@@ -4727,6 +5248,7 @@ void testQwertyKeyboardSpacingOverrides() {
   props.altHintRightPadding = 6;
   props.altLabelGap = 2;
   props.digitLabelOffsetX = 3;
+  props.background = Paint::none();
 
   qwertyKeyboard(frame, Rect{0, 0, 480, 400}, props);
 
@@ -4763,6 +5285,7 @@ void testKeyboardTypography() {
   props.numberRow = true;
   props.labelText.font = FONT_SLOT_TITLE;
   props.controlText.font = FONT_SLOT_BODY;
+  props.spaceLabel = "Space";
   props.keyAction = 1;
   qwertyKeyboard(frame, Rect{0, 400, 480, 400}, props);
   int letters = 0, controls = 0, alternates = 0;
@@ -4774,14 +5297,18 @@ void testKeyboardTypography() {
     if (op.font == FONT_SLOT_SMALL) ++alternates;
   }
   CHECK_EQ(letters, 36); // 26 letters plus 10 digits
-  CHECK_EQ(controls, 3); // mode, Shift, OK
+  CHECK_EQ(controls, 3);  // mode, Space, OK; Shift is an icon
+  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Bitmap), 2u);  // Shift and Delete
   CHECK_EQ(alternates, 10);
-  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Stroke), 0u);
+  CHECK_EQ(draw.countKind(FakeDrawTarget::Op::Stroke), interactions.count());
 }
 
-void testTallKeyboardSizing() {
-  CHECK_EQ(keyboardPreferredHeight(480, 4), 348);
-  CHECK_EQ(keyboardPreferredHeight(480, 5), 434);
+void testResponsiveKeyboardSizing() {
+  CHECK_EQ(keyboardPreferredHeight(320, 4), 162);
+  CHECK_EQ(keyboardPreferredHeight(480, 4), 250);
+  CHECK_EQ(keyboardPreferredHeight(480, 5), 312);
+  CHECK_EQ(keyboardPreferredHeight(800, 5), 312);
+  CHECK_EQ(keyboardPreferredHeight(480, 5, Insets{4, 4, 4, 4}, 6, 28, 10), 287);
   for (int id = 0; id <= static_cast<int>(KeyboardLayoutId::ArabicAr); ++id) {
     for (int flags = 0; flags < 8; ++flags) {
       FakeDrawTarget draw;
@@ -4800,13 +5327,13 @@ void testTallKeyboardSizing() {
       props.numberRow = flags & 4;
       screen.qwertyKeyboard(props, 0, LayoutAnchor::Bottom);
       const int rows = props.numberRow && !props.symbols ? 5 : 4;
-      const int height = rows == 5 ? 416 : 348;
-      const int rowHeight = rows == 5 ? 76 : 80;
+      const int height = rows == 5 ? 312 : 250;
+      const int rowHeight = 56;
       CHECK_EQ(screen.contentRect().bottom(), 780 - height);
       CHECK_EQ(screen.contentRect().x, 30); // other content keeps its margins
       CHECK_EQ(screen.contentRect().width, 420);
-      CHECK_EQ(interactions.data()[0].rect.x, 0);
-      CHECK_EQ(interactions.data()[0].rect.y, 780 - height + 5);
+      CHECK(interactions.data()[0].rect.x >= props.padding.left);
+      CHECK_EQ(interactions.data()[0].rect.y, 780 - height + props.padding.top);
       CHECK_EQ(interactions.data()[0].rect.height, rowHeight);
       const auto& layout = builtinKeyboardLayout(props.layout, props.shifted, props.symbols, props.numberRow);
       const auto& secondRow = interactions.data()[layout.rows[0].count];
@@ -4814,7 +5341,7 @@ void testTallKeyboardSizing() {
       for (size_t i = 0; i < interactions.count(); ++i) {
         const auto& hit = interactions.data()[i];
         CHECK_EQ(hit.rect.height, rowHeight);
-        CHECK(hit.rect.width >= 36); // even twelve-column international rows
+        CHECK(hit.rect.width >= props.minTouchSize);  // including twelve-column international rows
         CHECK(hit.rect.x >= 0 && hit.rect.right() <= 480);
         // The extra vertical space belongs to the key, including near its edges.
         for (int y : {hit.rect.y + 2, hit.rect.bottom() - 3}) {
@@ -4840,10 +5367,19 @@ void testTallKeyboardSizing() {
   props.layout = &builtinKeyboardLayout(KeyboardLayoutId::QwertyEn, false, false, true);
   props.keyAction = 1;
   screen.keyboard(props, 0, LayoutAnchor::Bottom);
-  CHECK_EQ(screen.contentRect().bottom(), 810 - 416);
-  CHECK_EQ(interactions.data()[0].rect.height, 76);
+  CHECK_EQ(screen.contentRect().bottom(), 810 - 312);
+  CHECK_EQ(interactions.data()[0].rect.height, 56);
   CHECK(interactions.data()[0].rect.x >= 10);
   CHECK(interactions.data()[9].rect.right() <= 490);
+
+  FakeDrawTarget shortDraw;
+  DeviceContext shortDevice = makeDevice(800, 300);
+  InteractionBuffer<64> shortInteractions;
+  Frame<64> shortFrame(shortDraw, shortDevice, input, shortInteractions);
+  Screen<64> shortScreen(shortFrame, theme);
+  shortScreen.keyboard(props, 0, LayoutAnchor::Bottom);
+  CHECK_EQ(shortScreen.contentRect().bottom(), 100);
+  CHECK_EQ(shortInteractions.data()[0].rect.height, 33);
 }
 
 void testScreenContentMarginCoordinateSpaces() {
@@ -6135,6 +6671,135 @@ void testListRowGapTouchStopsAtPartialRow() {
   CHECK_EQ(rowTappedAt(hits, last.bottom() + 2), -1);
 }
 
+void testPublicationPageDescriptionPainter() {
+  struct Painted {
+    Rect rect{};
+    bool claim = true;
+  };
+  FakeDrawTarget draw;
+  DeviceContext device;
+  device.width = 480;
+  device.height = 800;
+  InputSnapshot input;
+  InteractionBuffer<16> hits;
+  Frame<16> frame(draw, device, input, hits);
+  PublicationPageProps props;
+  props.book.title = "Title";
+  props.description = "must-not-measure";
+  props.primary.label = "Install";
+  props.primary.action = 91;
+  Painted painted;
+  props.descriptionPainterUserData = &painted;
+  props.descriptionPainter = [](DrawTarget&, Rect rect, const PublicationPageProps&, void* user) {
+    auto* p = static_cast<Painted*>(user);
+    p->rect = rect;
+    return p->claim;
+  };
+  publicationPage(frame, device.screen(), props);
+  CHECK(!draw.drewForbiddenLabel);
+  CHECK(painted.rect.height > 0 && painted.rect.width > 0);
+  CHECK(painted.rect.bottom() <= hits.data()[0].rect.y);  // never under the action button
+
+  // Declining falls back to the plain-text description.
+  painted.claim = false;
+  hits.clear();
+  publicationPage(frame, device.screen(), props);
+  CHECK(draw.drewForbiddenLabel);
+
+  // A painter alone (no text description) still gets the area.
+  props.description = nullptr;
+  painted = Painted{};
+  hits.clear();
+  publicationPage(frame, device.screen(), props);
+  CHECK(painted.rect.height > 0);
+}
+
+void testComponentStyleOverrides() {
+  ComponentStyle style;
+  style.text.fields = TextStyleOverride::Bold | TextStyleOverride::Alignment;
+  style.text.value.bold = false;
+  style.text.value.align = TextAlign::Center;
+  style.selected.fields =
+      BoxStyleOverride::Background | BoxStyleOverride::BorderWidth;
+  style.selected.background = Color::Transparent;
+  style.selected.borderWidth = 0;
+  TextStyle text;
+  text.bold = true;
+  text.maxLines = 3;
+  style.text.apply(text);
+  CHECK(!text.bold);
+  CHECK_EQ(text.maxLines, 3);
+  CHECK(text.align == TextAlign::Center);
+  StyleSet styles = defaultListRowStyles();
+  styles.selected.borderWidth = 3;
+  style.apply(styles);
+  CHECK(styles.normal.background.color == Color::White);
+  CHECK(styles.selected.background.kind == PaintKind::None);
+  CHECK_EQ(styles.selected.borderWidth, 0);
+  style.contentAlign = Align::Center;
+  CHECK_EQ(style.alignContent(Rect{0, 10, 100, 200}, 60).y, 80);
+  CHECK_EQ(style.alignContent(Rect{0, 10, 100, 200}, 300).height, 200);
+
+  FakeDrawTarget draw;
+  DeviceContext device = makeDevice();
+  InputSnapshot input;
+  InteractionBuffer<16> hits;
+  Frame<16> frame(draw, device, input, hits);
+  ThemeTokens theme = defaultThemeTokens();
+  Screen<16> screen(frame, theme);
+  screen.setComponentStyle(&style);
+  ListProps props;
+  auto resolved = screen.resolveListProps(props);
+  CHECK(resolved.labelText.align == TextAlign::Center);
+  CHECK(resolved.rowStyles.selected.background.kind == PaintKind::None);
+  screen.setComponentStyle(nullptr);
+  resolved = screen.resolveListProps(props);
+  CHECK(resolved.labelText.align == theme.bodyText.align);
+  CHECK(resolved.rowStyles.selected.background.kind == PaintKind::Solid);
+  ListItem item{};
+  item.label = "title";
+  item.subtitle = "aaaaaaaaa aaaaaaaaa aaaaaaaaa aaaaaaaaa aaaaaaaaa aaaaaaaaa";
+  props.items = &item;
+  props.count = 1;
+  props.rowHeight = 30;
+  props.subtitleText.maxLines = 2;
+  props.sidePadding = 0;
+  props.scrollIndicator = false;
+  CHECK_EQ(listContentHeight(draw, nullptr, Rect{0, 0, 180, 200}, props), 42);
+  CHECK(listContentHeight(draw, nullptr, Rect{0, 0, 180, 40}, props) >= 40);
+}
+
+void testRuntimeGridSpans() {
+  LayoutNode children[2];
+  children[0].id = "wide";
+  children[0].columnSpan = 2;
+  children[1].id = "side";
+  children[1].column = 2;
+  children[1].rowSpan = 2;
+  LayoutNode grid;
+  grid.kind = LayoutKind::Grid;
+  grid.columns = 3;
+  grid.rows = 2;
+  grid.gap = 4;
+  grid.children = children;
+  grid.childCount = 2;
+  int emitted = 0;
+  layoutTree(grid, LayoutRect{10, 20, 308, 204},
+             [&](const char *id, LayoutRect rect) {
+               ++emitted;
+               if (std::strcmp(id, "wide") == 0) {
+                 CHECK_EQ(rect.x, 10);
+                 CHECK_EQ(rect.width, 204);
+                 CHECK_EQ(rect.height, 100);
+               } else {
+                 CHECK_EQ(rect.x, 218);
+                 CHECK_EQ(rect.width, 100);
+                 CHECK_EQ(rect.height, 204);
+               }
+             });
+  CHECK_EQ(emitted, 2);
+}
+
 int main() {
   testListRowGapTouchBelongsToNearerRow();
   testListRowGapTouchSkipsButtonBoards();
@@ -6143,6 +6808,8 @@ int main() {
   testScrollBarHasRoundEndsWithoutFrame();
   testListGlimpseAndFullLastPage();
   testListGlimpseLookAheadKeepsProviderRows();
+  testComponentStyleOverrides();
+  testRuntimeGridSpans();
   testRect();
   testDisplayTarget();
   testDisplayTargetAlphaFont();
@@ -6162,6 +6829,7 @@ int main() {
   testPublishCycleIsolatesReaders();
   testListHelpers();
   testListVirtualization();
+  testListRevealActionTargetsOneRow();
   testListClampsBadTopIndex();
   testListItemsWindow();
   testListRowProvider();
@@ -6224,11 +6892,17 @@ int main() {
   testButtonHitPadding();
   testInvertedDrawTarget();
   testStyleSetUnset();
-  testDefaultStylesAreBorderless();
+  testDefaultStyles();
   testEReaderSettingsComponents();
   testLvglParityControls();
   testQwertyKeyboardComponent();
   testLocalizedKeyboardLayout();
+  testGermanAndFrenchLetters();
+  testCompactLayoutsMatchBuiltin();
+  testKeyboardUniformRowWidths();
+  testKeyboardOuterControlAlignment();
+  testWideScriptNumberRowWidth();
+  testKeyboardBackground();
   testSymbolKeyboardPages();
   testKeyboardLayoutVariants();
   testKeyboardEntry();
@@ -6243,9 +6917,9 @@ int main() {
   testKeyboardBottomHitOverflow();
   testHeaderLeadingButton();
   testScreenKeyboardUsesResponsiveHeight();
-  testTallKeyboardSizing();
+  testResponsiveKeyboardSizing();
   testKeyboardTypography();
-  testKeyboardHighlightPadding();
+  testKeyboardFullSizeHighlight();
   testCompactKeyboardAltLabelStaysInsideKey();
   testQwertyKeyboardSpacingOverrides();
   testScreenContentMarginCoordinateSpaces();
@@ -6264,6 +6938,7 @@ int main() {
   testCapsuleSlider();
   testSliderRow();
   testPublicationPage();
+  testPublicationPageDescriptionPainter();
   testCatalogShelves();
   testPublicationStylingAndButtons();
   testTileGrid();
