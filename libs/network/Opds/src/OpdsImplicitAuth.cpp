@@ -5,8 +5,11 @@
 #if defined(FREEINK_NET_WOLFSSL)
 
 #include <Arduino.h>
+#include <HeapFloor.h>
 #include <OpdsLoginForm.h>
 #include <SecureHttpClient.h>
+
+#include <algorithm>
 
 namespace {
 
@@ -94,15 +97,33 @@ bool opdsImplicitAuthenticate(const std::string& authenticateUrl, const std::str
     if (!cookies.empty()) http.addHeader("Cookie", cookies);
     if (isPost) http.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
+    // The page grows to MAX_PAGE_BYTES with the TLS session live. A block from 4 KB up is asked of the heap floor
+    // (founder rule 20) before it is taken; a realloc holds the old block and the new one. Refused, the login stops
+    // with nothing sent, where the string would take the heap under the floor or abort on a failed allocation.
     std::string page;
-    const auto onData = [&page](const uint8_t* data, size_t len) {
-      const size_t room = MAX_PAGE_BYTES - page.size();
-      page.append(reinterpret_cast<const char*>(data), len < room ? len : room);
+    bool noRoom = false;
+    const auto onData = [&page, &noRoom](const uint8_t* data, size_t len) {
+      const size_t take = std::min(len, MAX_PAGE_BYTES - page.size());
+      if (page.size() + take > page.capacity()) {
+        const size_t want = std::min(MAX_PAGE_BYTES, std::max(page.size() + take, 2 * page.capacity()));
+        if (want >= heapfloor::kBigBytes &&
+            !heapfloor::leaves(page.capacity() + want, want, ESP.getFreeHeap(), ESP.getMaxAllocHeap())) {
+          noRoom = true;
+          return false;
+        }
+        page.reserve(want);
+      }
+      page.append(reinterpret_cast<const char*>(data), take);
       return true;
     };
     const int status =
         isPost ? http.sendRequest("POST", reinterpret_cast<const uint8_t*>(postBody.data()), postBody.size(), onData)
                : http.GET(onData);
+    if (noRoom) {
+      LOG_ERR("OPDS", "Implicit auth: no room on the heap for the login page at step %d (free %u, largest %u)", step,
+              static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+      return false;
+    }
     if (status < 0) {
       LOG_ERR("OPDS", "Implicit auth: request failed at step %d", step);
       return false;
