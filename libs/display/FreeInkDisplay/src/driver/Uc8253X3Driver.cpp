@@ -7,6 +7,12 @@
 #include "../lut/UltraChipDirectGrayLuts.h"
 
 namespace freeink {
+#ifdef TENOR_PRESS_PROBE
+extern bool uc8253X3DiagNoSettle;
+#endif
+}  // namespace freeink
+
+namespace freeink {
 namespace {
 // UC8253 command set.
 constexpr uint8_t CMD_PANEL_SETTING = 0x00;
@@ -311,7 +317,11 @@ void Uc8253X3Driver::displayFinish(EpdBus& bus, const uint8_t* fb) {
 
   // First differential after a full garbles on X3; spend a no-op fast settle of
   // the just-displayed frame so the caller's next diff is clean.
+#ifdef TENOR_PRESS_PROBE
+  if (doFullSync && !uc8253X3DiagNoSettle) {
+#else
   if (doFullSync) {
+#endif
     loadBankCdi(bus, 0x29, 0x07, _cfg.fast);
     bus.sendPlaneFlipped(CMD_DTM2, fb, _h, _wb);
     triggerRefresh(bus, turnOff);
@@ -620,6 +630,12 @@ const Uc8253X3Config& FREEINK_UC8253_X3_CONFIG();
 static const Uc8253X3Config& uc8253X3ActiveConfig() { return FREEINK_UC8253_X3_CONFIG(); }
 #else
 static const Uc8253X3Config& uc8253X3ActiveConfig() { return uc8253X3DefaultConfig(); }
+#endif
+
+#ifdef TENOR_PRESS_PROBE
+// Measuring builds only: CMD:X3_NO_SETTLE drops the settle pass above, to see whether the sleep screen keeps a
+// negative ghost of the screen before it without it.
+bool uc8253X3DiagNoSettle = false;
 #endif
 
 PanelDriver& uc8253X3Driver() {
