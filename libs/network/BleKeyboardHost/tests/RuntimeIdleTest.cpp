@@ -39,6 +39,8 @@ void forget(const char* address) { fakeble::host().forget(address); }
 bool takeConnectFailure(char* output, size_t size) { return fakeble::host().takeConnectFailure(output, size); }
 uint8_t bondCount() { return fakeble::host().pairedCount(); }
 Peer bond(uint8_t index) { return {fakeble::host().paired(index).addr, fakeble::host().paired(index).name}; }
+// The idle test starts the radio itself: no remote is saved in the stack beforehand.
+bool firstSavedBond(char*, size_t, char*, size_t) { return false; }
 uint8_t foundCount() { return fakeble::host().deviceCount(); }
 Peer found(uint8_t index) { return {fakeble::host().device(index).addr, fakeble::host().device(index).name}; }
 bool spawnStart() { detail::startTask(); return true; }
