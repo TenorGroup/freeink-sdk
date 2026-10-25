@@ -55,18 +55,35 @@ std::string hostOf(const std::string& url) {
 }  // namespace
 
 bool opdsImplicitAuthenticate(const std::string& authenticateUrl, const std::string& username,
-                              const std::string& password, std::string& outToken) {
+                              const std::string& password, std::string& outToken, const OpdsRootsFor& rootsFor) {
   OpdsCookieJar jar;
   std::string url = authenticateUrl;
   ensureImplicitAuthParams(url);
   std::string postBody;
   bool isPost = false;
   bool passwordSubmitted = false;
+  bool wasTls = false;
 
   for (int step = 0; step < MAX_STEPS; ++step) {
     freeink::SecureHttpClient http;
     http.setTimeout(AUTH_TIMEOUT_MS);
-    http.setInsecure();
+    freeink::http_url::Parts parts;
+    if (!freeink::http_url::parse(url, parts)) {
+      LOG_ERR("OPDS", "Implicit auth: bad URL");
+      return false;
+    }
+    if (parts.tls) {
+      const char* roots = rootsFor ? rootsFor(url) : nullptr;
+      if (!roots) {
+        LOG_ERR("OPDS", "Implicit auth: no roots to verify the server");
+        return false;
+      }
+      http.setCACert(roots);
+    } else if (wasTls) {
+      LOG_ERR("OPDS", "Implicit auth: refusing to step down from https to http");
+      return false;
+    }
+    wasTls = parts.tls;
     if (!http.begin(url)) {
       LOG_ERR("OPDS", "Implicit auth: bad URL");
       return false;
@@ -148,7 +165,8 @@ bool opdsImplicitAuthenticate(const std::string& authenticateUrl, const std::str
 
 #else
 
-bool opdsImplicitAuthenticate(const std::string&, const std::string&, const std::string&, std::string&) {
+bool opdsImplicitAuthenticate(const std::string&, const std::string&, const std::string&, std::string&,
+                              const OpdsRootsFor&) {
   LOG_ERR("OPDS", "Implicit OAuth requires the wolfSSL HTTP client");
   return false;
 }

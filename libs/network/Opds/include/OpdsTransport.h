@@ -57,6 +57,13 @@ class OpdsTransport {
   // Resolve a possibly-relative href against a base URL, applying whatever URL
   // normalisation the HTTP client requires.
   virtual std::string resolveUrl(const std::string& base, const std::string& ref) = 0;
+
+  // PEM roots an https URL is verified against, nullptr when it cannot be (a host build, a clock that is
+  // still wrong). The headless implicit login submits the stored password, so it stops without them.
+  virtual const char* rootsFor(const std::string& url) {
+    (void)url;
+    return nullptr;
+  }
 };
 
 }  // namespace freeink::opds
